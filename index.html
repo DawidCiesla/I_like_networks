@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070b10" />
+    <title>I Like Networks — Phase 1</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="network-canvas" aria-label="Network map"></canvas>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">PHASE 1 / FIRST NETWORK</div>
+          <h1>I LIKE NETWORKS</h1>
+        </div>
+        <div class="topbar-stats">
+          <div><span>FUNDS</span><strong id="money-value">$0</strong></div>
+          <div><span>THROUGHPUT</span><strong id="throughput-value">0 Mb/s</strong></div>
+          <div><span>INCOME</span><strong id="income-value">$0/s</strong></div>
+        </div>
+      </header>
+
+      <aside class="panel" id="control-panel">
+        <div class="panel-section intro-section">
+          <div class="section-kicker">NETWORK 01</div>
+          <h2>Your first link</h2>
+          <p id="objective-text">Connect the client to the server to start moving traffic.</p>
+        </div>
+
+        <div class="panel-section" id="link-section">
+          <button id="connect-button" class="primary-action">CONNECT ETHERNET <span>$40</span></button>
+          <div class="metric-grid">
+            <div><span>Client demand</span><strong id="demand-value">10 Mb/s</strong></div>
+            <div><span>Link capacity</span><strong id="capacity-value">—</strong></div>
+            <div><span>Server capacity</span><strong id="server-value">25 Mb/s</strong></div>
+            <div><span>Utilization</span><strong id="utilization-value">0%</strong></div>
+          </div>
+        </div>
+
+        <div class="panel-section upgrades-section">
+          <div class="section-row"><h3>UPGRADES</h3><span>Phase 1</span></div>
+          <button class="upgrade-card" data-upgrade="client">
+            <div><span class="upgrade-name">Client NIC</span><span class="upgrade-desc">+5 Mb/s generated traffic</span></div>
+            <strong id="client-upgrade-cost">$25</strong>
+          </button>
+          <button class="upgrade-card" data-upgrade="link">
+            <div><span class="upgrade-name">Ethernet capacity</span><span class="upgrade-desc">+20 Mb/s link capacity</span></div>
+            <strong id="link-upgrade-cost">$35</strong>
+          </button>
+          <button class="upgrade-card" data-upgrade="server">
+            <div><span class="upgrade-name">Server uplink</span><span class="upgrade-desc">+15 Mb/s server capacity</span></div>
+            <strong id="server-upgrade-cost">$45</strong>
+          </button>
+        </div>
+
+        <div class="panel-section footer-controls">
+          <div class="speed-controls" role="group" aria-label="Simulation speed">
+            <button data-speed="0">PAUSE</button>
+            <button data-speed="1" class="active">1×</button>
+            <button data-speed="2">2×</button>
+            <button data-speed="4">4×</button>
+          </div>
+          <button id="reset-button" class="text-button">Reset save</button>
+        </div>
+      </aside>
+
+      <div class="hint">Drag to pan · wheel to zoom · click a node for details</div>
+      <div id="toast" class="toast" aria-live="polite"></div>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
