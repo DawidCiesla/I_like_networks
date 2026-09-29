@@ -23,7 +23,8 @@ body { background: #181818; image-rendering: pixelated; }
 button { font: inherit; }
 button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 
-#network-canvas {
+#network-canvas,
+#transport-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -986,5 +987,67 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 
   .inspector-panel {
     transform: scale(1.5);
+  }
+}
+
+
+/* Transport T0 */
+.passenger-dot {
+  position: relative;
+  width: 10px;
+  height: 13px;
+  display: inline-block;
+}
+
+.passenger-dot::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 5px;
+  height: 5px;
+  background: #f2f1ea;
+}
+
+.passenger-dot::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 6px;
+  width: 9px;
+  height: 7px;
+  background: #00c8d7;
+}
+
+.transit-legend-row {
+  min-height: 22px;
+  display: grid;
+  grid-template-columns: 57px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 8px;
+  color: #efeee8;
+}
+
+.transit-legend-row .legend-line {
+  width: 57px;
+}
+
+.transit-legend-row.future {
+  opacity: .42;
+}
+
+#inspector-services .route-head,
+#inspector-services .route-row {
+  grid-template-columns: 1fr 64px;
+}
+
+#inspector-services .route-row span:last-child {
+  color: #efeee8;
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .transit-legend-row {
+    font-size: 8px;
   }
 }
