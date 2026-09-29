@@ -394,3 +394,81 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
   .network-panel { width: calc(100vw - 28px); bottom: 51px; }
   .hint { display: none; }
 }
+
+
+/* Adaptive HUD scaling for higher-resolution desktop displays.
+   1920×1080 keeps the reference size; QHD and 4K scale the UI up
+   without changing the game-world canvas or simulation. */
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .menu-chip,
+  .resource-box {
+    transform: scale(1.28);
+    transform-origin: top left;
+  }
+
+  .legend-box {
+    transform: scale(1.28);
+    transform-origin: top right;
+  }
+
+  .status-wrap {
+    transform: translateX(-50%) scale(1.28);
+    transform-origin: top center;
+  }
+
+  .network-panel {
+    transform: translateX(-50%) scale(1.28);
+    transform-origin: bottom center;
+  }
+
+  .reset-button {
+    transform: scale(1.28);
+    transform-origin: bottom left;
+  }
+
+  .hint {
+    transform: scale(1.28);
+    transform-origin: bottom right;
+  }
+
+  .toast {
+    transform: translateX(-50%) translateY(8px) scale(1.28);
+    transform-origin: bottom center;
+  }
+
+  .toast.show {
+    transform: translateX(-50%) translateY(0) scale(1.28);
+  }
+}
+
+@media (min-width: 3200px) and (min-height: 1700px) {
+  .menu-chip,
+  .resource-box {
+    transform: scale(1.5);
+  }
+
+  .legend-box {
+    transform: scale(1.5);
+  }
+
+  .status-wrap {
+    transform: translateX(-50%) scale(1.5);
+  }
+
+  .network-panel {
+    transform: translateX(-50%) scale(1.5);
+  }
+
+  .reset-button,
+  .hint {
+    transform: scale(1.5);
+  }
+
+  .toast {
+    transform: translateX(-50%) translateY(8px) scale(1.5);
+  }
+
+  .toast.show {
+    transform: translateX(-50%) translateY(0) scale(1.5);
+  }
+}
