@@ -1,0 +1,14 @@
+{
+  "name": "i-like-networks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/simulation/model.js && node --check src/simulation/actions.js && node --check src/render/networkRenderer.js && node --check src/ui/hud.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
