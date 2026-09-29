@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171717" />
-    <title>I Like Networks — Phase 2</title>
+    <title>I Like Networks — Phase 3</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -15,8 +15,15 @@
 
       <section class="resource-box pixel-window" aria-label="Resources">
         <div class="window-title">RESOURCES</div>
-        <div class="resource-line"><span class="coin-dot"></span><strong id="money-value">0</strong><span id="income-value" class="resource-delta">+0</span></div>
-        <div class="resource-line"><span class="data-diamond"></span><strong id="throughput-value">0 Mb/s</strong></div>
+        <div class="resource-line">
+          <span class="coin-dot"></span>
+          <strong id="money-value">0</strong>
+          <span id="income-value" class="resource-delta">+0</span>
+        </div>
+        <div class="resource-line">
+          <span class="data-diamond"></span>
+          <strong id="throughput-value">0 Mb/s</strong>
+        </div>
       </section>
 
       <div class="status-wrap">
@@ -31,8 +38,8 @@
 
         <section class="message-bar pixel-window">
           <div class="face-icon">⌣</div>
-          <div id="objective-text">Connect the client to the server.</div>
-          <span class="message-tag">Phase 2 ↓</span>
+          <div id="objective-text">Build a router to connect multiple networks.</div>
+          <span class="message-tag">Phase 3 ↓</span>
         </section>
       </div>
 
@@ -50,10 +57,22 @@
         </div>
       </section>
 
+      <section id="route-table-box" class="route-table-box pixel-window hidden" aria-label="Routing table">
+        <div class="window-title">ROUTING TABLE</div>
+        <div class="route-head">
+          <span>DESTINATION</span><span>NEXT</span>
+        </div>
+        <div id="route-table-body"></div>
+        <div class="route-traffic">
+          <div><span>SERVER A</span><strong id="route-a-throughput">0 Mb/s</strong></div>
+          <div><span>SERVER B</span><strong id="route-b-throughput">0 Mb/s</strong></div>
+        </div>
+      </section>
+
       <section class="network-panel pixel-window" id="control-panel">
         <div class="panel-title">
           <span class="globe-icon">⊕</span>
-          <span>Local Network</span>
+          <span>Network Expansion</span>
         </div>
         <div class="dash-divider"></div>
 
@@ -66,7 +85,7 @@
           <span class="buy-pill"><span id="connect-cost">$40</span></span>
         </button>
 
-        <button id="switch-button" class="connect-row phase-two-row">
+        <button id="switch-button" class="connect-row">
           <span class="row-icon switch-color">▤</span>
           <span class="row-copy">
             <strong>Install Switch</strong>
@@ -75,57 +94,96 @@
           <span class="buy-pill"><span id="switch-cost">$95</span></span>
         </button>
 
-        <button id="add-client-button" class="connect-row phase-two-row">
+        <button id="router-button" class="connect-row phase-three-row">
+          <span class="row-icon router-color">◆</span>
+          <span class="row-copy">
+            <strong>Install Router</strong>
+            <small id="router-subtitle">Route traffic between networks</small>
+          </span>
+          <span class="buy-pill"><span id="router-cost">$220</span></span>
+        </button>
+
+        <button id="add-client-button" class="connect-row">
           <span class="row-icon client-color">▣</span>
           <span class="row-copy">
-            <strong>Add Client</strong>
+            <strong>Add LAN A Client</strong>
             <small id="client-count-text">1 / 4 connected</small>
           </span>
           <span class="buy-pill"><span id="add-client-cost">$60</span></span>
         </button>
 
-        <div class="dash-divider"></div>
-
-        <button class="upgrade-row" data-upgrade="client">
-          <span class="row-icon client-color">▣</span>
-          <span class="row-copy"><strong>Client NIC</strong><small>+5 Mb/s per client</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$25</strong></span>
-          <span class="buy-pill">Buy</span>
+        <button id="branch-button" class="connect-row phase-three-row">
+          <span class="row-icon branch-color">▦</span>
+          <span class="row-copy">
+            <strong>Build LAN B</strong>
+            <small id="branch-subtitle">Second routed subnet</small>
+          </span>
+          <span class="buy-pill"><span id="branch-cost">$180</span></span>
         </button>
+
+        <button id="branch-client-button" class="connect-row phase-three-row">
+          <span class="row-icon branch-color">▣</span>
+          <span class="row-copy">
+            <strong>Add LAN B Client</strong>
+            <small id="branch-client-count">2 / 4 connected</small>
+          </span>
+          <span class="buy-pill"><span id="branch-client-cost">$85</span></span>
+        </button>
+
+        <button id="secondary-server-button" class="connect-row phase-three-row">
+          <span class="row-icon secondary-server-color">▥</span>
+          <span class="row-copy">
+            <strong>Build Server B</strong>
+            <small id="secondary-server-subtitle">Add second destination network</small>
+          </span>
+          <span class="buy-pill"><span id="secondary-server-cost">$210</span></span>
+        </button>
+
+        <div class="dash-divider"></div>
 
         <button class="upgrade-row" data-upgrade="link">
           <span class="row-icon blue-color">╪</span>
-          <span class="row-copy"><strong>Uplink Capacity</strong><small>+20 Mb/s</small></span>
+          <span class="row-copy"><strong>LAN A Uplink</strong><small>+20 Mb/s</small></span>
           <span class="row-cost"><span class="coin-dot tiny"></span><strong>$35</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
-        <button class="upgrade-row" data-upgrade="switch">
-          <span class="row-icon switch-color">▤</span>
-          <span class="row-copy"><strong>Switch Fabric</strong><small>+25 Mb/s switching</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$70</strong></span>
+        <button class="upgrade-row" data-upgrade="router">
+          <span class="row-icon router-color">◆</span>
+          <span class="row-copy"><strong>Router Core</strong><small>+40 Mb/s routing</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$120</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
-        <button class="upgrade-row" data-upgrade="buffer">
-          <span class="row-icon queue-color">▥</span>
-          <span class="row-copy"><strong>Switch Buffer</strong><small>+40 Mb queue</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$55</strong></span>
+        <button class="upgrade-row" data-upgrade="branch">
+          <span class="row-icon branch-color">╪</span>
+          <span class="row-copy"><strong>LAN B Uplink</strong><small>+20 Mb/s</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$95</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
         <button class="upgrade-row" data-upgrade="server">
           <span class="row-icon server-color">▥</span>
-          <span class="row-copy"><strong>Server Uplink</strong><small>+15 Mb/s capacity</small></span>
+          <span class="row-copy"><strong>Server A</strong><small>+15 Mb/s capacity</small></span>
           <span class="row-cost"><span class="coin-dot tiny"></span><strong>$45</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
+        <button class="upgrade-row" data-upgrade="server2">
+          <span class="row-icon secondary-server-color">▥</span>
+          <span class="row-copy"><strong>Server B</strong><small>+20 Mb/s capacity + uplink</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$110</strong></span>
+          <span class="buy-pill">Buy</span>
+        </button>
+
         <div class="dash-divider"></div>
-        <div class="mini-stats phase-two-stats">
-          <div><span>DEMAND</span><strong id="demand-value">10 Mb/s</strong></div>
-          <div><span>THROUGHPUT</span><strong id="throughput-stat">0 Mb/s</strong></div>
-          <div><span>QUEUE</span><strong id="queue-value">0 / 0 Mb</strong></div>
+
+        <div class="mini-stats phase-three-stats">
+          <div><span>DEMAND A</span><strong id="demand-a-value">10 Mb/s</strong></div>
+          <div><span>DEMAND B</span><strong id="demand-b-value">0 Mb/s</strong></div>
+          <div><span>ROUTER IN</span><strong id="router-ingress-value">0 Mb/s</strong></div>
+          <div><span>ROUTER CORE</span><strong id="router-capacity-value">—</strong></div>
+          <div><span>QUEUE</span><strong id="queue-value">0 Mb</strong></div>
           <div><span>LATENCY</span><strong id="latency-value">0 ms</strong></div>
           <div><span>LOSS</span><strong id="loss-value">0%</strong></div>
           <div><span>BOTTLENECK</span><strong id="bottleneck-value">—</strong></div>
@@ -133,7 +191,7 @@
       </section>
 
       <button id="reset-button" class="reset-button">RESET NETWORK</button>
-      <div class="hint">DRAG TO PAN • WHEEL TO ZOOM • BUILD LOAD UNTIL A BOTTLENECK APPEARS</div>
+      <div class="hint">DRAG TO PAN • WHEEL TO ZOOM • ROUTES ARE CREATED AUTOMATICALLY</div>
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 
