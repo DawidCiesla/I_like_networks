@@ -4,157 +4,227 @@ import assert from 'node:assert/strict';
 import {
   advanceSimulation,
   createInitialState,
-  getAddBranchClientCost,
+  getAbandonmentPercent,
+  getAddStopBCost,
   getBottleneck,
-  getBranchDemandMbps,
-  getRouteTable,
-  getRouterIngressMbps,
-  getThroughputMbps,
+  getCorridorBDemandPpm,
+  getDeliveredPassengersPpm,
+  getInterchangeIngressPpm,
+  getServiceBoard,
 } from '../src/simulation/model.js';
 
 import {
-  addBranchClient,
-  buildBranchNetwork,
-  buildEthernet,
-  buildRouter,
-  buildSecondaryServer,
-  buildSwitch,
+  addStopB,
+  buildCorridorB,
+  buildFirstLine,
+  buildInterchange,
+  buildStationB,
+  buildTerminalA,
   buyUpgrade,
 } from '../src/simulation/actions.js';
 
 function fundedState() {
   const state = createInitialState();
   state.money = 10_000;
-  buildEthernet(state);
-  buildSwitch(state);
+  buildFirstLine(state);
+  buildTerminalA(state);
   return state;
 }
 
-test('router requires the switched LAN', () => {
+test('no passenger service runs before Line 1 is built', () => {
   const state = createInitialState();
-  assert.equal(buildRouter(state).reason, 'switch-required');
+
+  assert.equal(getDeliveredPassengersPpm(state), 0);
+});
+
+test('starting Line 1 begins passenger transport and earns fare revenue', () => {
+  const state = createInitialState();
+
+  assert.equal(buildFirstLine(state).ok, true);
+  assert.equal(getDeliveredPassengersPpm(state), 10);
+
+  const before = state.money;
+
+  advanceSimulation(state, 0.25);
+
+  assert.ok(state.money > before);
+  assert.ok(state.stats.lifetimePassengers > 0);
+});
+
+test('Northside Terminal requires Line 1', () => {
+  const state = createInitialState();
+
+  assert.equal(
+    buildTerminalA(state).reason,
+    'line-required',
+  );
 
   state.money = 10_000;
-  buildEthernet(state);
-  buildSwitch(state);
+  buildFirstLine(state);
 
-  assert.equal(buildRouter(state).ok, true);
-  assert.equal(state.router.built, true);
+  assert.equal(buildTerminalA(state).ok, true);
+  assert.equal(state.terminalA.built, true);
 });
 
-test('router initializes direct routes to LAN A and Server A', () => {
-  const state = fundedState();
-  buildRouter(state);
+test('Central Interchange requires the terminal', () => {
+  const state = createInitialState();
+  state.money = 10_000;
 
-  const routes = getRouteTable(state);
+  buildFirstLine(state);
 
-  assert.equal(routes.length, 2);
-  assert.equal(routes[0].destination, '10.0.1.0/24');
-  assert.equal(routes[1].destination, '10.0.10.0/24');
+  assert.equal(
+    buildInterchange(state).reason,
+    'terminal-required',
+  );
+
+  buildTerminalA(state);
+
+  assert.equal(buildInterchange(state).ok, true);
 });
 
-test('LAN B adds a second source network and routing-table entry', () => {
+test('Line 2 adds a second source corridor and service-board entry', () => {
   const state = fundedState();
-  buildRouter(state);
-  buildBranchNetwork(state);
 
-  assert.equal(state.branch.built, true);
-  assert.ok(getBranchDemandMbps(state) > 0);
-  assert.ok(getRouteTable(state).some((route) => route.destination === '10.0.2.0/24'));
+  buildInterchange(state);
+  buildCorridorB(state);
+
+  assert.equal(state.corridorB.built, true);
+  assert.ok(getCorridorBDemandPpm(state) > 0);
+
+  assert.ok(
+    getServiceBoard(state).some(
+      (service) => service.destination === 'Riverside',
+    ),
+  );
 });
 
-test('branch clients increase routed ingress', () => {
+test('adding a Line 2 stop increases passenger demand', () => {
   const state = fundedState();
-  buildRouter(state);
-  buildBranchNetwork(state);
 
-  const before = getRouterIngressMbps(state);
-  const cost = getAddBranchClientCost(state);
+  buildInterchange(state);
+  buildCorridorB(state);
 
-  assert.equal(addBranchClient(state).ok, true);
-  assert.ok(getRouterIngressMbps(state) > before);
-  assert.ok(getAddBranchClientCost(state) > cost);
+  const beforeDemand = getCorridorBDemandPpm(state);
+  const beforeCost = getAddStopBCost(state);
+
+  assert.equal(addStopB(state).ok, true);
+  assert.ok(getCorridorBDemandPpm(state) > beforeDemand);
+  assert.ok(getAddStopBCost(state) > beforeCost);
 });
 
-test('Server B adds a second destination and receives routed traffic', () => {
+test('Harbor Station creates a second delivered passenger stream', () => {
   const state = fundedState();
-  buildRouter(state);
-  buildBranchNetwork(state);
-  buildSecondaryServer(state);
 
-  for (let i = 0; i < 10; i += 1) advanceSimulation(state, 0.25);
+  buildInterchange(state);
+  buildCorridorB(state);
+  buildStationB(state);
 
-  assert.ok(state.router.lastThroughputMbps.primary > 0);
-  assert.ok(state.router.lastThroughputMbps.secondary > 0);
-  assert.ok(getRouteTable(state).some((route) => route.destination === '10.0.20.0/24'));
+  for (let index = 0; index < 20; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(state.interchange.lastDeliveredPpm.primary > 0);
+  assert.ok(state.interchange.lastDeliveredPpm.secondary > 0);
+
+  assert.ok(
+    getServiceBoard(state).some(
+      (service) => service.destination === 'Harbor Station',
+    ),
+  );
 });
 
-test('router core becomes a bottleneck when combined ingress is too high', () => {
+test('interchange becomes a bottleneck when combined passenger flow is too high', () => {
   const state = fundedState();
-  buildRouter(state);
-  buildBranchNetwork(state);
 
-  state.client.count = 4;
-  state.client.trafficMbps = 25;
-  state.switch.capacityMbps = 200;
-  state.link.capacityMbps = 200;
+  buildInterchange(state);
+  buildCorridorB(state);
 
-  state.branch.clientCount = 4;
-  state.branch.clientTrafficMbps = 20;
-  state.branch.linkCapacityMbps = 200;
+  state.corridorA.stopCount = 4;
+  state.corridorA.demandPerStopPpm = 25;
+  state.corridorA.lineCapacityPpm = 200;
+  state.terminalA.platformCapacityPpm = 200;
 
-  state.router.capacityMbps = 40;
+  state.corridorB.stopCount = 4;
+  state.corridorB.demandPerStopPpm = 20;
+  state.corridorB.lineCapacityPpm = 200;
 
-  assert.equal(getBottleneck(state), 'router');
+  state.interchange.transferCapacityPpm = 40;
 
-  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
+  assert.equal(getBottleneck(state), 'interchange');
+  assert.ok(getInterchangeIngressPpm(state) > 40);
 
-  assert.ok(state.router.queueMb > 0);
+  for (let index = 0; index < 30; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(state.interchange.queuePassengers > 0);
 });
 
-test('routing preserves separate downstream bottlenecks', () => {
+test('Central Station can bottleneck without blocking Harbor Station queue', () => {
   const state = fundedState();
-  buildRouter(state);
-  buildBranchNetwork(state);
-  buildSecondaryServer(state);
 
-  state.client.count = 4;
-  state.client.trafficMbps = 20;
-  state.switch.capacityMbps = 200;
-  state.link.capacityMbps = 200;
-  state.branch.linkCapacityMbps = 200;
-  state.router.capacityMbps = 200;
+  buildInterchange(state);
+  buildCorridorB(state);
+  buildStationB(state);
 
-  state.server.capacityMbps = 20;
-  state.secondaryServer.capacityMbps = 200;
-  state.secondaryServer.linkCapacityMbps = 200;
+  state.corridorA.stopCount = 4;
+  state.corridorA.demandPerStopPpm = 20;
+  state.corridorA.lineCapacityPpm = 200;
+  state.terminalA.platformCapacityPpm = 200;
 
-  assert.equal(getBottleneck(state), 'server-a');
+  state.corridorB.lineCapacityPpm = 200;
+  state.interchange.transferCapacityPpm = 200;
 
-  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
+  state.stationA.capacityPpm = 20;
+  state.stationB.capacityPpm = 200;
 
-  assert.ok(state.router.routeQueuesMb.primary > 0);
-  assert.equal(state.router.routeQueuesMb.secondary, 0);
+  assert.equal(getBottleneck(state), 'station-a');
+
+  for (let index = 0; index < 40; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(
+    state.interchange.destinationQueuesPassengers.primary > 0,
+  );
+
+  assert.equal(
+    state.interchange.destinationQueuesPassengers.secondary,
+    0,
+  );
 });
 
-test('router upgrade increases routed core capacity', () => {
+test('passengers leave the queue after waiting capacity is exhausted', () => {
   const state = fundedState();
-  buildRouter(state);
 
-  const before = state.router.capacityMbps;
-  assert.equal(buyUpgrade(state, 'router').ok, true);
-  assert.ok(state.router.capacityMbps > before);
+  buildInterchange(state);
+  buildCorridorB(state);
+
+  state.corridorA.stopCount = 4;
+  state.corridorA.demandPerStopPpm = 30;
+  state.corridorA.lineCapacityPpm = 300;
+  state.terminalA.platformCapacityPpm = 300;
+
+  state.corridorB.stopCount = 4;
+  state.corridorB.demandPerStopPpm = 30;
+  state.corridorB.lineCapacityPpm = 300;
+
+  state.interchange.transferCapacityPpm = 10;
+  state.interchange.waitingCapacityPassengers = 1;
+
+  for (let index = 0; index < 60; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(state.interchange.totalAbandonedPassengers > 0);
+  assert.ok(getAbandonmentPercent(state) > 0);
 });
 
-test('phase 2 behavior still works before the router is installed', () => {
+test('adding buses increases Line 1 capacity', () => {
   const state = fundedState();
-  state.client.count = 4;
-  state.client.trafficMbps = 20;
-  state.link.capacityMbps = 15;
-  state.server.capacityMbps = 100;
 
-  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
+  const before = state.corridorA.lineCapacityPpm;
 
-  assert.ok(state.switch.queueMb > 0);
-  assert.ok(getThroughputMbps(state) > 0);
+  assert.equal(buyUpgrade(state, 'lineA').ok, true);
+  assert.ok(state.corridorA.lineCapacityPpm > before);
 });
