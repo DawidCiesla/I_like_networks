@@ -1,136 +1,208 @@
 import {
   ECONOMY,
   UPGRADES,
-  getAddBranchClientCost,
-  getAddClientCost,
+  getAddStopACost,
+  getAddStopBCost,
   getUpgradeCost,
 } from './model.js';
 
-export function buildEthernet(state) {
-  if (state.linkBuilt) return { ok: false, reason: 'already-built' };
-  if (state.money < ECONOMY.ethernetBuildCost) return { ok: false, reason: 'insufficient-funds' };
-  state.money -= ECONOMY.ethernetBuildCost;
-  state.linkBuilt = true;
+export function buildFirstLine(state) {
+  if (state.corridorA.lineBuilt) {
+    return { ok: false, reason: 'already-built' };
+  }
+
+  if (state.money < ECONOMY.firstLineBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.firstLineBuildCost;
+  state.corridorA.lineBuilt = true;
+
   return { ok: true };
 }
 
-export function buildSwitch(state) {
-  if (!state.linkBuilt) return { ok: false, reason: 'link-required' };
-  if (state.switch.built) return { ok: false, reason: 'already-built' };
-  if (state.money < ECONOMY.switchBuildCost) return { ok: false, reason: 'insufficient-funds' };
-  state.money -= ECONOMY.switchBuildCost;
-  state.switch.built = true;
+export function buildTerminalA(state) {
+  if (!state.corridorA.lineBuilt) {
+    return { ok: false, reason: 'line-required' };
+  }
+
+  if (state.terminalA.built) {
+    return { ok: false, reason: 'already-built' };
+  }
+
+  if (state.money < ECONOMY.terminalBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.terminalBuildCost;
+  state.terminalA.built = true;
+
   return { ok: true };
 }
 
-export function buildRouter(state) {
-  if (!state.switch.built) return { ok: false, reason: 'switch-required' };
-  if (state.router.built) return { ok: false, reason: 'already-built' };
-  if (state.money < ECONOMY.routerBuildCost) return { ok: false, reason: 'insufficient-funds' };
+export function buildInterchange(state) {
+  if (!state.terminalA.built) {
+    return { ok: false, reason: 'terminal-required' };
+  }
 
-  state.money -= ECONOMY.routerBuildCost;
-  state.router.built = true;
-  state.switch.queueMb = 0;
-  state.switch.currentDropMbps = 0;
+  if (state.interchange.built) {
+    return { ok: false, reason: 'already-built' };
+  }
+
+  if (state.money < ECONOMY.interchangeBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.interchangeBuildCost;
+  state.interchange.built = true;
+  state.terminalA.queuePassengers = 0;
+  state.terminalA.currentAbandonmentPpm = 0;
+
   return { ok: true };
 }
 
-export function buildBranchNetwork(state) {
-  if (!state.router.built) return { ok: false, reason: 'router-required' };
-  if (state.branch.built) return { ok: false, reason: 'already-built' };
-  if (state.money < ECONOMY.branchNetworkCost) return { ok: false, reason: 'insufficient-funds' };
+export function buildCorridorB(state) {
+  if (!state.interchange.built) {
+    return { ok: false, reason: 'interchange-required' };
+  }
 
-  state.money -= ECONOMY.branchNetworkCost;
-  state.branch.built = true;
+  if (state.corridorB.built) {
+    return { ok: false, reason: 'already-built' };
+  }
+
+  if (state.money < ECONOMY.corridorBBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.corridorBBuildCost;
+  state.corridorB.built = true;
+
   return { ok: true };
 }
 
-export function buildSecondaryServer(state) {
-  if (!state.router.built) return { ok: false, reason: 'router-required' };
-  if (state.secondaryServer.built) return { ok: false, reason: 'already-built' };
-  if (state.money < ECONOMY.secondaryServerCost) return { ok: false, reason: 'insufficient-funds' };
+export function buildStationB(state) {
+  if (!state.interchange.built) {
+    return { ok: false, reason: 'interchange-required' };
+  }
 
-  state.money -= ECONOMY.secondaryServerCost;
-  state.secondaryServer.built = true;
+  if (state.stationB.built) {
+    return { ok: false, reason: 'already-built' };
+  }
+
+  if (state.money < ECONOMY.stationBBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.stationBBuildCost;
+  state.stationB.built = true;
+
   return { ok: true };
 }
 
-export function addClient(state) {
-  if (!state.switch.built) return { ok: false, reason: 'switch-required' };
-  if (state.client.count >= ECONOMY.maxClients) return { ok: false, reason: 'client-limit' };
+export function addStopA(state) {
+  if (!state.terminalA.built) {
+    return { ok: false, reason: 'terminal-required' };
+  }
 
-  const cost = getAddClientCost(state);
-  if (state.money < cost) return { ok: false, reason: 'insufficient-funds' };
+  if (state.corridorA.stopCount >= ECONOMY.maxStopsA) {
+    return { ok: false, reason: 'stop-limit' };
+  }
+
+  const cost = getAddStopACost(state);
+
+  if (state.money < cost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
 
   state.money -= cost;
-  state.client.count += 1;
+  state.corridorA.stopCount += 1;
+
   return { ok: true, cost };
 }
 
-export function addBranchClient(state) {
-  if (!state.branch.built) return { ok: false, reason: 'branch-required' };
-  if (state.branch.clientCount >= ECONOMY.maxBranchClients) {
-    return { ok: false, reason: 'client-limit' };
+export function addStopB(state) {
+  if (!state.corridorB.built) {
+    return { ok: false, reason: 'corridor-required' };
   }
 
-  const cost = getAddBranchClientCost(state);
-  if (state.money < cost) return { ok: false, reason: 'insufficient-funds' };
+  if (state.corridorB.stopCount >= ECONOMY.maxStopsB) {
+    return { ok: false, reason: 'stop-limit' };
+  }
+
+  const cost = getAddStopBCost(state);
+
+  if (state.money < cost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
 
   state.money -= cost;
-  state.branch.clientCount += 1;
+  state.corridorB.stopCount += 1;
+
   return { ok: true, cost };
 }
 
 export function buyUpgrade(state, type) {
   const config = UPGRADES[type];
-  if (!config) return { ok: false, reason: 'unknown-upgrade' };
 
-  if (type === 'link' && !state.linkBuilt) {
-    return { ok: false, reason: 'link-required' };
+  if (!config) {
+    return { ok: false, reason: 'unknown-upgrade' };
   }
-  if ((type === 'switch' || type === 'buffer') && !state.switch.built) {
-    return { ok: false, reason: 'switch-required' };
+
+  if (type === 'lineA' && !state.corridorA.lineBuilt) {
+    return { ok: false, reason: 'line-required' };
   }
-  if (type === 'router' && !state.router.built) {
-    return { ok: false, reason: 'router-required' };
+
+  if (
+    (type === 'terminalA' || type === 'waitingArea')
+    && !state.terminalA.built
+  ) {
+    return { ok: false, reason: 'terminal-required' };
   }
-  if (type === 'branch' && !state.branch.built) {
-    return { ok: false, reason: 'branch-required' };
+
+  if (type === 'interchange' && !state.interchange.built) {
+    return { ok: false, reason: 'interchange-required' };
   }
-  if (type === 'server2' && !state.secondaryServer.built) {
-    return { ok: false, reason: 'secondary-server-required' };
+
+  if (type === 'lineB' && !state.corridorB.built) {
+    return { ok: false, reason: 'corridor-required' };
+  }
+
+  if (type === 'stationB' && !state.stationB.built) {
+    return { ok: false, reason: 'station-b-required' };
   }
 
   const cost = getUpgradeCost(state, type);
-  if (state.money < cost) return { ok: false, reason: 'insufficient-funds' };
+
+  if (state.money < cost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
 
   state.money -= cost;
 
-  if (type === 'client') {
-    state.client.level += 1;
-    state.client.trafficMbps += config.delta;
-  } else if (type === 'link') {
-    state.link.level += 1;
-    state.link.capacityMbps += config.delta;
-  } else if (type === 'switch') {
-    state.switch.level += 1;
-    state.switch.capacityMbps += config.delta;
-  } else if (type === 'buffer') {
-    state.switch.bufferLevel += 1;
-    state.switch.bufferMb += config.delta;
-  } else if (type === 'server') {
-    state.server.level += 1;
-    state.server.capacityMbps += config.delta;
-  } else if (type === 'router') {
-    state.router.level += 1;
-    state.router.capacityMbps += config.delta;
-  } else if (type === 'branch') {
-    state.branch.level += 1;
-    state.branch.linkCapacityMbps += config.delta;
-  } else if (type === 'server2') {
-    state.secondaryServer.level += 1;
-    state.secondaryServer.capacityMbps += config.delta;
-    state.secondaryServer.linkCapacityMbps += config.delta;
+  if (type === 'catchmentA') {
+    state.corridorA.demandLevel += 1;
+    state.corridorA.demandPerStopPpm += config.delta;
+  } else if (type === 'lineA') {
+    state.corridorA.lineLevel += 1;
+    state.corridorA.lineCapacityPpm += config.delta;
+  } else if (type === 'terminalA') {
+    state.terminalA.level += 1;
+    state.terminalA.platformCapacityPpm += config.delta;
+  } else if (type === 'waitingArea') {
+    state.terminalA.waitingLevel += 1;
+    state.terminalA.waitingCapacityPassengers += config.delta;
+  } else if (type === 'stationA') {
+    state.stationA.level += 1;
+    state.stationA.capacityPpm += config.delta;
+  } else if (type === 'interchange') {
+    state.interchange.level += 1;
+    state.interchange.transferCapacityPpm += config.delta;
+  } else if (type === 'lineB') {
+    state.corridorB.lineLevel += 1;
+    state.corridorB.lineCapacityPpm += config.delta;
+  } else if (type === 'stationB') {
+    state.stationB.level += 1;
+    state.stationB.capacityPpm += config.delta;
   }
 
   return { ok: true, cost };
@@ -142,5 +214,6 @@ export function setSimulationSpeed(state, speed) {
   }
 
   state.simulationSpeed = speed;
+
   return { ok: true };
 }
