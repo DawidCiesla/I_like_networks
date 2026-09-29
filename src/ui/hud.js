@@ -38,6 +38,7 @@ export class Hud {
     onUpgrade,
     onSpeed,
     onReset,
+    onInspectorClose,
   }) {
     this.handlers = {
       onBuild,
@@ -87,6 +88,7 @@ export class Hud {
 
     this.el.inspectorClose.addEventListener('click', () => {
       this.selection = null;
+      onInspectorClose?.();
       this.#syncPanels();
     });
 
