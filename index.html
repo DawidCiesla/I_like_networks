@@ -38,8 +38,8 @@
 
         <section class="message-bar pixel-window">
           <div class="face-icon">⌣</div>
-          <div id="objective-text">Build a router to connect multiple networks.</div>
-          <span class="message-tag">Phase 3 ↓</span>
+          <div id="objective-text">Build your network without replacing what is already there.</div>
+          <span class="message-tag">Network ↓</span>
         </section>
       </div>
 
@@ -57,141 +57,52 @@
         </div>
       </section>
 
-      <section id="route-table-box" class="route-table-box pixel-window hidden" aria-label="Routing table">
-        <div class="window-title">ROUTING TABLE</div>
-        <div class="route-head">
-          <span>DESTINATION</span><span>NEXT</span>
+      <div class="build-dock">
+        <button id="build-menu-button" class="build-menu-button pixel-window" type="button">
+          <span class="build-plus">＋</span>
+          <span>BUILD</span>
+        </button>
+
+        <section id="build-panel" class="build-panel pixel-window hidden" aria-label="Build menu">
+          <div class="panel-heading-row">
+            <div class="window-title">BUILD</div>
+            <button id="build-panel-close" class="panel-close" type="button" aria-label="Close build menu">×</button>
+          </div>
+          <div id="build-list" class="build-list"></div>
+          <div id="build-empty" class="build-empty hidden">Nothing new to build right now.</div>
+        </section>
+      </div>
+
+      <section id="inspector-panel" class="inspector-panel pixel-window hidden" aria-label="Selected network element">
+        <div class="panel-heading-row">
+          <div>
+            <div id="inspector-kicker" class="inspector-kicker">SELECTED</div>
+            <div id="inspector-title" class="inspector-title">Network element</div>
+          </div>
+          <button id="inspector-close" class="panel-close" type="button" aria-label="Close inspector">×</button>
         </div>
-        <div id="route-table-body"></div>
-        <div class="route-traffic">
-          <div><span>SERVER A</span><strong id="route-a-throughput">0 Mb/s</strong></div>
-          <div><span>SERVER B</span><strong id="route-b-throughput">0 Mb/s</strong></div>
-        </div>
-      </section>
 
-      <section class="network-panel pixel-window" id="control-panel">
-        <div class="panel-title">
-          <span class="globe-icon">⊕</span>
-          <span>Network Expansion</span>
-        </div>
-        <div class="dash-divider"></div>
+        <div id="inspector-subtitle" class="inspector-subtitle"></div>
+        <div id="inspector-stats" class="inspector-stats"></div>
+        <div id="inspector-actions" class="inspector-actions"></div>
 
-        <button id="connect-button" class="connect-row">
-          <span class="row-icon cable-icon">⇄</span>
-          <span class="row-copy">
-            <strong>Ethernet Link</strong>
-            <small id="connect-subtitle">Client ↔ Server</small>
-          </span>
-          <span class="buy-pill"><span id="connect-cost">$40</span></span>
-        </button>
-
-        <button id="switch-button" class="connect-row">
-          <span class="row-icon switch-color">▤</span>
-          <span class="row-copy">
-            <strong>Install Switch</strong>
-            <small id="switch-subtitle">Unlock multiple clients</small>
-          </span>
-          <span class="buy-pill"><span id="switch-cost">$95</span></span>
-        </button>
-
-        <button id="router-button" class="connect-row phase-three-row">
-          <span class="row-icon router-color">◆</span>
-          <span class="row-copy">
-            <strong>Install Router</strong>
-            <small id="router-subtitle">Route traffic between networks</small>
-          </span>
-          <span class="buy-pill"><span id="router-cost">$220</span></span>
-        </button>
-
-        <button id="add-client-button" class="connect-row">
-          <span class="row-icon client-color">▣</span>
-          <span class="row-copy">
-            <strong>Add LAN A Client</strong>
-            <small id="client-count-text">1 / 4 connected</small>
-          </span>
-          <span class="buy-pill"><span id="add-client-cost">$60</span></span>
-        </button>
-
-        <button id="branch-button" class="connect-row phase-three-row">
-          <span class="row-icon branch-color">▦</span>
-          <span class="row-copy">
-            <strong>Build LAN B</strong>
-            <small id="branch-subtitle">Second routed subnet</small>
-          </span>
-          <span class="buy-pill"><span id="branch-cost">$180</span></span>
-        </button>
-
-        <button id="branch-client-button" class="connect-row phase-three-row">
-          <span class="row-icon branch-color">▣</span>
-          <span class="row-copy">
-            <strong>Add LAN B Client</strong>
-            <small id="branch-client-count">2 / 4 connected</small>
-          </span>
-          <span class="buy-pill"><span id="branch-client-cost">$85</span></span>
-        </button>
-
-        <button id="secondary-server-button" class="connect-row phase-three-row">
-          <span class="row-icon secondary-server-color">▥</span>
-          <span class="row-copy">
-            <strong>Build Server B</strong>
-            <small id="secondary-server-subtitle">Add second destination network</small>
-          </span>
-          <span class="buy-pill"><span id="secondary-server-cost">$210</span></span>
-        </button>
-
-        <div class="dash-divider"></div>
-
-        <button class="upgrade-row" data-upgrade="link">
-          <span class="row-icon blue-color">╪</span>
-          <span class="row-copy"><strong>LAN A Uplink</strong><small>+20 Mb/s</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$35</strong></span>
-          <span class="buy-pill">Buy</span>
-        </button>
-
-        <button class="upgrade-row" data-upgrade="router">
-          <span class="row-icon router-color">◆</span>
-          <span class="row-copy"><strong>Router Core</strong><small>+40 Mb/s routing</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$120</strong></span>
-          <span class="buy-pill">Buy</span>
-        </button>
-
-        <button class="upgrade-row" data-upgrade="branch">
-          <span class="row-icon branch-color">╪</span>
-          <span class="row-copy"><strong>LAN B Uplink</strong><small>+20 Mb/s</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$95</strong></span>
-          <span class="buy-pill">Buy</span>
-        </button>
-
-        <button class="upgrade-row" data-upgrade="server">
-          <span class="row-icon server-color">▥</span>
-          <span class="row-copy"><strong>Server A</strong><small>+15 Mb/s capacity</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$45</strong></span>
-          <span class="buy-pill">Buy</span>
-        </button>
-
-        <button class="upgrade-row" data-upgrade="server2">
-          <span class="row-icon secondary-server-color">▥</span>
-          <span class="row-copy"><strong>Server B</strong><small>+20 Mb/s capacity + uplink</small></span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$110</strong></span>
-          <span class="buy-pill">Buy</span>
-        </button>
-
-        <div class="dash-divider"></div>
-
-        <div class="mini-stats phase-three-stats">
-          <div><span>DEMAND A</span><strong id="demand-a-value">10 Mb/s</strong></div>
-          <div><span>DEMAND B</span><strong id="demand-b-value">0 Mb/s</strong></div>
-          <div><span>ROUTER IN</span><strong id="router-ingress-value">0 Mb/s</strong></div>
-          <div><span>ROUTER CORE</span><strong id="router-capacity-value">—</strong></div>
-          <div><span>QUEUE</span><strong id="queue-value">0 Mb</strong></div>
-          <div><span>LATENCY</span><strong id="latency-value">0 ms</strong></div>
-          <div><span>LOSS</span><strong id="loss-value">0%</strong></div>
-          <div><span>BOTTLENECK</span><strong id="bottleneck-value">—</strong></div>
-        </div>
+        <section id="inspector-routes" class="inspector-routes hidden">
+          <div class="dash-divider"></div>
+          <div class="window-title">ROUTING TABLE</div>
+          <div class="route-head">
+            <span>DESTINATION</span>
+            <span>NEXT</span>
+          </div>
+          <div id="route-table-body"></div>
+          <div class="route-traffic">
+            <div><span>SERVER A</span><strong id="route-a-throughput">0 Mb/s</strong></div>
+            <div><span>SERVER B</span><strong id="route-b-throughput">0 Mb/s</strong></div>
+          </div>
+        </section>
       </section>
 
       <button id="reset-button" class="reset-button">RESET NETWORK</button>
-      <div class="hint">DRAG TO PAN • WHEEL TO ZOOM • ROUTES ARE CREATED AUTOMATICALLY</div>
+      <div class="hint">CLICK A DEVICE TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM</div>
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 
