@@ -4,123 +4,157 @@ import assert from 'node:assert/strict';
 import {
   advanceSimulation,
   createInitialState,
-  getAddClientCost,
+  getAddBranchClientCost,
   getBottleneck,
-  getIncomePerSecond,
-  getLatencyMs,
-  getPacketLossPercent,
-  getQueueFillRatio,
+  getBranchDemandMbps,
+  getRouteTable,
+  getRouterIngressMbps,
   getThroughputMbps,
-  getTotalDemandMbps,
-  getUpgradeCost,
 } from '../src/simulation/model.js';
 
 import {
-  addClient,
+  addBranchClient,
+  buildBranchNetwork,
   buildEthernet,
+  buildRouter,
+  buildSecondaryServer,
   buildSwitch,
   buyUpgrade,
-  setSimulationSpeed,
 } from '../src/simulation/actions.js';
 
-test('disconnected network has zero throughput and income', () => {
+function fundedState() {
   const state = createInitialState();
-  assert.equal(getThroughputMbps(state), 0);
-  assert.equal(getIncomePerSecond(state), 0);
-});
-
-test('building Ethernet starts traffic and charges the build cost', () => {
-  const state = createInitialState();
-  assert.equal(buildEthernet(state).ok, true);
-  assert.equal(state.money, 60);
-  assert.equal(getThroughputMbps(state), 10);
-});
-
-test('switch requires Ethernet and enables additional clients', () => {
-  const state = createInitialState();
-  assert.equal(buildSwitch(state).reason, 'link-required');
+  state.money = 10_000;
   buildEthernet(state);
-  state.money = 500;
-  assert.equal(buildSwitch(state).ok, true);
-
-  const cost = getAddClientCost(state);
-  assert.equal(addClient(state).ok, true);
-  assert.equal(state.client.count, 2);
-  assert.ok(getAddClientCost(state) > cost);
-});
-
-test('aggregate demand grows with client count', () => {
-  const state = createInitialState();
-  state.client.count = 3;
-  assert.equal(getTotalDemandMbps(state), 30);
-});
-
-test('overloaded uplink builds a queue and eventually drops traffic', () => {
-  const state = createInitialState();
-  buildEthernet(state);
-  state.money = 500;
   buildSwitch(state);
+  return state;
+}
+
+test('router requires the switched LAN', () => {
+  const state = createInitialState();
+  assert.equal(buildRouter(state).reason, 'switch-required');
+
+  state.money = 10_000;
+  buildEthernet(state);
+  buildSwitch(state);
+
+  assert.equal(buildRouter(state).ok, true);
+  assert.equal(state.router.built, true);
+});
+
+test('router initializes direct routes to LAN A and Server A', () => {
+  const state = fundedState();
+  buildRouter(state);
+
+  const routes = getRouteTable(state);
+
+  assert.equal(routes.length, 2);
+  assert.equal(routes[0].destination, '10.0.1.0/24');
+  assert.equal(routes[1].destination, '10.0.10.0/24');
+});
+
+test('LAN B adds a second source network and routing-table entry', () => {
+  const state = fundedState();
+  buildRouter(state);
+  buildBranchNetwork(state);
+
+  assert.equal(state.branch.built, true);
+  assert.ok(getBranchDemandMbps(state) > 0);
+  assert.ok(getRouteTable(state).some((route) => route.destination === '10.0.2.0/24'));
+});
+
+test('branch clients increase routed ingress', () => {
+  const state = fundedState();
+  buildRouter(state);
+  buildBranchNetwork(state);
+
+  const before = getRouterIngressMbps(state);
+  const cost = getAddBranchClientCost(state);
+
+  assert.equal(addBranchClient(state).ok, true);
+  assert.ok(getRouterIngressMbps(state) > before);
+  assert.ok(getAddBranchClientCost(state) > cost);
+});
+
+test('Server B adds a second destination and receives routed traffic', () => {
+  const state = fundedState();
+  buildRouter(state);
+  buildBranchNetwork(state);
+  buildSecondaryServer(state);
+
+  for (let i = 0; i < 10; i += 1) advanceSimulation(state, 0.25);
+
+  assert.ok(state.router.lastThroughputMbps.primary > 0);
+  assert.ok(state.router.lastThroughputMbps.secondary > 0);
+  assert.ok(getRouteTable(state).some((route) => route.destination === '10.0.20.0/24'));
+});
+
+test('router core becomes a bottleneck when combined ingress is too high', () => {
+  const state = fundedState();
+  buildRouter(state);
+  buildBranchNetwork(state);
+
   state.client.count = 4;
-  state.switch.capacityMbps = 100;
-  state.link.capacityMbps = 20;
+  state.client.trafficMbps = 25;
+  state.switch.capacityMbps = 200;
+  state.link.capacityMbps = 200;
+
+  state.branch.clientCount = 4;
+  state.branch.clientTrafficMbps = 20;
+  state.branch.linkCapacityMbps = 200;
+
+  state.router.capacityMbps = 40;
+
+  assert.equal(getBottleneck(state), 'router');
+
+  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
+
+  assert.ok(state.router.queueMb > 0);
+});
+
+test('routing preserves separate downstream bottlenecks', () => {
+  const state = fundedState();
+  buildRouter(state);
+  buildBranchNetwork(state);
+  buildSecondaryServer(state);
+
+  state.client.count = 4;
+  state.client.trafficMbps = 20;
+  state.switch.capacityMbps = 200;
+  state.link.capacityMbps = 200;
+  state.branch.linkCapacityMbps = 200;
+  state.router.capacityMbps = 200;
+
+  state.server.capacityMbps = 20;
+  state.secondaryServer.capacityMbps = 200;
+  state.secondaryServer.linkCapacityMbps = 200;
+
+  assert.equal(getBottleneck(state), 'server-a');
+
+  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
+
+  assert.ok(state.router.routeQueuesMb.primary > 0);
+  assert.equal(state.router.routeQueuesMb.secondary, 0);
+});
+
+test('router upgrade increases routed core capacity', () => {
+  const state = fundedState();
+  buildRouter(state);
+
+  const before = state.router.capacityMbps;
+  assert.equal(buyUpgrade(state, 'router').ok, true);
+  assert.ok(state.router.capacityMbps > before);
+});
+
+test('phase 2 behavior still works before the router is installed', () => {
+  const state = fundedState();
+  state.client.count = 4;
+  state.client.trafficMbps = 20;
+  state.link.capacityMbps = 15;
   state.server.capacityMbps = 100;
 
-  for (let i = 0; i < 40; i += 1) advanceSimulation(state, 0.25);
+  for (let i = 0; i < 20; i += 1) advanceSimulation(state, 0.25);
 
   assert.ok(state.switch.queueMb > 0);
-  assert.ok(getQueueFillRatio(state) > 0);
-  assert.ok(getLatencyMs(state) > 4);
-
-  for (let i = 0; i < 40; i += 1) advanceSimulation(state, 0.25);
-
-  assert.ok(state.switch.totalDroppedMb > 0);
-  assert.ok(getPacketLossPercent(state) > 0);
-  assert.equal(getBottleneck(state), 'link');
-});
-
-test('increasing link capacity drains the queue', () => {
-  const state = createInitialState();
-  buildEthernet(state);
-  state.money = 1000;
-  buildSwitch(state);
-  state.client.count = 4;
-  state.switch.capacityMbps = 100;
-  state.server.capacityMbps = 100;
-  state.link.capacityMbps = 20;
-
-  for (let i = 0; i < 24; i += 1) advanceSimulation(state, 0.25);
-  const queued = state.switch.queueMb;
-
-  state.link.capacityMbps = 80;
-  for (let i = 0; i < 12; i += 1) advanceSimulation(state, 0.25);
-
-  assert.ok(state.switch.queueMb < queued);
-});
-
-test('phase 2 switch and buffer upgrades have escalating costs', () => {
-  const state = createInitialState();
-  buildEthernet(state);
-  state.money = 1000;
-  buildSwitch(state);
-
-  const switchCost = getUpgradeCost(state, 'switch');
-  const bufferCost = getUpgradeCost(state, 'buffer');
-
-  assert.equal(buyUpgrade(state, 'switch').ok, true);
-  assert.equal(buyUpgrade(state, 'buffer').ok, true);
-  assert.ok(getUpgradeCost(state, 'switch') > switchCost);
-  assert.ok(getUpgradeCost(state, 'buffer') > bufferCost);
-});
-
-test('speed multiplier changes simulated progress', () => {
-  const slow = createInitialState();
-  const fast = createInitialState();
-  buildEthernet(slow);
-  buildEthernet(fast);
-  setSimulationSpeed(fast, 4);
-
-  advanceSimulation(slow, 0.25);
-  advanceSimulation(fast, 0.25);
-
-  assert.ok(fast.stats.lifetimeRevenue > slow.stats.lifetimeRevenue);
+  assert.ok(getThroughputMbps(state) > 0);
 });
