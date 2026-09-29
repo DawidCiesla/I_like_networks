@@ -472,3 +472,71 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
     transform: translateX(-50%) translateY(0) scale(1.5);
   }
 }
+
+
+/* Phase 2 — switches, queues and bottlenecks */
+.network-panel {
+  width: 385px;
+  min-height: 428px;
+  bottom: 72px;
+}
+
+.phase-two-row {
+  min-height: 40px;
+}
+
+.switch-color {
+  color: #14cf32;
+}
+
+.queue-color {
+  color: #f4ca00;
+}
+
+.phase-two-stats {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+}
+
+.phase-two-stats div {
+  min-height: 15px;
+}
+
+.metric-warning {
+  color: #f4ca00 !important;
+  text-shadow: 1px 1px #312800;
+}
+
+.metric-danger {
+  color: #ff3155 !important;
+  text-shadow: 1px 1px #350710;
+}
+
+@media (max-height: 850px) and (min-width: 721px) {
+  .network-panel {
+    bottom: 48px;
+    transform: translateX(-50%) scale(.88);
+    transform-origin: bottom center;
+  }
+}
+
+@media (max-width: 720px) {
+  .network-panel {
+    width: calc(100vw - 28px);
+    max-height: 55vh;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .network-panel {
+    transform: translateX(-50%) scale(1.28);
+  }
+}
+
+@media (min-width: 3200px) and (min-height: 1700px) {
+  .network-panel {
+    transform: translateX(-50%) scale(1.5);
+  }
+}
