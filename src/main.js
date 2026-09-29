@@ -1,73 +1,97 @@
-import { advanceSimulation } from './simulation/model.js';
 import {
-  addBranchClient,
-  addClient,
-  buildBranchNetwork,
-  buildEthernet,
-  buildRouter,
-  buildSecondaryServer,
-  buildSwitch,
+  advanceSimulation,
+} from './simulation/model.js';
+
+import {
+  addStopA,
+  addStopB,
+  buildCorridorB,
+  buildFirstLine,
+  buildInterchange,
+  buildStationB,
+  buildTerminalA,
   buyUpgrade,
   setSimulationSpeed,
 } from './simulation/actions.js';
-import { clearSave, loadState, saveState } from './persistence/storage.js';
-import { NetworkRenderer } from './render/networkRenderer.js';
-import { Hud } from './ui/hud.js';
 
-const canvas = document.querySelector('#network-canvas');
+import {
+  clearSave,
+  loadState,
+  saveState,
+} from './persistence/storage.js';
+
+import {
+  TransportRenderer,
+} from './render/transportRenderer.js';
+
+import {
+  Hud,
+} from './ui/hud.js';
+
+const canvas = document.querySelector('#transport-canvas');
+
 let state = loadState();
 let hud;
 
 const toastFailure = (result) => {
   const messages = {
     'insufficient-funds': 'Not enough funds.',
-    'link-required': 'Build Ethernet first.',
-    'switch-required': 'Install the switch first.',
-    'router-required': 'Install the router first.',
-    'branch-required': 'Build LAN B first.',
-    'secondary-server-required': 'Build Server B first.',
-    'client-limit': 'Client limit reached.',
-    'already-built': 'That element is already online.',
+    'line-required': 'Start Line 1 first.',
+    'terminal-required': 'Build Northside Terminal first.',
+    'interchange-required': 'Build Central Interchange first.',
+    'corridor-required': 'Open Line 2 first.',
+    'station-b-required': 'Build Harbor Station first.',
+    'stop-limit': 'Stop limit reached for this prototype.',
+    'already-built': 'That infrastructure is already open.',
   };
 
-  hud.toast(messages[result.reason] ?? 'Action unavailable.');
+  hud.toast(
+    messages[result.reason]
+      ?? 'Action unavailable.',
+  );
 };
 
-const renderer = new NetworkRenderer(canvas, {
-  onSelectionChanged: (selection) => hud?.setSelection(selection),
-});
+const renderer = new TransportRenderer(
+  canvas,
+  {
+    onSelectionChanged: (selection) => {
+      hud?.setSelection(selection);
+    },
+  },
+);
 
 hud = new Hud({
   onBuild: (type) => {
     const buildActions = {
-      ethernet: {
-        run: () => buildEthernet(state),
-        selection: 'lanA',
-        success: 'Ethernet online. Existing route established.',
+      lineA: {
+        run: () => buildFirstLine(state),
+        selection: 'corridorA',
+        success: 'Bus Line 1 is now carrying passengers.',
       },
-      switch: {
-        run: () => buildSwitch(state),
-        selection: 'switch',
-        success: 'Switch installed on the existing LAN.',
+      terminalA: {
+        run: () => buildTerminalA(state),
+        selection: 'terminalA',
+        success: 'Northside Terminal is open.',
       },
-      router: {
-        run: () => buildRouter(state),
-        selection: 'router',
-        success: 'Router inserted into the existing trunk.',
+      interchange: {
+        run: () => buildInterchange(state),
+        selection: 'interchange',
+        success: 'Central Interchange is open. Existing Line 1 stayed in place.',
       },
-      branch: {
-        run: () => buildBranchNetwork(state),
-        selection: 'lanB',
-        success: 'LAN B added to the existing network.',
+      corridorB: {
+        run: () => buildCorridorB(state),
+        selection: 'corridorB',
+        success: 'Bus Line 2 is now serving Riverside.',
       },
-      server2: {
-        run: () => buildSecondaryServer(state),
-        selection: 'serverB',
-        success: 'Server B and its new route are online.',
+      stationB: {
+        run: () => buildStationB(state),
+        selection: 'stationB',
+        success: 'Harbor Station is open.',
       },
     };
 
     const action = buildActions[type];
+
     if (!action) return;
 
     const result = action.run();
@@ -81,27 +105,43 @@ hud = new Hud({
     }
   },
 
-  onAddClient: () => {
-    const result = addClient(state);
-    if (result.ok) hud.toast('LAN A client connected.');
-    else toastFailure(result);
+  onAddStopA: () => {
+    const result = addStopA(state);
+
+    if (result.ok) {
+      hud.toast('New stop added to Bus Line 1.');
+    } else {
+      toastFailure(result);
+    }
   },
 
-  onAddBranchClient: () => {
-    const result = addBranchClient(state);
-    if (result.ok) hud.toast('LAN B client connected.');
-    else toastFailure(result);
+  onAddStopB: () => {
+    const result = addStopB(state);
+
+    if (result.ok) {
+      hud.toast('New stop added to Bus Line 2.');
+    } else {
+      toastFailure(result);
+    }
   },
 
   onUpgrade: (type) => {
     const result = buyUpgrade(state, type);
-    if (result.ok) hud.toast(`${type.toUpperCase()} upgraded.`);
-    else toastFailure(result);
+
+    if (result.ok) {
+      hud.toast('Transport capacity upgraded.');
+    } else {
+      toastFailure(result);
+    }
   },
 
-  onSpeed: (speed) => setSimulationSpeed(state, speed),
+  onSpeed: (speed) => {
+    setSimulationSpeed(state, speed);
+  },
 
-  onInspectorClose: () => renderer.setSelection(null),
+  onInspectorClose: () => {
+    renderer.setSelection(null);
+  },
 
   onReset: () => {
     clearSave();
@@ -113,11 +153,23 @@ let last = performance.now();
 let saveAccumulator = 0;
 
 function frame(now) {
-  const delta = Math.min((now - last) / 1000, 0.1);
+  const delta = Math.min(
+    (now - last) / 1000,
+    0.1,
+  );
+
   last = now;
 
-  advanceSimulation(state, delta);
-  renderer.render(state, delta);
+  advanceSimulation(
+    state,
+    delta,
+  );
+
+  renderer.render(
+    state,
+    delta,
+  );
+
   hud.render(state);
 
   saveAccumulator += delta;
@@ -130,7 +182,10 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('beforeunload', () => saveState(state));
+window.addEventListener(
+  'beforeunload',
+  () => saveState(state),
+);
 
 hud.render(state);
 requestAnimationFrame(frame);
