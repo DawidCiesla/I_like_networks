@@ -73,6 +73,7 @@ hud = new Hud({
     const result = action.run();
 
     if (result.ok) {
+      renderer.setSelection(action.selection);
       hud.setSelection(action.selection);
       hud.toast(action.success);
     } else {
@@ -99,6 +100,8 @@ hud = new Hud({
   },
 
   onSpeed: (speed) => setSimulationSpeed(state, speed),
+
+  onInspectorClose: () => renderer.setSelection(null),
 
   onReset: () => {
     clearSave();
