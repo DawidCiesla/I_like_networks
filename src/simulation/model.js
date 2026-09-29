@@ -1,37 +1,70 @@
-export const GAME_VERSION = 3;
+export const GAME_VERSION = 4;
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
-  ethernetBuildCost: 40,
-  switchBuildCost: 95,
-  routerBuildCost: 220,
-  branchNetworkCost: 180,
-  secondaryServerCost: 210,
-  addClientBaseCost: 60,
-  addClientCostGrowth: 1.5,
-  addBranchClientBaseCost: 85,
-  addBranchClientCostGrowth: 1.55,
-  maxClients: 4,
-  maxBranchClients: 4,
-  revenuePerMbpsSecond: 0.16,
+  firstLineBuildCost: 40,
+  terminalBuildCost: 95,
+  interchangeBuildCost: 220,
+  corridorBBuildCost: 180,
+  stationBBuildCost: 210,
+  addStopABaseCost: 60,
+  addStopACostGrowth: 1.5,
+  addStopBBaseCost: 85,
+  addStopBCostGrowth: 1.55,
+  maxStopsA: 4,
+  maxStopsB: 4,
+  farePerPassenger: 8,
 });
 
 export const UPGRADES = Object.freeze({
-  client: { baseCost: 25, costGrowth: 1.65, delta: 5 },
-  link: { baseCost: 35, costGrowth: 1.7, delta: 20 },
-  switch: { baseCost: 70, costGrowth: 1.75, delta: 25 },
-  buffer: { baseCost: 55, costGrowth: 1.7, delta: 40 },
-  server: { baseCost: 45, costGrowth: 1.7, delta: 15 },
-  router: { baseCost: 120, costGrowth: 1.8, delta: 40 },
-  branch: { baseCost: 95, costGrowth: 1.75, delta: 20 },
-  server2: { baseCost: 110, costGrowth: 1.75, delta: 20 },
+  catchmentA: { baseCost: 25, costGrowth: 1.65, delta: 5 },
+  lineA: { baseCost: 35, costGrowth: 1.7, delta: 20 },
+  terminalA: { baseCost: 70, costGrowth: 1.75, delta: 25 },
+  waitingArea: { baseCost: 55, costGrowth: 1.7, delta: 40 },
+  stationA: { baseCost: 45, costGrowth: 1.7, delta: 15 },
+  interchange: { baseCost: 120, costGrowth: 1.8, delta: 40 },
+  lineB: { baseCost: 95, costGrowth: 1.75, delta: 20 },
+  stationB: { baseCost: 110, costGrowth: 1.75, delta: 20 },
 });
 
-export const NETWORKS = Object.freeze({
-  lanA: { cidr: '10.0.1.0/24', label: 'LAN A' },
-  lanB: { cidr: '10.0.2.0/24', label: 'LAN B' },
-  serverA: { cidr: '10.0.10.0/24', label: 'SERVER NET A' },
-  serverB: { cidr: '10.0.20.0/24', label: 'SERVER NET B' },
+export const TRANSPORT_MODES = Object.freeze({
+  bus: {
+    label: 'Bus',
+    unlocked: true,
+    role: 'Flexible local transport',
+  },
+  tram: {
+    label: 'Tram',
+    unlocked: false,
+    role: 'High-capacity urban corridor',
+  },
+  metro: {
+    label: 'Metro',
+    unlocked: false,
+    role: 'Very high-capacity rapid transit',
+  },
+  rail: {
+    label: 'Rail',
+    unlocked: false,
+    role: 'Regional and intercity transport',
+  },
+  ferry: {
+    label: 'Ferry',
+    unlocked: false,
+    role: 'Water crossings',
+  },
+  air: {
+    label: 'Air',
+    unlocked: false,
+    role: 'Long-distance transport',
+  },
+});
+
+export const PLACES = Object.freeze({
+  corridorA: { label: 'Northside', code: 'LINE 1' },
+  corridorB: { label: 'Riverside', code: 'LINE 2' },
+  stationA: { label: 'Central Station', code: 'CENTRAL' },
+  stationB: { label: 'Harbor Station', code: 'HARBOR' },
 });
 
 export function createInitialState() {
@@ -40,331 +73,615 @@ export function createInitialState() {
     money: ECONOMY.startingMoney,
     elapsedSeconds: 0,
     simulationSpeed: 1,
-    linkBuilt: false,
-    client: { trafficMbps: 10, level: 0, count: 1 },
-    link: { capacityMbps: 20, level: 0 },
-    switch: {
-      built: false,
-      capacityMbps: 35,
-      level: 0,
-      bufferMb: 80,
-      bufferLevel: 0,
-      queueMb: 0,
-      currentDropMbps: 0,
-      totalDroppedMb: 0,
+
+    corridorA: {
+      lineBuilt: false,
+      mode: 'bus',
+      stopCount: 1,
+      demandPerStopPpm: 10,
+      demandLevel: 0,
+      lineCapacityPpm: 20,
+      lineLevel: 0,
     },
-    server: { capacityMbps: 25, level: 0 },
-    router: {
+
+    terminalA: {
       built: false,
-      capacityMbps: 60,
+      platformCapacityPpm: 35,
       level: 0,
-      bufferMb: 120,
-      queueMb: 0,
-      currentDropMbps: 0,
-      totalDroppedMb: 0,
-      routeQueuesMb: { primary: 0, secondary: 0 },
-      routeDropsMbps: { primary: 0, secondary: 0 },
-      lastThroughputMbps: { primary: 0, secondary: 0 },
+      waitingCapacityPassengers: 80,
+      waitingLevel: 0,
+      queuePassengers: 0,
+      currentAbandonmentPpm: 0,
+      totalAbandonedPassengers: 0,
     },
-    branch: {
-      built: false,
-      clientCount: 2,
-      clientTrafficMbps: 8,
-      linkCapacityMbps: 30,
+
+    stationA: {
+      capacityPpm: 25,
       level: 0,
     },
-    secondaryServer: {
+
+    interchange: {
       built: false,
-      capacityMbps: 30,
+      transferCapacityPpm: 60,
       level: 0,
-      linkCapacityMbps: 30,
+      waitingCapacityPassengers: 120,
+      queuePassengers: 0,
+      currentAbandonmentPpm: 0,
+      totalAbandonedPassengers: 0,
+      destinationQueuesPassengers: {
+        primary: 0,
+        secondary: 0,
+      },
+      destinationAbandonmentPpm: {
+        primary: 0,
+        secondary: 0,
+      },
+      lastDeliveredPpm: {
+        primary: 0,
+        secondary: 0,
+      },
     },
-    stats: { lifetimeRevenue: 0, lifetimeDataMb: 0 },
+
+    corridorB: {
+      built: false,
+      mode: 'bus',
+      stopCount: 2,
+      demandPerStopPpm: 8,
+      lineCapacityPpm: 30,
+      lineLevel: 0,
+    },
+
+    stationB: {
+      built: false,
+      capacityPpm: 30,
+      level: 0,
+    },
+
+    stats: {
+      lifetimeRevenue: 0,
+      lifetimePassengers: 0,
+    },
   };
 }
 
-export function getPrimaryDemandMbps(state) {
-  return state.client.trafficMbps * state.client.count;
+export function getCorridorADemandPpm(state) {
+  return state.corridorA.demandPerStopPpm * state.corridorA.stopCount;
 }
 
-export function getBranchDemandMbps(state) {
-  if (!state.branch.built) return 0;
-  return state.branch.clientTrafficMbps * state.branch.clientCount;
+export function getCorridorBDemandPpm(state) {
+  if (!state.corridorB.built) return 0;
+  return state.corridorB.demandPerStopPpm * state.corridorB.stopCount;
 }
 
-export function getTotalDemandMbps(state) {
-  return getPrimaryDemandMbps(state) + getBranchDemandMbps(state);
+export function getTotalDemandPpm(state) {
+  return getCorridorADemandPpm(state) + getCorridorBDemandPpm(state);
 }
 
-export function getSwitchIngressCapacityMbps(state) {
-  return state.switch.built ? state.switch.capacityMbps : Number.POSITIVE_INFINITY;
+export function getTerminalAIngressCapacityPpm(state) {
+  return state.terminalA.built
+    ? state.terminalA.platformCapacityPpm
+    : Number.POSITIVE_INFINITY;
 }
 
-export function getServiceCapacityMbps(state) {
-  if (!state.linkBuilt) return 0;
-  return Math.min(state.link.capacityMbps, state.server.capacityMbps);
-}
+export function getLocalServiceCapacityPpm(state) {
+  if (!state.corridorA.lineBuilt) return 0;
 
-export function getArrivalMbps(state) {
-  if (state.router.built) return getRouterIngressMbps(state);
-  return Math.min(getPrimaryDemandMbps(state), getSwitchIngressCapacityMbps(state));
-}
-
-export function getRouterIngressMbps(state) {
-  if (!state.router.built) return 0;
-  const lanA = Math.min(
-    getPrimaryDemandMbps(state),
-    getSwitchIngressCapacityMbps(state),
-    state.link.capacityMbps,
+  return Math.min(
+    state.corridorA.lineCapacityPpm,
+    state.stationA.capacityPpm,
   );
-  const lanB = state.branch.built
-    ? Math.min(getBranchDemandMbps(state), state.branch.linkCapacityMbps)
+}
+
+export function getLocalArrivalPpm(state) {
+  if (state.interchange.built) return getInterchangeIngressPpm(state);
+
+  return Math.min(
+    getCorridorADemandPpm(state),
+    getTerminalAIngressCapacityPpm(state),
+  );
+}
+
+export function getInterchangeIngressPpm(state) {
+  if (!state.interchange.built) return 0;
+
+  const corridorA = Math.min(
+    getCorridorADemandPpm(state),
+    getTerminalAIngressCapacityPpm(state),
+    state.corridorA.lineCapacityPpm,
+  );
+
+  const corridorB = state.corridorB.built
+    ? Math.min(
+      getCorridorBDemandPpm(state),
+      state.corridorB.lineCapacityPpm,
+    )
     : 0;
-  return lanA + lanB;
+
+  return corridorA + corridorB;
 }
 
 export function getDestinationRatios(state) {
-  if (!state.secondaryServer.built) return { primary: 1, secondary: 0 };
+  if (!state.stationB.built) {
+    return { primary: 1, secondary: 0 };
+  }
+
   return { primary: 0.6, secondary: 0.4 };
 }
 
-export function getPrimaryRouteCapacityMbps(state) {
-  return state.server.capacityMbps;
+export function getStationACapacityPpm(state) {
+  return state.stationA.capacityPpm;
 }
 
-export function getSecondaryRouteCapacityMbps(state) {
-  if (!state.secondaryServer.built) return 0;
-  return Math.min(
-    state.secondaryServer.capacityMbps,
-    state.secondaryServer.linkCapacityMbps,
-  );
+export function getStationBCapacityPpm(state) {
+  if (!state.stationB.built) return 0;
+  return state.stationB.capacityPpm;
 }
 
-export function getThroughputMbps(state) {
-  if (!state.linkBuilt) return 0;
-  if (state.router.built) {
-    return state.router.lastThroughputMbps.primary + state.router.lastThroughputMbps.secondary;
+export function getDeliveredPassengersPpm(state) {
+  if (!state.corridorA.lineBuilt) return 0;
+
+  if (state.interchange.built) {
+    return (
+      state.interchange.lastDeliveredPpm.primary
+      + state.interchange.lastDeliveredPpm.secondary
+    );
   }
-  const arrival = getArrivalMbps(state);
-  const serviceCapacity = getServiceCapacityMbps(state);
-  if (state.switch.built && state.switch.queueMb > 0) return serviceCapacity;
-  return Math.min(arrival, serviceCapacity);
+
+  const arrival = getLocalArrivalPpm(state);
+  const capacity = getLocalServiceCapacityPpm(state);
+
+  if (state.terminalA.built && state.terminalA.queuePassengers > 0) {
+    return capacity;
+  }
+
+  return Math.min(arrival, capacity);
 }
 
 export function getIncomePerSecond(state) {
-  return getThroughputMbps(state) * ECONOMY.revenuePerMbpsSecond;
+  return (
+    getDeliveredPassengersPpm(state)
+    * ECONOMY.farePerPassenger
+    / 60
+  );
 }
 
 export function getUtilization(state) {
-  if (state.router.built) {
-    if (state.router.capacityMbps <= 0) return 0;
-    return Math.min(1, getRouterIngressMbps(state) / state.router.capacityMbps);
+  if (state.interchange.built) {
+    if (state.interchange.transferCapacityPpm <= 0) return 0;
+
+    return Math.min(
+      1,
+      getInterchangeIngressPpm(state)
+        / state.interchange.transferCapacityPpm,
+    );
   }
-  const serviceCapacity = getServiceCapacityMbps(state);
-  if (serviceCapacity <= 0) return 0;
-  return Math.min(1, getThroughputMbps(state) / serviceCapacity);
+
+  const capacity = getLocalServiceCapacityPpm(state);
+
+  if (capacity <= 0) return 0;
+
+  return Math.min(1, getDeliveredPassengersPpm(state) / capacity);
 }
 
-export function getQueueFillRatio(state) {
-  if (state.router.built) {
-    if (state.router.bufferMb <= 0) return 0;
-    return Math.min(1, state.router.queueMb / state.router.bufferMb);
+export function getWaitingFillRatio(state) {
+  if (state.interchange.built) {
+    if (state.interchange.waitingCapacityPassengers <= 0) return 0;
+
+    return Math.min(
+      1,
+      state.interchange.queuePassengers
+        / state.interchange.waitingCapacityPassengers,
+    );
   }
-  if (!state.switch.built || state.switch.bufferMb <= 0) return 0;
-  return Math.min(1, state.switch.queueMb / state.switch.bufferMb);
-}
 
-export function getRouteQueueFillRatio(state, destination) {
-  if (!state.router.built || state.router.bufferMb <= 0) return 0;
-  const perRouteBuffer = state.router.bufferMb / 2;
-  return Math.min(1, state.router.routeQueuesMb[destination] / perRouteBuffer);
-}
-
-export function getLatencyMs(state) {
-  if (!state.linkBuilt) return 0;
-  if (state.router.built) {
-    const throughput = Math.max(1, getThroughputMbps(state));
-    const queued = state.router.queueMb
-      + state.router.routeQueuesMb.primary
-      + state.router.routeQueuesMb.secondary;
-    return Math.min(5000, 8 + (queued / throughput) * 1000);
+  if (
+    !state.terminalA.built
+    || state.terminalA.waitingCapacityPassengers <= 0
+  ) {
+    return 0;
   }
-  const serviceCapacity = getServiceCapacityMbps(state);
-  if (!state.switch.built || serviceCapacity <= 0) return 4;
-  const queueDelayMs = (state.switch.queueMb / serviceCapacity) * 1000;
-  return Math.min(5000, 4 + queueDelayMs);
+
+  return Math.min(
+    1,
+    state.terminalA.queuePassengers
+      / state.terminalA.waitingCapacityPassengers,
+  );
 }
 
-export function getPacketLossPercent(state) {
-  const demand = getTotalDemandMbps(state);
+export function getDestinationWaitingFillRatio(state, destination) {
+  if (
+    !state.interchange.built
+    || state.interchange.waitingCapacityPassengers <= 0
+  ) {
+    return 0;
+  }
+
+  const perDestinationCapacity =
+    state.interchange.waitingCapacityPassengers / 2;
+
+  return Math.min(
+    1,
+    state.interchange.destinationQueuesPassengers[destination]
+      / perDestinationCapacity,
+  );
+}
+
+export function getAverageWaitMinutes(state) {
+  if (!state.corridorA.lineBuilt) return 0;
+
+  if (state.interchange.built) {
+    const delivered = Math.max(1, getDeliveredPassengersPpm(state));
+
+    const waiting =
+      state.interchange.queuePassengers
+      + state.interchange.destinationQueuesPassengers.primary
+      + state.interchange.destinationQueuesPassengers.secondary;
+
+    return Math.min(120, waiting / delivered);
+  }
+
+  const service = getLocalServiceCapacityPpm(state);
+
+  if (!state.terminalA.built || service <= 0) return 0;
+
+  return Math.min(
+    120,
+    state.terminalA.queuePassengers / service,
+  );
+}
+
+export function getAbandonmentPercent(state) {
+  const demand = getTotalDemandPpm(state);
+
   if (demand <= 0) return 0;
-  const dropMbps = state.router.built
-    ? state.router.currentDropMbps
-      + state.router.routeDropsMbps.primary
-      + state.router.routeDropsMbps.secondary
-    : state.switch.currentDropMbps;
-  return Math.min(100, (dropMbps / demand) * 100);
+
+  const abandonmentPpm = state.interchange.built
+    ? (
+      state.interchange.currentAbandonmentPpm
+      + state.interchange.destinationAbandonmentPpm.primary
+      + state.interchange.destinationAbandonmentPpm.secondary
+    )
+    : state.terminalA.currentAbandonmentPpm;
+
+  return Math.min(100, (abandonmentPpm / demand) * 100);
 }
 
 export function getBottleneck(state) {
-  if (!state.linkBuilt) return 'offline';
+  if (!state.corridorA.lineBuilt) return 'offline';
 
-  if (state.router.built) {
-    const lanA = getPrimaryDemandMbps(state);
-    const lanB = getBranchDemandMbps(state);
-    if (lanA > getSwitchIngressCapacityMbps(state)) return 'switch-a';
-    if (lanA > state.link.capacityMbps) return 'uplink-a';
-    if (state.branch.built && lanB > state.branch.linkCapacityMbps) return 'uplink-b';
+  if (state.interchange.built) {
+    const demandA = getCorridorADemandPpm(state);
+    const demandB = getCorridorBDemandPpm(state);
 
-    const ingress = getRouterIngressMbps(state);
-    if (ingress > state.router.capacityMbps) return 'router';
+    if (demandA > getTerminalAIngressCapacityPpm(state)) {
+      return 'terminal-a';
+    }
+
+    if (demandA > state.corridorA.lineCapacityPpm) {
+      return 'line-a';
+    }
+
+    if (
+      state.corridorB.built
+      && demandB > state.corridorB.lineCapacityPpm
+    ) {
+      return 'line-b';
+    }
+
+    const ingress = getInterchangeIngressPpm(state);
+
+    if (ingress > state.interchange.transferCapacityPpm) {
+      return 'interchange';
+    }
 
     const ratios = getDestinationRatios(state);
-    const routed = Math.min(ingress, state.router.capacityMbps);
-    if (routed * ratios.primary > getPrimaryRouteCapacityMbps(state)) return 'server-a';
+    const transferred = Math.min(
+      ingress,
+      state.interchange.transferCapacityPpm,
+    );
+
     if (
-      state.secondaryServer.built
-      && routed * ratios.secondary > getSecondaryRouteCapacityMbps(state)
-    ) return 'server-b';
+      transferred * ratios.primary
+      > getStationACapacityPpm(state)
+    ) {
+      return 'station-a';
+    }
+
+    if (
+      state.stationB.built
+      && transferred * ratios.secondary
+        > getStationBCapacityPpm(state)
+    ) {
+      return 'station-b';
+    }
 
     return 'none';
   }
 
-  const demand = getPrimaryDemandMbps(state);
-  const switchCapacity = getSwitchIngressCapacityMbps(state);
-  const linkCapacity = state.link.capacityMbps;
-  const serverCapacity = state.server.capacityMbps;
-  const minimum = Math.min(demand, switchCapacity, linkCapacity, serverCapacity);
+  const demand = getCorridorADemandPpm(state);
+  const terminalCapacity = getTerminalAIngressCapacityPpm(state);
+  const lineCapacity = state.corridorA.lineCapacityPpm;
+  const stationCapacity = state.stationA.capacityPpm;
+
+  const minimum = Math.min(
+    demand,
+    terminalCapacity,
+    lineCapacity,
+    stationCapacity,
+  );
+
   if (minimum >= demand) return 'none';
-  if (minimum === switchCapacity) return 'switch';
-  if (minimum === linkCapacity) return 'link';
-  return 'server';
+  if (minimum === terminalCapacity) return 'terminal-a';
+  if (minimum === lineCapacity) return 'line-a';
+
+  return 'station-a';
 }
 
 function getUpgradeLevel(state, type) {
-  if (type === 'buffer') return state.switch.bufferLevel;
-  if (type === 'server2') return state.secondaryServer.level;
-  return state[type].level;
+  if (type === 'catchmentA') {
+    return state.corridorA.demandLevel;
+  }
+
+  if (type === 'lineA') {
+    return state.corridorA.lineLevel;
+  }
+
+  if (type === 'terminalA') {
+    return state.terminalA.level;
+  }
+
+  if (type === 'waitingArea') {
+    return state.terminalA.waitingLevel;
+  }
+
+  if (type === 'stationA') {
+    return state.stationA.level;
+  }
+
+  if (type === 'interchange') {
+    return state.interchange.level;
+  }
+
+  if (type === 'lineB') {
+    return state.corridorB.lineLevel;
+  }
+
+  if (type === 'stationB') {
+    return state.stationB.level;
+  }
+
+  throw new Error(`Unknown upgrade type: ${type}`);
 }
 
 export function getUpgradeCost(state, type) {
   const config = UPGRADES[type];
-  if (!config) throw new Error(`Unknown upgrade type: ${type}`);
-  return Math.round(config.baseCost * config.costGrowth ** getUpgradeLevel(state, type));
-}
 
-export function getAddClientCost(state) {
-  const addedClients = Math.max(0, state.client.count - 1);
-  return Math.round(ECONOMY.addClientBaseCost * ECONOMY.addClientCostGrowth ** addedClients);
-}
+  if (!config) {
+    throw new Error(`Unknown upgrade type: ${type}`);
+  }
 
-export function getAddBranchClientCost(state) {
-  const addedClients = Math.max(0, state.branch.clientCount - 2);
   return Math.round(
-    ECONOMY.addBranchClientBaseCost * ECONOMY.addBranchClientCostGrowth ** addedClients,
+    config.baseCost
+      * config.costGrowth ** getUpgradeLevel(state, type),
   );
 }
 
-export function getRouteTable(state) {
-  const routes = [
+export function getAddStopACost(state) {
+  const addedStops = Math.max(0, state.corridorA.stopCount - 1);
+
+  return Math.round(
+    ECONOMY.addStopABaseCost
+      * ECONOMY.addStopACostGrowth ** addedStops,
+  );
+}
+
+export function getAddStopBCost(state) {
+  const addedStops = Math.max(0, state.corridorB.stopCount - 2);
+
+  return Math.round(
+    ECONOMY.addStopBBaseCost
+      * ECONOMY.addStopBCostGrowth ** addedStops,
+  );
+}
+
+export function getServiceBoard(state) {
+  const services = [
     {
-      destination: NETWORKS.lanA.cidr,
-      label: NETWORKS.lanA.label,
-      nextHop: 'DIRECT',
-      active: state.router.built,
-    },
-    {
-      destination: NETWORKS.serverA.cidr,
-      label: NETWORKS.serverA.label,
-      nextHop: 'PORT 2',
-      active: state.router.built,
+      destination: PLACES.stationA.label,
+      service: '1',
+      mode: TRANSPORT_MODES[state.corridorA.mode].label,
+      active: state.interchange.built,
     },
   ];
 
-  if (state.branch.built) {
-    routes.push({
-      destination: NETWORKS.lanB.cidr,
-      label: NETWORKS.lanB.label,
-      nextHop: 'PORT 3',
+  if (state.corridorB.built) {
+    services.push({
+      destination: PLACES.corridorB.label,
+      service: '2',
+      mode: TRANSPORT_MODES[state.corridorB.mode].label,
       active: true,
     });
   }
 
-  if (state.secondaryServer.built) {
-    routes.push({
-      destination: NETWORKS.serverB.cidr,
-      label: NETWORKS.serverB.label,
-      nextHop: 'PORT 4',
+  if (state.stationB.built) {
+    services.push({
+      destination: PLACES.stationB.label,
+      service: '2',
+      mode: TRANSPORT_MODES[state.corridorB.mode].label,
       active: true,
     });
   }
 
-  return routes;
+  return services;
 }
 
-function simulateLegacyNetwork(state, delta) {
-  const arrival = getArrivalMbps(state);
-  const serviceCapacity = getServiceCapacityMbps(state);
-  let servedMbps = Math.min(arrival, serviceCapacity);
+function simulateLocalCorridor(state, deltaMinutes) {
+  const arrivalPpm = getLocalArrivalPpm(state);
+  const serviceCapacityPpm = getLocalServiceCapacityPpm(state);
 
-  if (state.switch.built && state.linkBuilt) {
-    const availableMb = state.switch.queueMb + arrival * delta;
-    const servedMb = Math.min(availableMb, serviceCapacity * delta);
-    const queuedBeforeDrop = Math.max(0, availableMb - servedMb);
-    const droppedMb = Math.max(0, queuedBeforeDrop - state.switch.bufferMb);
-    state.switch.queueMb = Math.min(state.switch.bufferMb, queuedBeforeDrop);
-    state.switch.currentDropMbps = droppedMb / delta;
-    state.switch.totalDroppedMb += droppedMb;
-    servedMbps = servedMb / delta;
+  let deliveredPpm = Math.min(
+    arrivalPpm,
+    serviceCapacityPpm,
+  );
+
+  if (
+    state.terminalA.built
+    && state.corridorA.lineBuilt
+  ) {
+    const availablePassengers =
+      state.terminalA.queuePassengers
+      + arrivalPpm * deltaMinutes;
+
+    const deliveredPassengers = Math.min(
+      availablePassengers,
+      serviceCapacityPpm * deltaMinutes,
+    );
+
+    const waitingBeforeAbandonment = Math.max(
+      0,
+      availablePassengers - deliveredPassengers,
+    );
+
+    const abandonedPassengers = Math.max(
+      0,
+      waitingBeforeAbandonment
+        - state.terminalA.waitingCapacityPassengers,
+    );
+
+    state.terminalA.queuePassengers = Math.min(
+      state.terminalA.waitingCapacityPassengers,
+      waitingBeforeAbandonment,
+    );
+
+    state.terminalA.currentAbandonmentPpm =
+      deltaMinutes > 0
+        ? abandonedPassengers / deltaMinutes
+        : 0;
+
+    state.terminalA.totalAbandonedPassengers +=
+      abandonedPassengers;
+
+    deliveredPpm =
+      deltaMinutes > 0
+        ? deliveredPassengers / deltaMinutes
+        : 0;
   } else {
-    state.switch.queueMb = 0;
-    state.switch.currentDropMbps = 0;
+    state.terminalA.queuePassengers = 0;
+    state.terminalA.currentAbandonmentPpm = 0;
   }
 
-  return servedMbps;
+  return deliveredPpm;
 }
 
-function simulateRoutedNetwork(state, delta) {
-  const ingress = getRouterIngressMbps(state);
+function simulateInterchange(state, deltaMinutes) {
+  const ingressPpm = getInterchangeIngressPpm(state);
 
-  const routerAvailableMb = state.router.queueMb + ingress * delta;
-  const routerServedMb = Math.min(routerAvailableMb, state.router.capacityMbps * delta);
-  const routerQueuedBeforeDrop = Math.max(0, routerAvailableMb - routerServedMb);
-  const routerDroppedMb = Math.max(0, routerQueuedBeforeDrop - state.router.bufferMb);
+  const availablePassengers =
+    state.interchange.queuePassengers
+    + ingressPpm * deltaMinutes;
 
-  state.router.queueMb = Math.min(state.router.bufferMb, routerQueuedBeforeDrop);
-  state.router.currentDropMbps = routerDroppedMb / delta;
-  state.router.totalDroppedMb += routerDroppedMb;
+  const transferredPassengers = Math.min(
+    availablePassengers,
+    state.interchange.transferCapacityPpm * deltaMinutes,
+  );
 
-  const routedMbps = routerServedMb / delta;
+  const waitingBeforeAbandonment = Math.max(
+    0,
+    availablePassengers - transferredPassengers,
+  );
+
+  const abandonedPassengers = Math.max(
+    0,
+    waitingBeforeAbandonment
+      - state.interchange.waitingCapacityPassengers,
+  );
+
+  state.interchange.queuePassengers = Math.min(
+    state.interchange.waitingCapacityPassengers,
+    waitingBeforeAbandonment,
+  );
+
+  state.interchange.currentAbandonmentPpm =
+    deltaMinutes > 0
+      ? abandonedPassengers / deltaMinutes
+      : 0;
+
+  state.interchange.totalAbandonedPassengers +=
+    abandonedPassengers;
+
+  const transferredPpm =
+    deltaMinutes > 0
+      ? transferredPassengers / deltaMinutes
+      : 0;
+
   const ratios = getDestinationRatios(state);
-  const routeBufferMb = state.router.bufferMb / 2;
 
-  const processRoute = (key, incomingMbps, capacityMbps) => {
-    const availableMb = state.router.routeQueuesMb[key] + incomingMbps * delta;
-    const servedMb = Math.min(availableMb, capacityMbps * delta);
-    const queuedBeforeDrop = Math.max(0, availableMb - servedMb);
-    const droppedMb = Math.max(0, queuedBeforeDrop - routeBufferMb);
+  const perDestinationWaitingCapacity =
+    state.interchange.waitingCapacityPassengers / 2;
 
-    state.router.routeQueuesMb[key] = Math.min(routeBufferMb, queuedBeforeDrop);
-    state.router.routeDropsMbps[key] = droppedMb / delta;
-    state.router.totalDroppedMb += droppedMb;
-    state.router.lastThroughputMbps[key] = servedMb / delta;
+  const processDestination = (
+    key,
+    incomingPpm,
+    capacityPpm,
+  ) => {
+    const destinationAvailable =
+      state.interchange.destinationQueuesPassengers[key]
+      + incomingPpm * deltaMinutes;
+
+    const deliveredPassengers = Math.min(
+      destinationAvailable,
+      capacityPpm * deltaMinutes,
+    );
+
+    const destinationWaitingBeforeAbandonment =
+      Math.max(
+        0,
+        destinationAvailable - deliveredPassengers,
+      );
+
+    const destinationAbandonedPassengers =
+      Math.max(
+        0,
+        destinationWaitingBeforeAbandonment
+          - perDestinationWaitingCapacity,
+      );
+
+    state.interchange.destinationQueuesPassengers[key] =
+      Math.min(
+        perDestinationWaitingCapacity,
+        destinationWaitingBeforeAbandonment,
+      );
+
+    state.interchange.destinationAbandonmentPpm[key] =
+      deltaMinutes > 0
+        ? destinationAbandonedPassengers / deltaMinutes
+        : 0;
+
+    state.interchange.totalAbandonedPassengers +=
+      destinationAbandonedPassengers;
+
+    state.interchange.lastDeliveredPpm[key] =
+      deltaMinutes > 0
+        ? deliveredPassengers / deltaMinutes
+        : 0;
   };
 
-  processRoute(
+  processDestination(
     'primary',
-    routedMbps * ratios.primary,
-    getPrimaryRouteCapacityMbps(state),
+    transferredPpm * ratios.primary,
+    getStationACapacityPpm(state),
   );
 
-  processRoute(
+  processDestination(
     'secondary',
-    routedMbps * ratios.secondary,
-    getSecondaryRouteCapacityMbps(state),
+    transferredPpm * ratios.secondary,
+    getStationBCapacityPpm(state),
   );
 
-  return state.router.lastThroughputMbps.primary + state.router.lastThroughputMbps.secondary;
+  return (
+    state.interchange.lastDeliveredPpm.primary
+    + state.interchange.lastDeliveredPpm.secondary
+  );
 }
 
 export function advanceSimulation(state, realDeltaSeconds) {
@@ -372,18 +689,29 @@ export function advanceSimulation(state, realDeltaSeconds) {
     !Number.isFinite(realDeltaSeconds)
     || realDeltaSeconds <= 0
     || state.simulationSpeed <= 0
-  ) return;
+  ) {
+    return;
+  }
 
-  const delta = Math.min(realDeltaSeconds, 0.25) * state.simulationSpeed;
+  const deltaSeconds =
+    Math.min(realDeltaSeconds, 0.25)
+      * state.simulationSpeed;
 
-  const servedMbps = state.router.built
-    ? simulateRoutedNetwork(state, delta)
-    : simulateLegacyNetwork(state, delta);
+  const deltaMinutes = deltaSeconds / 60;
 
-  const revenue = servedMbps * ECONOMY.revenuePerMbpsSecond * delta;
+  const deliveredPpm = state.interchange.built
+    ? simulateInterchange(state, deltaMinutes)
+    : simulateLocalCorridor(state, deltaMinutes);
 
-  state.elapsedSeconds += delta;
+  const deliveredPassengers =
+    deliveredPpm * deltaMinutes;
+
+  const revenue =
+    deliveredPassengers
+      * ECONOMY.farePerPassenger;
+
+  state.elapsedSeconds += deltaSeconds;
   state.money += revenue;
   state.stats.lifetimeRevenue += revenue;
-  state.stats.lifetimeDataMb += servedMbps * delta;
+  state.stats.lifetimePassengers += deliveredPassengers;
 }

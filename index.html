@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171717" />
-    <title>I Like Networks — Phase 3</title>
+    <title>I Like Transit — Transport T0</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main id="app">
-      <canvas id="network-canvas" aria-label="Network map"></canvas>
+      <canvas id="transport-canvas" aria-label="Passenger transport map"></canvas>
 
       <button class="menu-chip" aria-label="Menu">≡</button>
 
@@ -21,8 +21,8 @@
           <span id="income-value" class="resource-delta">+0</span>
         </div>
         <div class="resource-line">
-          <span class="data-diamond"></span>
-          <strong id="throughput-value">0 Mb/s</strong>
+          <span class="passenger-dot"></span>
+          <strong id="throughput-value">0 pax/min</strong>
         </div>
       </section>
 
@@ -38,22 +38,34 @@
 
         <section class="message-bar pixel-window">
           <div class="face-icon">⌣</div>
-          <div id="objective-text">Build your network without replacing what is already there.</div>
-          <span class="message-tag">Network ↓</span>
+          <div id="objective-text">Start your first passenger service.</div>
+          <span class="message-tag">Transport T0 ↓</span>
         </section>
       </div>
 
       <section class="legend-box pixel-window" aria-label="Legend">
-        <div class="window-title legend-title">LEGEND</div>
-        <div class="legend-row"><span class="legend-line blue"></span><span class="legend-port blue"></span></div>
-        <div class="legend-row"><span class="legend-line green"></span><span class="legend-port green"></span></div>
-        <div class="legend-row"><span class="legend-line yellow"></span><span class="legend-port yellow"></span></div>
-        <div class="legend-row"><span class="legend-line magenta dashed"></span><span class="legend-port magenta"></span></div>
+        <div class="window-title legend-title">LINES</div>
+        <div class="transit-legend-row">
+          <span class="legend-line blue"></span>
+          <span>1 BUS</span>
+        </div>
+        <div class="transit-legend-row">
+          <span class="legend-line yellow"></span>
+          <span>2 BUS</span>
+        </div>
+        <div class="transit-legend-row future">
+          <span class="legend-line green dashed"></span>
+          <span>TRAM</span>
+        </div>
+        <div class="transit-legend-row future">
+          <span class="legend-line magenta dashed"></span>
+          <span>RAIL</span>
+        </div>
         <div class="legend-separator"></div>
         <div class="legend-icons">
-          <button title="Network">⌂</button>
+          <button title="Transport map">⌂</button>
           <button title="Settings">⚙</button>
-          <button title="World">◎</button>
+          <button title="Region">◎</button>
         </div>
       </section>
 
@@ -69,15 +81,15 @@
             <button id="build-panel-close" class="panel-close" type="button" aria-label="Close build menu">×</button>
           </div>
           <div id="build-list" class="build-list"></div>
-          <div id="build-empty" class="build-empty hidden">Nothing new to build right now.</div>
+          <div id="build-empty" class="build-empty hidden">No new infrastructure available.</div>
         </section>
       </div>
 
-      <section id="inspector-panel" class="inspector-panel pixel-window hidden" aria-label="Selected network element">
+      <section id="inspector-panel" class="inspector-panel pixel-window hidden" aria-label="Selected transport element">
         <div class="panel-heading-row">
           <div>
             <div id="inspector-kicker" class="inspector-kicker">SELECTED</div>
-            <div id="inspector-title" class="inspector-title">Network element</div>
+            <div id="inspector-title" class="inspector-title">Transport element</div>
           </div>
           <button id="inspector-close" class="panel-close" type="button" aria-label="Close inspector">×</button>
         </div>
@@ -86,23 +98,23 @@
         <div id="inspector-stats" class="inspector-stats"></div>
         <div id="inspector-actions" class="inspector-actions"></div>
 
-        <section id="inspector-routes" class="inspector-routes hidden">
+        <section id="inspector-services" class="inspector-routes hidden">
           <div class="dash-divider"></div>
-          <div class="window-title">ROUTING TABLE</div>
+          <div class="window-title">SERVICE BOARD</div>
           <div class="route-head">
             <span>DESTINATION</span>
-            <span>NEXT</span>
+            <span>LINE</span>
           </div>
-          <div id="route-table-body"></div>
+          <div id="service-board-body"></div>
           <div class="route-traffic">
-            <div><span>SERVER A</span><strong id="route-a-throughput">0 Mb/s</strong></div>
-            <div><span>SERVER B</span><strong id="route-b-throughput">0 Mb/s</strong></div>
+            <div><span>CENTRAL</span><strong id="service-a-throughput">0 pax/min</strong></div>
+            <div><span>HARBOR</span><strong id="service-b-throughput">0 pax/min</strong></div>
           </div>
         </section>
       </section>
 
-      <button id="reset-button" class="reset-button">RESET NETWORK</button>
-      <div class="hint">CLICK A DEVICE TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM</div>
+      <button id="reset-button" class="reset-button">RESET CITY</button>
+      <div class="hint">CLICK A STOP / STATION TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM</div>
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 

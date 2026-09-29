@@ -1,60 +1,68 @@
 import {
   ECONOMY,
-  getAddBranchClientCost,
-  getAddClientCost,
+  PLACES,
+  TRANSPORT_MODES,
+  getAbandonmentPercent,
+  getAddStopACost,
+  getAddStopBCost,
+  getAverageWaitMinutes,
   getBottleneck,
-  getBranchDemandMbps,
+  getCorridorADemandPpm,
+  getCorridorBDemandPpm,
+  getDeliveredPassengersPpm,
   getIncomePerSecond,
-  getLatencyMs,
-  getPacketLossPercent,
-  getPrimaryDemandMbps,
-  getRouteTable,
-  getRouterIngressMbps,
-  getThroughputMbps,
+  getInterchangeIngressPpm,
+  getServiceBoard,
   getUpgradeCost,
 } from '../simulation/model.js';
 
 const compact = (value) => {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
+  }
+
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  }
+
   return value.toFixed(value < 100 ? 1 : 0);
 };
 
 const money = (value) => `$${compact(value)}`;
 
-const ACTION_META = {
-  ethernet: {
-    icon: '⇄',
-    title: 'Ethernet Link',
-    detail: 'Connect the first client to Server A',
+const BUILD_META = {
+  lineA: {
+    icon: '▰',
+    title: 'Start Bus Line 1',
+    detail: 'Northside → Central Station',
   },
-  switch: {
+  terminalA: {
     icon: '▤',
-    title: 'Install Switch',
-    detail: 'Expand LAN A without replacing existing links',
+    title: 'Build Northside Terminal',
+    detail: 'Unlock more stops and waiting capacity',
   },
-  router: {
+  interchange: {
     icon: '◆',
-    title: 'Install Router',
-    detail: 'Insert routing into the existing trunk',
+    title: 'Build Central Interchange',
+    detail: 'Connect multiple corridors and destinations',
   },
-  branch: {
-    icon: '▦',
-    title: 'Build LAN B',
-    detail: 'Add a second source network',
+  corridorB: {
+    icon: '▰',
+    title: 'Open Bus Line 2',
+    detail: 'Riverside → Central Interchange',
   },
-  server2: {
+  stationB: {
     icon: '▥',
-    title: 'Build Server B',
-    detail: 'Add a second destination network',
+    title: 'Build Harbor Station',
+    detail: 'Add a second passenger destination',
   },
 };
 
 export class Hud {
   constructor({
     onBuild,
-    onAddClient,
-    onAddBranchClient,
+    onAddStopA,
+    onAddStopB,
     onUpgrade,
     onSpeed,
     onReset,
@@ -62,8 +70,8 @@ export class Hud {
   }) {
     this.handlers = {
       onBuild,
-      onAddClient,
-      onAddBranchClient,
+      onAddStopA,
+      onAddStopB,
       onUpgrade,
     };
 
@@ -71,22 +79,22 @@ export class Hud {
     this.buildOpen = false;
     this.lastState = null;
 
-    // Interactive DOM nodes must stay stable between pointer-down and click.
-    // These keys only rebuild structure when the available controls actually change.
     this.buildStructureKey = null;
     this.inspectorStructureKey = null;
-    this.routeStructureKey = null;
+    this.serviceStructureKey = null;
 
     this.el = {
       money: document.querySelector('#money-value'),
       throughput: document.querySelector('#throughput-value'),
       income: document.querySelector('#income-value'),
       objective: document.querySelector('#objective-text'),
+
       buildButton: document.querySelector('#build-menu-button'),
       buildPanel: document.querySelector('#build-panel'),
       buildClose: document.querySelector('#build-panel-close'),
       buildList: document.querySelector('#build-list'),
       buildEmpty: document.querySelector('#build-empty'),
+
       inspector: document.querySelector('#inspector-panel'),
       inspectorClose: document.querySelector('#inspector-close'),
       inspectorKicker: document.querySelector('#inspector-kicker'),
@@ -94,10 +102,12 @@ export class Hud {
       inspectorSubtitle: document.querySelector('#inspector-subtitle'),
       inspectorStats: document.querySelector('#inspector-stats'),
       inspectorActions: document.querySelector('#inspector-actions'),
-      inspectorRoutes: document.querySelector('#inspector-routes'),
-      routeTableBody: document.querySelector('#route-table-body'),
-      routeAThroughput: document.querySelector('#route-a-throughput'),
-      routeBThroughput: document.querySelector('#route-b-throughput'),
+
+      inspectorServices: document.querySelector('#inspector-services'),
+      serviceBoardBody: document.querySelector('#service-board-body'),
+      serviceAThroughput: document.querySelector('#service-a-throughput'),
+      serviceBThroughput: document.querySelector('#service-b-throughput'),
+
       toast: document.querySelector('#toast'),
       reset: document.querySelector('#reset-button'),
     };
@@ -115,6 +125,7 @@ export class Hud {
     this.el.inspectorClose.addEventListener('click', () => {
       this.selection = null;
       this.inspectorStructureKey = null;
+      this.serviceStructureKey = null;
       onInspectorClose?.();
       this.#syncPanels();
     });
@@ -122,6 +133,7 @@ export class Hud {
     this.el.buildList.addEventListener('click', (event) => {
       const button = event.target.closest('[data-build]');
       if (!button || button.disabled) return;
+
       this.handlers.onBuild(button.dataset.build);
     });
 
@@ -131,14 +143,15 @@ export class Hud {
 
       if (button.dataset.command === 'upgrade') {
         this.handlers.onUpgrade(button.dataset.type);
-      } else if (button.dataset.command === 'add-client') {
-        this.handlers.onAddClient();
-      } else if (button.dataset.command === 'add-branch-client') {
-        this.handlers.onAddBranchClient();
+      } else if (button.dataset.command === 'add-stop-a') {
+        this.handlers.onAddStopA();
+      } else if (button.dataset.command === 'add-stop-b') {
+        this.handlers.onAddStopB();
       }
     });
 
     const pauseButton = document.querySelector('.speed-box > [data-speed="0"]');
+
     pauseButton?.addEventListener(
       'click',
       () => onSpeed(this.currentSpeed === 0 ? 1 : 0),
@@ -157,12 +170,14 @@ export class Hud {
   setSelection(selection) {
     if (this.selection !== selection) {
       this.inspectorStructureKey = null;
-      this.routeStructureKey = null;
+      this.serviceStructureKey = null;
     }
 
     this.selection = selection;
 
-    if (selection) this.buildOpen = false;
+    if (selection) {
+      this.buildOpen = false;
+    }
 
     this.#syncPanels();
   }
@@ -171,11 +186,11 @@ export class Hud {
     this.lastState = state;
     this.currentSpeed = state.simulationSpeed;
 
-    const throughput = getThroughputMbps(state);
+    const delivered = getDeliveredPassengersPpm(state);
     const income = getIncomePerSecond(state);
 
     this.el.money.textContent = compact(state.money);
-    this.el.throughput.textContent = `${throughput.toFixed(0)} Mb/s`;
+    this.el.throughput.textContent = `${delivered.toFixed(0)} pax/min`;
     this.el.income.textContent = `+${compact(income)}/s`;
 
     this.#renderBuildMenu(state);
@@ -191,6 +206,7 @@ export class Hud {
     });
 
     const pauseButton = document.querySelector('.speed-box > [data-speed="0"]');
+
     if (pauseButton) {
       pauseButton.textContent = state.simulationSpeed === 0 ? '▶' : 'Ⅱ';
     }
@@ -203,29 +219,41 @@ export class Hud {
   }
 
   #getBuildOptions(state) {
+    if (!state.corridorA.lineBuilt) {
+      return [{
+        key: 'lineA',
+        cost: ECONOMY.firstLineBuildCost,
+      }];
+    }
+
+    if (!state.terminalA.built) {
+      return [{
+        key: 'terminalA',
+        cost: ECONOMY.terminalBuildCost,
+      }];
+    }
+
+    if (!state.interchange.built) {
+      return [{
+        key: 'interchange',
+        cost: ECONOMY.interchangeBuildCost,
+      }];
+    }
+
     const options = [];
 
-    if (!state.linkBuilt) {
-      options.push({ key: 'ethernet', cost: ECONOMY.ethernetBuildCost });
-      return options;
+    if (!state.corridorB.built) {
+      options.push({
+        key: 'corridorB',
+        cost: ECONOMY.corridorBBuildCost,
+      });
     }
 
-    if (!state.switch.built) {
-      options.push({ key: 'switch', cost: ECONOMY.switchBuildCost });
-      return options;
-    }
-
-    if (!state.router.built) {
-      options.push({ key: 'router', cost: ECONOMY.routerBuildCost });
-      return options;
-    }
-
-    if (!state.branch.built) {
-      options.push({ key: 'branch', cost: ECONOMY.branchNetworkCost });
-    }
-
-    if (!state.secondaryServer.built) {
-      options.push({ key: 'server2', cost: ECONOMY.secondaryServerCost });
+    if (!state.stationB.built) {
+      options.push({
+        key: 'stationB',
+        cost: ECONOMY.stationBBuildCost,
+      });
     }
 
     return options;
@@ -240,7 +268,7 @@ export class Hud {
       this.el.buildList.replaceChildren();
 
       for (const option of options) {
-        const meta = ACTION_META[option.key];
+        const meta = BUILD_META[option.key];
         const button = document.createElement('button');
 
         button.type = 'button';
@@ -275,13 +303,8 @@ export class Hud {
 
     this.el.buildEmpty.classList.toggle('hidden', options.length > 0);
 
-    const available = options.filter(
-      (option) => state.money >= option.cost,
-    ).length;
-
-    const suffix = options.length > 0
-      ? ` ${available}/${options.length}`
-      : '';
+    const available = options.filter((option) => state.money >= option.cost).length;
+    const suffix = options.length > 0 ? ` ${available}/${options.length}` : '';
 
     this.el.buildButton.querySelector('span:last-child').textContent =
       `BUILD${suffix}`;
@@ -295,12 +318,15 @@ export class Hud {
     if (!view) {
       this.selection = null;
       this.inspectorStructureKey = null;
-      this.routeStructureKey = null;
+      this.serviceStructureKey = null;
       this.#syncPanels();
       return;
     }
 
-    const showRoutes = this.selection === 'router' && state.router.built;
+    const showServices =
+      this.selection === 'interchange'
+      && state.interchange.built;
+
     const structureKey = JSON.stringify({
       selection: this.selection,
       stats: view.stats.map((stat) => stat.label),
@@ -310,7 +336,7 @@ export class Hud {
         action.title,
         action.detail,
       ]),
-      showRoutes,
+      showServices,
     });
 
     if (structureKey !== this.inspectorStructureKey) {
@@ -349,10 +375,10 @@ export class Hud {
       if (price) price.textContent = action.costLabel;
     });
 
-    this.el.inspectorRoutes.classList.toggle('hidden', !showRoutes);
+    this.el.inspectorServices.classList.toggle('hidden', !showServices);
 
-    if (showRoutes) {
-      this.#renderRouteTable(state);
+    if (showServices) {
+      this.#renderServiceBoard(state);
     }
   }
 
@@ -380,7 +406,9 @@ export class Hud {
       button.className = 'inspector-action';
       button.dataset.command = action.command;
 
-      if (action.type) button.dataset.type = action.type;
+      if (action.type) {
+        button.dataset.type = action.type;
+      }
 
       const copy = document.createElement('span');
       copy.className = 'inspector-action-copy';
@@ -403,104 +431,108 @@ export class Hud {
 
   #getInspectorView(state, selection) {
     const bottleneck = getBottleneck(state);
-    const loss = getPacketLossPercent(state);
+    const abandonment = getAbandonmentPercent(state);
+    const averageWait = getAverageWaitMinutes(state);
 
-    if (selection === 'lanA') {
-      const addCost = getAddClientCost(state);
+    if (selection === 'corridorA') {
+      const addStopCost = getAddStopACost(state);
 
       return {
-        kicker: 'NETWORK',
-        title: 'LAN A',
-        subtitle: '10.0.1.0/24',
+        kicker: 'LINE',
+        title: 'Bus Line 1',
+        subtitle: `${PLACES.corridorA.label} → ${PLACES.stationA.label}`,
         stats: [
           {
-            label: 'CLIENTS',
-            value: `${state.client.count} / ${ECONOMY.maxClients}`,
+            label: 'MODE',
+            value: TRANSPORT_MODES[state.corridorA.mode].label.toUpperCase(),
+          },
+          {
+            label: 'STOPS',
+            value: `${state.corridorA.stopCount} / ${ECONOMY.maxStopsA}`,
           },
           {
             label: 'DEMAND',
-            value: `${getPrimaryDemandMbps(state).toFixed(0)} Mb/s`,
+            value: `${getCorridorADemandPpm(state).toFixed(0)} pax/min`,
           },
           {
-            label: 'PER CLIENT',
-            value: `${state.client.trafficMbps} Mb/s`,
-          },
-          {
-            label: 'UPLINK',
-            value: `${state.link.capacityMbps} Mb/s`,
+            label: 'LINE CAPACITY',
+            value: `${state.corridorA.lineCapacityPpm} pax/min`,
           },
         ],
         actions: [
           {
-            command: 'add-client',
-            title: 'Add client',
-            detail: 'Connect another endpoint to LAN A',
-            costLabel: state.client.count >= ECONOMY.maxClients
-              ? 'MAX'
-              : money(addCost),
+            command: 'add-stop-a',
+            title: 'Add stop',
+            detail: 'Add another Northside stop to Line 1',
+            costLabel:
+              state.corridorA.stopCount >= ECONOMY.maxStopsA
+                ? 'MAX'
+                : money(addStopCost),
             disabled:
-              !state.switch.built
-              || state.client.count >= ECONOMY.maxClients
-              || state.money < addCost,
+              !state.terminalA.built
+              || state.corridorA.stopCount >= ECONOMY.maxStopsA
+              || state.money < addStopCost,
           },
           this.#upgradeAction(
             state,
-            'client',
-            'Client NIC',
-            '+5 Mb/s demand per client',
+            'catchmentA',
+            'Expand catchment',
+            '+5 pax/min demand per stop',
           ),
           this.#upgradeAction(
             state,
-            'link',
-            'LAN A uplink',
-            '+20 Mb/s capacity',
+            'lineA',
+            'Add bus / frequency',
+            '+20 pax/min line capacity',
           ),
         ],
       };
     }
 
-    if (selection === 'switch') {
+    if (selection === 'terminalA' && state.terminalA.built) {
       return {
-        kicker: 'DEVICE',
-        title: 'LAN A Switch',
-        subtitle: 'Local switching fabric',
+        kicker: 'TERMINAL',
+        title: 'Northside Terminal',
+        subtitle: 'Local passenger collection point',
         stats: [
           {
-            label: 'FABRIC',
-            value: `${state.switch.capacityMbps} Mb/s`,
+            label: 'PLATFORM',
+            value: `${state.terminalA.platformCapacityPpm} pax/min`,
           },
           {
-            label: 'BUFFER',
-            value: `${state.switch.bufferMb} Mb`,
+            label: 'WAITING',
+            value: `${state.terminalA.queuePassengers.toFixed(0)} pax`,
           },
           {
-            label: 'QUEUE',
-            value: `${state.switch.queueMb.toFixed(0)} Mb`,
+            label: 'WAITING AREA',
+            value: `${state.terminalA.waitingCapacityPassengers} pax`,
           },
           {
             label: 'STATUS',
-            value: state.router.built
-              ? 'LOCAL'
-              : bottleneck === 'switch'
+            value:
+              bottleneck === 'terminal-a'
                 ? 'BOTTLENECK'
-                : 'ONLINE',
-            className: bottleneck === 'switch' ? 'metric-warning' : '',
+                : 'OPEN',
+            className:
+              bottleneck === 'terminal-a'
+                ? 'metric-warning'
+                : '',
           },
         ],
         actions: [
           this.#upgradeAction(
             state,
-            'switch',
-            'Switch fabric',
-            '+25 Mb/s switching',
+            'terminalA',
+            'Platform throughput',
+            '+25 pax/min terminal capacity',
           ),
-          ...(!state.router.built
+          ...(!state.interchange.built
             ? [
               this.#upgradeAction(
                 state,
-                'buffer',
-                'Switch buffer',
-                '+40 Mb queue',
+                'waitingArea',
+                'Expand waiting area',
+                '+40 passenger waiting capacity',
               ),
             ]
             : []),
@@ -508,187 +540,177 @@ export class Hud {
       };
     }
 
-    if (selection === 'router' && state.router.built) {
-      const totalQueue =
-        state.router.queueMb
-        + state.router.routeQueuesMb.primary
-        + state.router.routeQueuesMb.secondary;
+    if (selection === 'interchange' && state.interchange.built) {
+      const totalWaiting =
+        state.interchange.queuePassengers
+        + state.interchange.destinationQueuesPassengers.primary
+        + state.interchange.destinationQueuesPassengers.secondary;
 
       return {
-        kicker: 'DEVICE',
-        title: 'Core Router',
-        subtitle: 'Routes traffic between subnets',
+        kicker: 'HUB',
+        title: 'Central Interchange',
+        subtitle: 'Transfers passengers between services',
         stats: [
           {
-            label: 'CORE',
-            value: `${state.router.capacityMbps} Mb/s`,
+            label: 'TRANSFER CAPACITY',
+            value: `${state.interchange.transferCapacityPpm} pax/min`,
           },
           {
             label: 'INGRESS',
-            value: `${getRouterIngressMbps(state).toFixed(0)} Mb/s`,
+            value: `${getInterchangeIngressPpm(state).toFixed(0)} pax/min`,
           },
           {
-            label: 'QUEUE',
-            value: `${totalQueue.toFixed(0)} Mb`,
+            label: 'WAITING',
+            value: `${totalWaiting.toFixed(0)} pax`,
           },
           {
-            label: 'LATENCY',
-            value: `${getLatencyMs(state).toFixed(0)} ms`,
+            label: 'AVG WAIT',
+            value: `${averageWait.toFixed(1)} min`,
+            className: averageWait > 5 ? 'metric-warning' : '',
           },
           {
-            label: 'LOSS',
-            value: `${loss.toFixed(loss < 1 ? 1 : 0)}%`,
-            className: loss > 0 ? 'metric-danger' : '',
+            label: 'LEFT QUEUE',
+            value: `${abandonment.toFixed(abandonment < 1 ? 1 : 0)}%`,
+            className: abandonment > 0 ? 'metric-danger' : '',
           },
           {
             label: 'BOTTLENECK',
-            value: bottleneck === 'none'
-              ? 'NONE'
-              : bottleneck.toUpperCase(),
-            className: bottleneck === 'router'
-              ? 'metric-warning'
-              : '',
+            value: bottleneck === 'none' ? 'NONE' : bottleneck.toUpperCase(),
+            className: bottleneck === 'interchange' ? 'metric-warning' : '',
           },
         ],
         actions: [
           this.#upgradeAction(
             state,
-            'router',
-            'Router core',
-            '+40 Mb/s routed capacity',
+            'interchange',
+            'Expand interchange',
+            '+40 pax/min transfer capacity',
           ),
         ],
       };
     }
 
-    if (selection === 'serverA') {
-      const serverIsBottleneck =
-        bottleneck === 'server-a' || bottleneck === 'server';
+    if (selection === 'stationA') {
+      const stationIsBottleneck = bottleneck === 'station-a';
 
       return {
         kicker: 'DESTINATION',
-        title: 'Server A',
-        subtitle: '10.0.10.0/24',
+        title: PLACES.stationA.label,
+        subtitle: 'Primary passenger destination',
         stats: [
           {
             label: 'CAPACITY',
-            value: `${state.server.capacityMbps} Mb/s`,
+            value: `${state.stationA.capacityPpm} pax/min`,
           },
           {
-            label: 'TRAFFIC',
-            value: state.router.built
-              ? `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s`
-              : `${getThroughputMbps(state).toFixed(0)} Mb/s`,
+            label: 'ARRIVALS',
+            value: state.interchange.built
+              ? `${state.interchange.lastDeliveredPpm.primary.toFixed(0)} pax/min`
+              : `${getDeliveredPassengersPpm(state).toFixed(0)} pax/min`,
           },
           {
-            label: 'ROUTE QUEUE',
-            value: state.router.built
-              ? `${state.router.routeQueuesMb.primary.toFixed(0)} Mb`
+            label: 'WAITING TO ARRIVE',
+            value: state.interchange.built
+              ? `${state.interchange.destinationQueuesPassengers.primary.toFixed(0)} pax`
               : '—',
           },
           {
             label: 'STATUS',
-            value: serverIsBottleneck ? 'BOTTLENECK' : 'ONLINE',
-            className: serverIsBottleneck ? 'metric-warning' : '',
+            value: stationIsBottleneck ? 'BOTTLENECK' : 'OPEN',
+            className: stationIsBottleneck ? 'metric-warning' : '',
           },
         ],
         actions: [
           this.#upgradeAction(
             state,
-            'server',
-            'Server A capacity',
-            '+15 Mb/s service capacity',
+            'stationA',
+            'Expand platforms',
+            '+15 pax/min station capacity',
           ),
         ],
       };
     }
 
-    if (selection === 'lanB' && state.branch.built) {
-      const addCost = getAddBranchClientCost(state);
+    if (selection === 'corridorB' && state.corridorB.built) {
+      const addStopCost = getAddStopBCost(state);
 
       return {
-        kicker: 'NETWORK',
-        title: 'LAN B',
-        subtitle: '10.0.2.0/24',
+        kicker: 'LINE',
+        title: 'Bus Line 2',
+        subtitle: `${PLACES.corridorB.label} → Central Interchange`,
         stats: [
           {
-            label: 'CLIENTS',
-            value: `${state.branch.clientCount} / ${ECONOMY.maxBranchClients}`,
+            label: 'MODE',
+            value: TRANSPORT_MODES[state.corridorB.mode].label.toUpperCase(),
+          },
+          {
+            label: 'STOPS',
+            value: `${state.corridorB.stopCount} / ${ECONOMY.maxStopsB}`,
           },
           {
             label: 'DEMAND',
-            value: `${getBranchDemandMbps(state).toFixed(0)} Mb/s`,
+            value: `${getCorridorBDemandPpm(state).toFixed(0)} pax/min`,
           },
           {
-            label: 'PER CLIENT',
-            value: `${state.branch.clientTrafficMbps} Mb/s`,
-          },
-          {
-            label: 'UPLINK',
-            value: `${state.branch.linkCapacityMbps} Mb/s`,
+            label: 'LINE CAPACITY',
+            value: `${state.corridorB.lineCapacityPpm} pax/min`,
           },
         ],
         actions: [
           {
-            command: 'add-branch-client',
-            title: 'Add client',
-            detail: 'Connect another endpoint to LAN B',
+            command: 'add-stop-b',
+            title: 'Add stop',
+            detail: 'Add another Riverside stop to Line 2',
             costLabel:
-              state.branch.clientCount >= ECONOMY.maxBranchClients
+              state.corridorB.stopCount >= ECONOMY.maxStopsB
                 ? 'MAX'
-                : money(addCost),
+                : money(addStopCost),
             disabled:
-              state.branch.clientCount >= ECONOMY.maxBranchClients
-              || state.money < addCost,
+              state.corridorB.stopCount >= ECONOMY.maxStopsB
+              || state.money < addStopCost,
           },
           this.#upgradeAction(
             state,
-            'branch',
-            'LAN B uplink',
-            '+20 Mb/s capacity',
+            'lineB',
+            'Add bus / frequency',
+            '+20 pax/min line capacity',
           ),
         ],
       };
     }
 
-    if (selection === 'serverB' && state.secondaryServer.built) {
+    if (selection === 'stationB' && state.stationB.built) {
+      const stationIsBottleneck = bottleneck === 'station-b';
+
       return {
         kicker: 'DESTINATION',
-        title: 'Server B',
-        subtitle: '10.0.20.0/24',
+        title: PLACES.stationB.label,
+        subtitle: 'Second passenger destination',
         stats: [
           {
             label: 'CAPACITY',
-            value: `${state.secondaryServer.capacityMbps} Mb/s`,
+            value: `${state.stationB.capacityPpm} pax/min`,
           },
           {
-            label: 'UPLINK',
-            value: `${state.secondaryServer.linkCapacityMbps} Mb/s`,
+            label: 'ARRIVALS',
+            value: `${state.interchange.lastDeliveredPpm.secondary.toFixed(0)} pax/min`,
           },
           {
-            label: 'TRAFFIC',
-            value: `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s`,
-          },
-          {
-            label: 'ROUTE QUEUE',
-            value: `${state.router.routeQueuesMb.secondary.toFixed(0)} Mb`,
+            label: 'WAITING TO ARRIVE',
+            value: `${state.interchange.destinationQueuesPassengers.secondary.toFixed(0)} pax`,
           },
           {
             label: 'STATUS',
-            value: bottleneck === 'server-b'
-              ? 'BOTTLENECK'
-              : 'ONLINE',
-            className: bottleneck === 'server-b'
-              ? 'metric-warning'
-              : '',
+            value: stationIsBottleneck ? 'BOTTLENECK' : 'OPEN',
+            className: stationIsBottleneck ? 'metric-warning' : '',
           },
         ],
         actions: [
           this.#upgradeAction(
             state,
-            'server2',
-            'Server B capacity',
-            '+20 Mb/s service + uplink',
+            'stationB',
+            'Expand platforms',
+            '+20 pax/min station capacity',
           ),
         ],
       };
@@ -710,80 +732,81 @@ export class Hud {
     };
   }
 
-  #renderRouteTable(state) {
-    const routes = getRouteTable(state);
-    const structureKey = routes
-      .map((route) => `${route.destination}:${route.nextHop}`)
+  #renderServiceBoard(state) {
+    const services = getServiceBoard(state);
+
+    const structureKey = services
+      .map((service) => `${service.destination}:${service.service}:${service.mode}`)
       .join('|');
 
-    if (structureKey !== this.routeStructureKey) {
-      this.routeStructureKey = structureKey;
-      this.el.routeTableBody.replaceChildren();
+    if (structureKey !== this.serviceStructureKey) {
+      this.serviceStructureKey = structureKey;
+      this.el.serviceBoardBody.replaceChildren();
 
-      for (const route of routes) {
+      for (const service of services) {
         const row = document.createElement('div');
         row.className = 'route-row';
 
         const destination = document.createElement('span');
-        destination.textContent = route.destination;
+        destination.textContent = service.destination;
 
-        const nextHop = document.createElement('span');
-        nextHop.textContent = route.nextHop;
+        const line = document.createElement('span');
+        line.textContent = `${service.service} ${service.mode.toUpperCase()}`;
 
-        row.append(destination, nextHop);
-        this.el.routeTableBody.append(row);
+        row.append(destination, line);
+        this.el.serviceBoardBody.append(row);
       }
     }
 
-    this.el.routeAThroughput.textContent =
-      `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s`;
+    this.el.serviceAThroughput.textContent =
+      `${state.interchange.lastDeliveredPpm.primary.toFixed(0)} pax/min`;
 
-    this.el.routeBThroughput.textContent = state.secondaryServer.built
-      ? `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s`
+    this.el.serviceBThroughput.textContent = state.stationB.built
+      ? `${state.interchange.lastDeliveredPpm.secondary.toFixed(0)} pax/min`
       : '—';
   }
 
   #renderObjective(state) {
     const bottleneck = getBottleneck(state);
 
-    if (!state.linkBuilt) {
+    if (!state.corridorA.lineBuilt) {
       this.el.objective.textContent =
-        'Open BUILD and connect the first Ethernet link.';
+        'Open BUILD and start Bus Line 1.';
       return;
     }
 
-    if (!state.switch.built) {
+    if (!state.terminalA.built) {
       this.el.objective.textContent =
-        'Add a switch. Existing links will stay where they are.';
+        'Build Northside Terminal to add more stops.';
       return;
     }
 
-    if (!state.router.built) {
+    if (!state.interchange.built) {
       this.el.objective.textContent =
-        'Insert a router into the existing trunk.';
+        'Build Central Interchange. Existing Line 1 stays in place.';
       return;
     }
 
-    if (!state.branch.built || !state.secondaryServer.built) {
+    if (!state.corridorB.built || !state.stationB.built) {
       this.el.objective.textContent =
-        'Expand the existing map with another network or server.';
+        'Expand the city with another line or destination.';
       return;
     }
 
     if (bottleneck !== 'none') {
       this.el.objective.textContent =
-        `Bottleneck: ${bottleneck}. Click that element to upgrade it.`;
+        `Passenger bottleneck: ${bottleneck}. Click that element to improve it.`;
       return;
     }
 
     if (this.selection) {
       this.el.objective.textContent =
-        'Selected element shows only its own upgrades.';
+        'Selected element shows only its own transport upgrades.';
       return;
     }
 
     this.el.objective.textContent =
-      'Network stable. Click any device or LAN to inspect it.';
+      'Services running normally. Click a stop, hub or station.';
   }
 
   toast(message) {

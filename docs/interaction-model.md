@@ -1,66 +1,66 @@
-# Interaction Model — Additive Map and Contextual Upgrades
+# Interaction Model — Additive Transport Map and Contextual Upgrades
 
 ## Problem
 
 A single global control panel does not scale with the game.
 
-As more devices, networks and upgrades are unlocked, a global list grows until it obscures the map. It also makes the network feel like a menu-driven game instead of a spatial system.
+As more lines, stops, stations and transport modes are unlocked, a global list would grow until it obscures the map. It would also make the game feel menu-driven instead of spatial.
 
-The map must also remain spatially stable. Buying a router or another network must not reorganize previously built infrastructure.
+The transport map must remain stable. Building a new interchange, line or destination must not arbitrarily relocate infrastructure the player has already built.
 
 ## Rules
 
-### 1. Existing infrastructure never moves because of an unlock
+### 1. Existing infrastructure does not move because of an unlock
 
-Nodes receive stable world coordinates.
+Stops, stations and hubs receive stable world coordinates.
 
-A new device is inserted into or attached to the existing topology without relocating old devices.
+A newly unlocked transport element is inserted into or attached to the existing layout without moving older elements.
 
 Example:
 
 ```text
-Before router:
+Before interchange:
 
-LAN A ---- [future router position] ---- Server A
+Stop ---- [future interchange position] ---- Central Station
 
-After router:
+After interchange:
 
-LAN A ----------- ROUTER --------------- Server A
+Stop -------- Central Interchange ---------- Central Station
 ```
 
-The line geometry remains the same.
+The existing corridor geometry remains recognizable.
 
 ### 2. Expansion is additive
 
-New networks create new branches.
+New services create new branches.
 
 ```text
-                         Server A
-                            /
-LAN A ---- Switch ---- Router
-                            \
-                             Server B
-                   /
-              LAN B
+                           Central Station
+                                 /
+Northside ---- Central Interchange
+                                 \
+                                  Harbor Station
+                    /
+               Riverside
 ```
 
-LAN B and Server B are added without rebuilding LAN A or Server A.
+Riverside and Harbor Station are added without rebuilding Northside or Central Station.
 
-### 3. BUILD only contains new infrastructure
+### 3. BUILD contains only genuinely new infrastructure
 
-The BUILD menu lists only infrastructure that has not yet been created.
+The BUILD menu lists infrastructure that has not yet been created.
 
 Once an item is built, it disappears from BUILD.
 
 Examples:
 
-- Ethernet
-- Switch
-- Router
-- LAN B
-- Server B
+- Bus Line 1,
+- Northside Terminal,
+- Central Interchange,
+- Bus Line 2,
+- Harbor Station.
 
-Client expansion and upgrades do not belong in the global BUILD list.
+Stop expansion and capacity upgrades do not belong in the global BUILD list.
 
 ### 4. Upgrades are contextual
 
@@ -68,50 +68,65 @@ Clicking a map element opens its Inspector.
 
 Examples:
 
-#### LAN A
-- add client,
-- Client NIC,
-- LAN A uplink.
+#### Bus Line 1
+- add stop,
+- expand passenger catchment,
+- add buses / increase frequency.
 
-#### Switch
-- switch fabric,
-- switch buffer while that buffer is part of the active simulation.
+#### Northside Terminal
+- platform throughput,
+- waiting capacity.
 
-#### Router
-- router core,
-- routing table,
-- router diagnostics.
+#### Central Interchange
+- transfer capacity,
+- service board,
+- passenger waiting diagnostics.
 
-#### Server A
-- Server A capacity.
+#### Central Station
+- platform / arrival capacity.
 
-#### LAN B
-- add client,
-- LAN B uplink.
+#### Bus Line 2
+- add stop,
+- add buses / increase frequency.
 
-#### Server B
-- Server B capacity.
+#### Harbor Station
+- destination capacity.
 
 Only relevant controls are shown.
 
 ### 5. The map is the primary interface
 
-The player should first identify the element spatially and then click it.
+The player should identify a problem spatially first and click the relevant transport element second.
 
 The Inspector supplements the map instead of replacing it.
 
 ### 6. Selection is persistent but lightweight
 
-The selected device receives a small dashed outline.
+The selected stop, line, station or hub receives a small dashed outline.
 
-Closing the Inspector removes that selection.
+Closing the Inspector removes the selection.
 
 ### 7. Future phases must follow the same model
 
-Contracts, failures, data centers and later systems should not reintroduce one giant global upgrade menu.
+Contracts, failures, timetables, fleets, multimodal transfers and later systems must not reintroduce one giant global upgrade menu.
 
 New functionality should be attached to:
 
 - a selected map object,
 - a compact dedicated overlay,
-- or the BUILD menu when it represents genuinely new infrastructure.
+- or BUILD when it represents genuinely new infrastructure.
+
+### 8. New transport modes are additive
+
+Introducing tram, metro, rail, ferry or air transport should add new infrastructure or parallel services.
+
+A bus line must not disappear simply because a higher-capacity transport mode becomes available.
+
+Example:
+
+```text
+A ───── B   Bus Line
+A ═════ B   Metro Line
+```
+
+Both services can coexist and compete for passenger demand.
