@@ -114,6 +114,10 @@ export class NetworkRenderer {
     this.resize();
   }
 
+  setSelection(selection) {
+    this.selected = selection;
+  }
+
   resize() {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = Math.max(1, Math.floor(rect.width * this.dpr));
