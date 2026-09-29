@@ -26,5 +26,5 @@ http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': mime[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
   createReadStream(file).pipe(res);
 }).listen(port, '127.0.0.1', () => {
-  console.log(`I Like Networks running at http://127.0.0.1:${port}`);
+  console.log(`I Like Transit running at http://127.0.0.1:${port}`);
 });
