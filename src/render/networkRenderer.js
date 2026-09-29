@@ -9,6 +9,20 @@ import {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+const WORLD = Object.freeze({
+  switch: { x: -145, y: 0, w: 108, h: 80 },
+  router: { x: 70, y: 0, w: 116, h: 116 },
+  serverA: { x: 365, y: -125, w: 122, h: 122 },
+  lanB: { x: -150, y: 235, w: 126, h: 102 },
+  serverB: { x: 365, y: 205, w: 122, h: 122 },
+  clients: [
+    { x: -425, y: -195, w: 86, h: 76 },
+    { x: -425, y: -65, w: 86, h: 76 },
+    { x: -425, y: 65, w: 86, h: 76 },
+    { x: -425, y: 195, w: 86, h: 76 },
+  ],
+});
+
 function routeMetrics(points) {
   const segments = [];
   let total = 0;
@@ -19,6 +33,7 @@ function routeMetrics(points) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const length = Math.hypot(dx, dy);
+
     segments.push({ a, b, dx, dy, length, start: total });
     total += length;
   }
@@ -44,78 +59,56 @@ function pointOnRoute(metrics, distance) {
   };
 }
 
-const PHASE2 = {
-  switch: { x: 0, y: 0 },
-  server: { x: 345, y: 0 },
-  clients: [
-    { x: -355, y: -210 },
-    { x: -355, y: -70 },
-    { x: -355, y: 70 },
-    { x: -355, y: 210 },
-  ],
-};
+function clientRoute(index) {
+  const client = WORLD.clients[index];
 
-const ROUTED = {
-  lanA: { x: -300, y: -145 },
-  lanB: { x: -300, y: 170 },
-  router: { x: 0, y: 10 },
-  serverA: { x: 350, y: -145 },
-  serverB: { x: 350, y: 170 },
-};
-
-const ROUTES = {
-  lanAToRouter: routeMetrics([
-    { x: ROUTED.lanA.x + 58, y: ROUTED.lanA.y },
-    { x: -150, y: ROUTED.lanA.y },
-    { x: -90, y: -75 },
-    { x: ROUTED.router.x - 62, y: ROUTED.router.y },
-  ]),
-  lanBToRouter: routeMetrics([
-    { x: ROUTED.lanB.x + 58, y: ROUTED.lanB.y },
-    { x: -150, y: ROUTED.lanB.y },
-    { x: -90, y: 85 },
-    { x: ROUTED.router.x - 62, y: ROUTED.router.y },
-  ]),
-  routerToA: routeMetrics([
-    { x: ROUTED.router.x + 62, y: ROUTED.router.y },
-    { x: 145, y: ROUTED.router.y },
-    { x: 225, y: -70 },
-    { x: ROUTED.serverA.x - 64, y: ROUTED.serverA.y },
-  ]),
-  routerToB: routeMetrics([
-    { x: ROUTED.router.x + 62, y: ROUTED.router.y + 8 },
-    { x: 145, y: ROUTED.router.y + 8 },
-    { x: 225, y: 105 },
-    { x: ROUTED.serverB.x - 64, y: ROUTED.serverB.y },
-  ]),
-};
-
-function phase2BranchRoute(position) {
   return routeMetrics([
-    { x: position.x + 45, y: position.y },
-    { x: -210, y: position.y },
-    { x: -135, y: position.y * 0.35 },
-    { x: PHASE2.switch.x - 55, y: 0 },
+    { x: client.x + client.w / 2, y: client.y },
+    { x: -285, y: client.y },
+    { x: -220, y: client.y * 0.42 },
+    { x: WORLD.switch.x - WORLD.switch.w / 2, y: 0 },
   ]);
 }
 
-const PHASE2_TRUNK = routeMetrics([
-  { x: PHASE2.switch.x + 54, y: 0 },
-  { x: 175, y: 0 },
-  { x: 225, y: -25 },
-  { x: PHASE2.server.x - 63, y: -25 },
-  { x: PHASE2.server.x - 63, y: 0 },
+const SWITCH_TO_ROUTER = routeMetrics([
+  { x: WORLD.switch.x + WORLD.switch.w / 2, y: 0 },
+  { x: WORLD.router.x - WORLD.router.w / 2, y: 0 },
+]);
+
+const ROUTER_TO_SERVER_A = routeMetrics([
+  { x: WORLD.router.x + WORLD.router.w / 2, y: 0 },
+  { x: 200, y: 0 },
+  { x: 260, y: -60 },
+  { x: WORLD.serverA.x - WORLD.serverA.w / 2, y: WORLD.serverA.y },
+]);
+
+const LAN_B_TO_ROUTER = routeMetrics([
+  { x: WORLD.lanB.x + WORLD.lanB.w / 2, y: WORLD.lanB.y },
+  { x: -20, y: WORLD.lanB.y },
+  { x: 15, y: 125 },
+  { x: WORLD.router.x, y: WORLD.router.y + WORLD.router.h / 2 },
+]);
+
+const ROUTER_TO_SERVER_B = routeMetrics([
+  { x: WORLD.router.x + WORLD.router.w / 2, y: 12 },
+  { x: 195, y: 12 },
+  { x: 255, y: 105 },
+  { x: WORLD.serverB.x - WORLD.serverB.w / 2, y: WORLD.serverB.y },
 ]);
 
 export class NetworkRenderer {
-  constructor(canvas) {
+  constructor(canvas, { onSelectionChanged } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.camera = { x: 0, y: 0, zoom: 1 };
-    this.pointer = { dragging: false, x: 0, y: 0 };
+    this.pointer = { dragging: false, x: 0, y: 0, startX: 0, startY: 0 };
     this.time = 0;
+    this.selected = null;
+    this.hitTargets = [];
+    this.onSelectionChanged = onSelectionChanged;
+    this.lastState = null;
 
     this.#bindInput();
     this.resize();
@@ -133,6 +126,8 @@ export class NetworkRenderer {
       this.pointer.dragging = true;
       this.pointer.x = event.clientX;
       this.pointer.y = event.clientY;
+      this.pointer.startX = event.clientX;
+      this.pointer.startY = event.clientY;
       this.canvas.setPointerCapture(event.pointerId);
     });
 
@@ -145,8 +140,17 @@ export class NetworkRenderer {
       this.pointer.y = event.clientY;
     });
 
-    this.canvas.addEventListener('pointerup', () => {
+    this.canvas.addEventListener('pointerup', (event) => {
+      const moved = Math.hypot(
+        event.clientX - this.pointer.startX,
+        event.clientY - this.pointer.startY,
+      );
+
       this.pointer.dragging = false;
+
+      if (moved < 5) {
+        this.#selectAt(event.clientX, event.clientY);
+      }
     });
 
     this.canvas.addEventListener('wheel', (event) => {
@@ -161,8 +165,35 @@ export class NetworkRenderer {
     window.addEventListener('resize', () => this.resize());
   }
 
+  #screenToWorld(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+
+    return {
+      x: (clientX - rect.left - rect.width / 2) / this.camera.zoom - this.camera.x,
+      y: (clientY - rect.top - rect.height / 2) / this.camera.zoom - this.camera.y,
+    };
+  }
+
+  #selectAt(clientX, clientY) {
+    const point = this.#screenToWorld(clientX, clientY);
+
+    const target = [...this.hitTargets]
+      .reverse()
+      .find(({ rect }) => (
+        point.x >= rect.x - rect.w / 2
+        && point.x <= rect.x + rect.w / 2
+        && point.y >= rect.y - rect.h / 2
+        && point.y <= rect.y + rect.h / 2
+      ));
+
+    this.selected = target?.id ?? null;
+    this.onSelectionChanged?.(this.selected);
+  }
+
   render(state, deltaSeconds) {
+    this.lastState = state;
     this.time += deltaSeconds;
+    this.hitTargets = [];
 
     const ctx = this.ctx;
     const width = this.canvas.width / this.dpr;
@@ -179,11 +210,7 @@ export class NetworkRenderer {
     ctx.scale(this.camera.zoom, this.camera.zoom);
     ctx.translate(this.camera.x, this.camera.y);
 
-    if (state.router.built) {
-      this.#drawRoutedNetwork(ctx, state);
-    } else {
-      this.#drawLegacyNetwork(ctx, state);
-    }
+    this.#drawStableNetwork(ctx, state);
 
     ctx.restore();
   }
@@ -208,187 +235,146 @@ export class NetworkRenderer {
     }
   }
 
-  #drawLegacyNetwork(ctx, state) {
-    if (!state.switch.built) {
-      const client = { x: -300, y: 120 };
-      const server = { x: 300, y: -110 };
-      const direct = routeMetrics([
-        { x: client.x + 45, y: client.y },
-        { x: -100, y: client.y },
-        { x: -60, y: 80 },
-        { x: -60, y: server.y },
-        { x: server.x - 62, y: server.y },
-      ]);
-
-      if (state.linkBuilt) {
-        this.#drawRoute(ctx, direct, '#0797ec', getThroughputMbps(state));
-      } else {
-        this.#drawGhostRoute(ctx, direct);
-      }
-
-      this.#drawClient(ctx, client.x, client.y, 'CLIENT', state.client.trafficMbps);
-      this.#drawServer(ctx, server.x, server.y, 'SERVER', state.server.capacityMbps, '#10c927');
-      return;
-    }
+  #drawStableNetwork(ctx, state) {
+    const primaryDemand = getPrimaryDemandMbps(state);
+    const primaryFlow = state.router.built
+      ? Math.min(primaryDemand, state.link.capacityMbps, state.switch.capacityMbps)
+      : getThroughputMbps(state);
 
     for (let index = 0; index < state.client.count; index += 1) {
-      const position = PHASE2.clients[index];
-      this.#drawRoute(
-        ctx,
-        phase2BranchRoute(position),
-        '#d02be3',
-        state.client.trafficMbps,
-      );
+      const route = clientRoute(index);
+      const flow = index === 0 || state.switch.built ? state.client.trafficMbps : 0;
+
+      if (state.linkBuilt && (index === 0 || state.switch.built)) {
+        this.#drawRoute(ctx, route, '#d02be3', flow);
+      }
+
       this.#drawClient(
         ctx,
-        position.x,
-        position.y,
-        `CLIENT ${index + 1}`,
+        WORLD.clients[index],
+        index + 1,
         state.client.trafficMbps,
+        this.selected === 'lanA',
       );
     }
 
-    const queueFill = getQueueFillRatio(state);
-    const loss = getPacketLossPercent(state);
-    const color = loss > 0 ? '#e91e47' : queueFill >= 0.5 ? '#f4ca00' : '#0797ec';
+    if (state.linkBuilt) {
+      const queueFill = getQueueFillRatio(state);
+      const packetLoss = getPacketLossPercent(state);
+      const coreColor = packetLoss > 0
+        ? '#e91e47'
+        : queueFill >= 0.5 && !state.router.built
+          ? '#f4ca00'
+          : '#0797ec';
 
-    this.#drawRoute(ctx, PHASE2_TRUNK, color, getThroughputMbps(state));
-    this.#drawSwitch(
-      ctx,
-      PHASE2.switch.x,
-      PHASE2.switch.y,
-      'SWITCH',
-      state.switch.capacityMbps,
-      '#10c927',
-    );
+      this.#drawRoute(ctx, SWITCH_TO_ROUTER, coreColor, primaryFlow);
+
+      if (state.router.built) {
+        this.#drawRoute(
+          ctx,
+          ROUTER_TO_SERVER_A,
+          '#0797ec',
+          state.router.lastThroughputMbps.primary,
+        );
+      } else {
+        this.#drawRoute(ctx, ROUTER_TO_SERVER_A, coreColor, getThroughputMbps(state));
+      }
+    }
+
+    if (state.switch.built) {
+      this.#drawSwitch(ctx, state, this.selected === 'switch');
+      this.hitTargets.push({ id: 'switch', rect: WORLD.switch });
+    } else {
+      this.#drawJunctionMarker(ctx, WORLD.switch.x, WORLD.switch.y, '#d02be3');
+    }
+
+    if (state.router.built) {
+      this.#drawRouter(ctx, state, this.selected === 'router');
+      this.hitTargets.push({ id: 'router', rect: WORLD.router });
+    } else if (state.linkBuilt) {
+      this.#drawJunctionMarker(ctx, WORLD.router.x, WORLD.router.y, '#0797ec');
+    }
+
     this.#drawServer(
       ctx,
-      PHASE2.server.x,
-      PHASE2.server.y,
-      'SERVER',
+      WORLD.serverA,
+      'SERVER A',
       state.server.capacityMbps,
-      '#10c927',
+      '#08b91c',
+      this.selected === 'serverA',
     );
-    this.#drawQueue(
-      ctx,
-      PHASE2.switch.x + 80,
-      PHASE2.switch.y + 45,
-      state.switch.queueMb,
-      state.switch.bufferMb,
-      color,
-    );
-  }
-
-  #drawRoutedNetwork(ctx, state) {
-    const routerLoss = getPacketLossPercent(state);
-    const routerQueue = state.router.queueMb;
-    const routerColor = routerLoss > 0
-      ? '#e91e47'
-      : routerQueue > 0
-        ? '#f4ca00'
-        : '#0797ec';
-
-    this.#drawNetworkBlock(
-      ctx,
-      ROUTED.lanA.x,
-      ROUTED.lanA.y,
-      'LAN A',
-      '10.0.1.0/24',
-      state.client.count,
-      '#d02be3',
-    );
-
-    this.#drawRoute(
-      ctx,
-      ROUTES.lanAToRouter,
-      '#d02be3',
-      Math.min(getPrimaryDemandMbps(state), state.link.capacityMbps),
-    );
+    this.hitTargets.push({ id: 'serverA', rect: WORLD.serverA });
 
     if (state.branch.built) {
+      this.#drawRoute(
+        ctx,
+        LAN_B_TO_ROUTER,
+        '#0fbcc4',
+        Math.min(getBranchDemandMbps(state), state.branch.linkCapacityMbps),
+      );
+
       this.#drawNetworkBlock(
         ctx,
-        ROUTED.lanB.x,
-        ROUTED.lanB.y,
+        WORLD.lanB,
         'LAN B',
         '10.0.2.0/24',
         state.branch.clientCount,
         '#0fbcc4',
+        this.selected === 'lanB',
       );
 
-      this.#drawRoute(
-        ctx,
-        ROUTES.lanBToRouter,
-        '#0fbcc4',
-        Math.min(getBranchDemandMbps(state), state.branch.linkCapacityMbps),
-      );
-    } else {
-      this.#drawGhostRoute(ctx, ROUTES.lanBToRouter);
+      this.hitTargets.push({ id: 'lanB', rect: WORLD.lanB });
     }
-
-    this.#drawRouter(ctx, state, routerColor);
-
-    this.#drawRoute(
-      ctx,
-      ROUTES.routerToA,
-      '#0797ec',
-      state.router.lastThroughputMbps.primary,
-    );
-
-    this.#drawServer(
-      ctx,
-      ROUTED.serverA.x,
-      ROUTED.serverA.y,
-      'SERVER A',
-      state.server.capacityMbps,
-      '#0797ec',
-    );
 
     if (state.secondaryServer.built) {
       this.#drawRoute(
         ctx,
-        ROUTES.routerToB,
+        ROUTER_TO_SERVER_B,
         '#08b91c',
         state.router.lastThroughputMbps.secondary,
       );
 
       this.#drawServer(
         ctx,
-        ROUTED.serverB.x,
-        ROUTED.serverB.y,
+        WORLD.serverB,
         'SERVER B',
         state.secondaryServer.capacityMbps,
         '#08b91c',
+        this.selected === 'serverB',
       );
-    } else {
-      this.#drawGhostRoute(ctx, ROUTES.routerToB);
-      this.#drawGhostServer(ctx, ROUTED.serverB.x, ROUTED.serverB.y, 'SERVER B');
+
+      this.hitTargets.push({ id: 'serverB', rect: WORLD.serverB });
     }
 
-    this.#drawRouteBadge(
-      ctx,
-      ROUTES.routerToA,
-      `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s`,
-    );
+    if (state.router.built) {
+      const routerQueue = state.router.queueMb
+        + state.router.routeQueuesMb.primary
+        + state.router.routeQueuesMb.secondary;
 
-    if (state.secondaryServer.built) {
-      this.#drawRouteBadge(
+      this.#drawQueue(
         ctx,
-        ROUTES.routerToB,
-        `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s`,
+        WORLD.router.x - 72,
+        WORLD.router.y + 76,
+        routerQueue,
+        state.router.bufferMb * 2,
+        routerQueue > state.router.bufferMb ? '#f4ca00' : '#0797ec',
+      );
+    } else if (state.switch.built && state.switch.queueMb > 0) {
+      this.#drawQueue(
+        ctx,
+        WORLD.switch.x + 68,
+        WORLD.switch.y + 48,
+        state.switch.queueMb,
+        state.switch.bufferMb,
+        '#f4ca00',
       );
     }
 
-    this.#drawQueue(
-      ctx,
-      ROUTED.router.x - 70,
-      ROUTED.router.y + 72,
-      state.router.queueMb,
-      state.router.bufferMb,
-      routerColor,
-    );
+    for (let index = 0; index < state.client.count; index += 1) {
+      this.hitTargets.push({ id: 'lanA', rect: WORLD.clients[index] });
+    }
 
-    this.#drawRevenuePulse(ctx, state);
+    if (state.linkBuilt) this.#drawRevenuePulse(ctx, state);
   }
 
   #traceRoute(ctx, metrics) {
@@ -398,20 +384,6 @@ export class NetworkRenderer {
     for (let i = 1; i < metrics.points.length; i += 1) {
       ctx.lineTo(metrics.points[i].x, metrics.points[i].y);
     }
-  }
-
-  #drawGhostRoute(ctx, metrics) {
-    ctx.save();
-    ctx.setLineDash([5, 7]);
-    ctx.strokeStyle = '#3d3d3d';
-    ctx.lineWidth = 11;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-    ctx.strokeStyle = '#686868';
-    ctx.lineWidth = 2;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-    ctx.restore();
   }
 
   #drawRoute(ctx, metrics, color, flowMbps) {
@@ -436,6 +408,7 @@ export class NetworkRenderer {
 
     this.#drawTrackTies(ctx, metrics, color);
     this.#drawPackets(ctx, metrics, flowMbps, color);
+
     ctx.restore();
   }
 
@@ -464,75 +437,91 @@ export class NetworkRenderer {
   #drawPackets(ctx, metrics, flowMbps, color) {
     if (flowMbps <= 0) return;
 
-    const count = Math.min(12, Math.max(2, Math.ceil(flowMbps / 5)));
-    const speed = 30 + Math.min(flowMbps, 120) * 0.7;
+    const count = Math.min(14, Math.max(2, Math.ceil(flowMbps / 5)));
+    const speed = 30 + Math.min(flowMbps, 140) * 0.7;
 
-    for (let i = 0; i < count; i += 1) {
+    for (let index = 0; index < count; index += 1) {
       const point = pointOnRoute(
         metrics,
-        this.time * speed + (i / count) * metrics.total,
+        this.time * speed + (index / count) * metrics.total,
       );
 
-      ctx.fillStyle = '#f1ffff';
+      ctx.fillStyle = '#f2ffff';
       ctx.fillRect(Math.round(point.x) - 2, Math.round(point.y) - 2, 5, 5);
+
       ctx.fillStyle = color;
       ctx.fillRect(Math.round(point.x) - 1, Math.round(point.y) - 1, 3, 3);
     }
   }
 
-  #drawRouteBadge(ctx, metrics, text) {
-    const point = pointOnRoute(metrics, metrics.total * 0.55);
-    ctx.font = '10px "Lucida Console", monospace';
-    const width = Math.ceil(ctx.measureText(text).width + 16);
+  #drawClient(ctx, rect, index, demand, selected) {
+    const { x, y } = rect;
 
-    ctx.fillStyle = '#151515';
-    ctx.strokeStyle = '#606060';
-    ctx.lineWidth = 2;
-    ctx.fillRect(point.x - width / 2, point.y - 28, width, 20);
-    ctx.strokeRect(point.x - width / 2, point.y - 28, width, 20);
+    if (selected) this.#drawSelection(ctx, rect, '#e91e47');
+
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(x - 43, y - 38, 86, 76);
 
     ctx.fillStyle = '#efeee8';
+    ctx.fillRect(x - 39, y - 34, 78, 68);
+
+    ctx.fillStyle = '#969a96';
+    ctx.fillRect(x - 32, y - 27, 64, 54);
+
+    ctx.fillStyle = '#171717';
+    ctx.fillRect(x - 22, y - 19, 44, 25);
+
+    ctx.fillStyle = '#28363a';
+    ctx.fillRect(x - 16, y - 13, 32, 13);
+
+    ctx.fillStyle = '#e91e47';
+    ctx.fillRect(x - 27, y + 17, 7, 4);
+
+    ctx.fillStyle = '#efeee8';
+    ctx.font = '9px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(text, point.x, point.y - 14);
+    ctx.fillText(`CLIENT ${index}`, x, y + 54);
+
+    this.#drawNodeValue(ctx, x, y - 51, demand, '#e91e47');
   }
 
-  #drawNetworkBlock(ctx, x, y, title, cidr, clients, color) {
-    ctx.fillStyle = '#080808';
-    ctx.fillRect(x - 62, y - 50, 124, 100);
+  #drawSwitch(ctx, state, selected) {
+    const { x, y } = WORLD.switch;
 
-    ctx.fillStyle = '#ecebe4';
-    ctx.fillRect(x - 57, y - 45, 114, 90);
+    if (selected) this.#drawSelection(ctx, WORLD.switch, '#08b91c');
 
-    ctx.fillStyle = '#2a2a2a';
-    ctx.fillRect(x - 50, y - 38, 100, 76);
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(x - 54, y - 40, 108, 80);
 
-    for (let i = 0; i < clients; i += 1) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const px = x - 31 + col * 38;
-      const py = y - 23 + row * 29;
+    ctx.fillStyle = '#efeee8';
+    ctx.fillRect(x - 49, y - 35, 98, 70);
 
-      ctx.fillStyle = '#111';
-      ctx.fillRect(px, py, 25, 17);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px, py, 25, 17);
-      ctx.fillStyle = '#4a4a4a';
-      ctx.fillRect(px + 5, py + 5, 15, 6);
+    ctx.fillStyle = '#767b77';
+    ctx.fillRect(x - 43, y - 29, 86, 58);
+
+    ctx.fillStyle = '#171717';
+    ctx.fillRect(x - 36, y - 18, 72, 36);
+
+    for (let index = 0; index < 6; index += 1) {
+      ctx.fillStyle = index < state.client.count ? '#d02be3' : '#414141';
+      ctx.fillRect(x - 29 + index * 12, y - 8, 7, 7);
+
+      ctx.fillStyle = '#10d433';
+      ctx.fillRect(x - 28 + index * 12, y + 5, 5, 3);
     }
 
-    ctx.fillStyle = '#f1f0e8';
+    ctx.fillStyle = '#efeee8';
     ctx.font = '10px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(title, x, y + 66);
+    ctx.fillText('SWITCH', x, y + 58);
 
-    ctx.fillStyle = '#9a9a93';
-    ctx.font = '8px "Lucida Console", monospace';
-    ctx.fillText(cidr, x, y + 80);
+    this.#drawNodeValue(ctx, x, y - 55, state.switch.capacityMbps, '#08b91c');
   }
 
-  #drawRouter(ctx, state, color) {
-    const { x, y } = ROUTED.router;
+  #drawRouter(ctx, state, selected) {
+    const { x, y } = WORLD.router;
+
+    if (selected) this.#drawSelection(ctx, WORLD.router, '#0797ec');
 
     ctx.fillStyle = '#050505';
     ctx.beginPath();
@@ -561,7 +550,7 @@ export class NetworkRenderer {
     ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = '#0797ec';
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(x - 23, y);
@@ -575,61 +564,26 @@ export class NetworkRenderer {
     ctx.textAlign = 'center';
     ctx.fillText('ROUTER', x, y + 75);
 
-    this.#drawNodeValue(ctx, x, y - 72, state.router.capacityMbps, color);
+    this.#drawNodeValue(ctx, x, y - 72, state.router.capacityMbps, '#0797ec');
   }
 
-  #drawSwitch(ctx, x, y, title, capacity, color) {
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(x - 54, y - 40, 108, 80);
-    ctx.fillStyle = '#efeee8';
-    ctx.fillRect(x - 49, y - 35, 98, 70);
-    ctx.fillStyle = '#767b77';
-    ctx.fillRect(x - 43, y - 29, 86, 58);
-    ctx.fillStyle = '#171717';
-    ctx.fillRect(x - 36, y - 18, 72, 36);
+  #drawServer(ctx, rect, title, capacity, color, selected) {
+    const { x, y } = rect;
 
-    for (let i = 0; i < 6; i += 1) {
-      ctx.fillStyle = color;
-      ctx.fillRect(x - 29 + i * 12, y - 8, 7, 7);
-    }
+    if (selected) this.#drawSelection(ctx, rect, color);
 
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '10px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(title, x, y + 57);
-    this.#drawNodeValue(ctx, x, y - 55, capacity, color);
-  }
-
-  #drawClient(ctx, x, y, title, demand) {
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(x - 43, y - 38, 86, 76);
-    ctx.fillStyle = '#efeee8';
-    ctx.fillRect(x - 39, y - 34, 78, 68);
-    ctx.fillStyle = '#969a96';
-    ctx.fillRect(x - 32, y - 27, 64, 54);
-    ctx.fillStyle = '#171717';
-    ctx.fillRect(x - 22, y - 19, 44, 25);
-    ctx.fillStyle = '#28363a';
-    ctx.fillRect(x - 16, y - 13, 32, 13);
-    ctx.fillStyle = '#e91e47';
-    ctx.fillRect(x - 27, y + 17, 7, 4);
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '9px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(title, x, y + 54);
-    this.#drawNodeValue(ctx, x, y - 52, demand, '#e91e47');
-  }
-
-  #drawServer(ctx, x, y, title, capacity, color) {
     ctx.fillStyle = '#050505';
     ctx.fillRect(x - 61, y - 61, 122, 122);
+
     ctx.fillStyle = '#efeee8';
     ctx.fillRect(x - 56, y - 56, 112, 112);
+
     ctx.fillStyle = '#929691';
     ctx.fillRect(x - 47, y - 47, 94, 94);
+
     ctx.fillStyle = '#151515';
     ctx.fillRect(x - 27, y - 31, 54, 62);
+
     ctx.strokeStyle = '#efeee7';
     ctx.lineWidth = 3;
     ctx.strokeRect(x - 27, y - 31, 54, 62);
@@ -637,6 +591,7 @@ export class NetworkRenderer {
     for (let row = -20; row <= 18; row += 13) {
       ctx.fillStyle = '#59605d';
       ctx.fillRect(x - 17, y + row, 23, 5);
+
       ctx.fillStyle = color;
       ctx.fillRect(x + 12, y + row, 5, 5);
     }
@@ -644,22 +599,58 @@ export class NetworkRenderer {
     ctx.fillStyle = '#efeee8';
     ctx.font = '10px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(title, x, y + 78);
+    ctx.fillText(title, x, y + 79);
+
     this.#drawNodeValue(ctx, x, y - 76, capacity, color);
   }
 
-  #drawGhostServer(ctx, x, y, title) {
-    ctx.save();
-    ctx.globalAlpha = 0.28;
-    ctx.setLineDash([6, 6]);
-    ctx.strokeStyle = '#8b8b8b';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x - 55, y - 55, 110, 110);
-    ctx.fillStyle = '#a0a09a';
+  #drawNetworkBlock(ctx, rect, title, cidr, clients, color, selected) {
+    const { x, y } = rect;
+
+    if (selected) this.#drawSelection(ctx, rect, color);
+
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(x - 63, y - 51, 126, 102);
+
+    ctx.fillStyle = '#efeee8';
+    ctx.fillRect(x - 58, y - 46, 116, 92);
+
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(x - 51, y - 39, 102, 78);
+
+    for (let index = 0; index < clients; index += 1) {
+      const column = index % 2;
+      const row = Math.floor(index / 2);
+      const px = x - 32 + column * 39;
+      const py = y - 23 + row * 29;
+
+      ctx.fillStyle = '#111';
+      ctx.fillRect(px, py, 25, 17);
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, 25, 17);
+
+      ctx.fillStyle = '#4a4a4a';
+      ctx.fillRect(px + 5, py + 5, 15, 6);
+    }
+
+    ctx.fillStyle = '#efeee8';
     ctx.font = '10px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(title, x, y + 75);
-    ctx.restore();
+    ctx.fillText(title, x, y + 68);
+
+    ctx.fillStyle = '#9a9a93';
+    ctx.font = '8px "Lucida Console", monospace';
+    ctx.fillText(cidr, x, y + 82);
+  }
+
+  #drawJunctionMarker(ctx, x, y, color) {
+    ctx.fillStyle = '#151515';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.fillRect(x - 8, y - 8, 16, 16);
+    ctx.strokeRect(x - 8, y - 8, 16, 16);
   }
 
   #drawQueue(ctx, x, y, queueMb, bufferMb, color) {
@@ -673,9 +664,9 @@ export class NetworkRenderer {
     ctx.fillRect(x, y, 142, 29);
     ctx.strokeRect(x, y, 142, 29);
 
-    for (let i = 0; i < slots; i += 1) {
-      ctx.fillStyle = i < filled ? color : '#2c2c2c';
-      ctx.fillRect(x + 8 + i * 10, y + 8, 7, 7);
+    for (let index = 0; index < slots; index += 1) {
+      ctx.fillStyle = index < filled ? color : '#2c2c2c';
+      ctx.fillRect(x + 8 + index * 10, y + 8, 7, 7);
     }
 
     ctx.fillStyle = '#efeee8';
@@ -700,14 +691,28 @@ export class NetworkRenderer {
     ctx.fillText(text, x, y + 4);
   }
 
+  #drawSelection(ctx, rect, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.strokeRect(
+      rect.x - rect.w / 2 - 8,
+      rect.y - rect.h / 2 - 8,
+      rect.w + 16,
+      rect.h + 16,
+    );
+    ctx.restore();
+  }
+
   #drawRevenuePulse(ctx, state) {
     const income = getIncomePerSecond(state);
     if (income <= 0) return;
 
     const phase = this.time % 2.2;
     const alpha = clamp(1 - phase / 2.2, 0.15, 1);
-    const x = ROUTED.serverA.x + 76;
-    const y = ROUTED.serverA.y + 20 - phase * 8;
+    const x = WORLD.serverA.x + 76;
+    const y = WORLD.serverA.y + 20 - phase * 8;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#ffe000';
