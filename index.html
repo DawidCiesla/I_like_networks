@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171717" />
-    <title>I Like Networks — Phase 1</title>
+    <title>I Like Networks — Phase 2</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -32,7 +32,7 @@
         <section class="message-bar pixel-window">
           <div class="face-icon">⌣</div>
           <div id="objective-text">Connect the client to the server.</div>
-          <span class="message-tag">New ↓</span>
+          <span class="message-tag">Phase 2 ↓</span>
         </section>
       </div>
 
@@ -53,7 +53,7 @@
       <section class="network-panel pixel-window" id="control-panel">
         <div class="panel-title">
           <span class="globe-icon">⊕</span>
-          <span>Network Link</span>
+          <span>Local Network</span>
         </div>
         <div class="dash-divider"></div>
 
@@ -66,47 +66,74 @@
           <span class="buy-pill"><span id="connect-cost">$40</span></span>
         </button>
 
-        <button class="upgrade-row" data-upgrade="client">
+        <button id="switch-button" class="connect-row phase-two-row">
+          <span class="row-icon switch-color">▤</span>
+          <span class="row-copy">
+            <strong>Install Switch</strong>
+            <small id="switch-subtitle">Unlock multiple clients</small>
+          </span>
+          <span class="buy-pill"><span id="switch-cost">$95</span></span>
+        </button>
+
+        <button id="add-client-button" class="connect-row phase-two-row">
           <span class="row-icon client-color">▣</span>
           <span class="row-copy">
-            <strong>Client NIC</strong>
-            <small>+5 Mb/s demand</small>
+            <strong>Add Client</strong>
+            <small id="client-count-text">1 / 4 connected</small>
           </span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong id="client-upgrade-cost">$25</strong></span>
+          <span class="buy-pill"><span id="add-client-cost">$60</span></span>
+        </button>
+
+        <div class="dash-divider"></div>
+
+        <button class="upgrade-row" data-upgrade="client">
+          <span class="row-icon client-color">▣</span>
+          <span class="row-copy"><strong>Client NIC</strong><small>+5 Mb/s per client</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$25</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
         <button class="upgrade-row" data-upgrade="link">
           <span class="row-icon blue-color">╪</span>
-          <span class="row-copy">
-            <strong>Link Capacity</strong>
-            <small>+20 Mb/s</small>
-          </span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong id="link-upgrade-cost">$35</strong></span>
+          <span class="row-copy"><strong>Uplink Capacity</strong><small>+20 Mb/s</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$35</strong></span>
+          <span class="buy-pill">Buy</span>
+        </button>
+
+        <button class="upgrade-row" data-upgrade="switch">
+          <span class="row-icon switch-color">▤</span>
+          <span class="row-copy"><strong>Switch Fabric</strong><small>+25 Mb/s switching</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$70</strong></span>
+          <span class="buy-pill">Buy</span>
+        </button>
+
+        <button class="upgrade-row" data-upgrade="buffer">
+          <span class="row-icon queue-color">▥</span>
+          <span class="row-copy"><strong>Switch Buffer</strong><small>+40 Mb queue</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$55</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
         <button class="upgrade-row" data-upgrade="server">
           <span class="row-icon server-color">▥</span>
-          <span class="row-copy">
-            <strong>Server Uplink</strong>
-            <small>+15 Mb/s capacity</small>
-          </span>
-          <span class="row-cost"><span class="coin-dot tiny"></span><strong id="server-upgrade-cost">$45</strong></span>
+          <span class="row-copy"><strong>Server Uplink</strong><small>+15 Mb/s capacity</small></span>
+          <span class="row-cost"><span class="coin-dot tiny"></span><strong>$45</strong></span>
           <span class="buy-pill">Buy</span>
         </button>
 
         <div class="dash-divider"></div>
-        <div class="mini-stats">
-          <div><span>CLIENT</span><strong id="demand-value">10 Mb/s</strong></div>
-          <div><span>LINK</span><strong id="capacity-value">—</strong></div>
-          <div><span>SERVER</span><strong id="server-value">25 Mb/s</strong></div>
-          <div><span>LOAD</span><strong id="utilization-value">0%</strong></div>
+        <div class="mini-stats phase-two-stats">
+          <div><span>DEMAND</span><strong id="demand-value">10 Mb/s</strong></div>
+          <div><span>THROUGHPUT</span><strong id="throughput-stat">0 Mb/s</strong></div>
+          <div><span>QUEUE</span><strong id="queue-value">0 / 0 Mb</strong></div>
+          <div><span>LATENCY</span><strong id="latency-value">0 ms</strong></div>
+          <div><span>LOSS</span><strong id="loss-value">0%</strong></div>
+          <div><span>BOTTLENECK</span><strong id="bottleneck-value">—</strong></div>
         </div>
       </section>
 
       <button id="reset-button" class="reset-button">RESET NETWORK</button>
-      <div class="hint">DRAG TO PAN • WHEEL TO ZOOM • CLICK A NODE</div>
+      <div class="hint">DRAG TO PAN • WHEEL TO ZOOM • BUILD LOAD UNTIL A BOTTLENECK APPEARS</div>
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 
