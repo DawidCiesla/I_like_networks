@@ -306,7 +306,9 @@ export class Hud {
         ],
         actions: [
           this.#upgradeAction(state, 'switch', 'Switch fabric', '+25 Mb/s switching'),
-          this.#upgradeAction(state, 'buffer', 'Switch buffer', '+40 Mb queue'),
+          ...(!state.router.built
+            ? [this.#upgradeAction(state, 'buffer', 'Switch buffer', '+40 Mb queue')]
+            : []),
         ],
       };
     }
