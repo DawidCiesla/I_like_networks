@@ -23,11 +23,31 @@ const compact = (value) => {
 const money = (value) => `$${compact(value)}`;
 
 const ACTION_META = {
-  ethernet: { icon: '⇄', title: 'Ethernet Link', detail: 'Connect the first client to Server A' },
-  switch: { icon: '▤', title: 'Install Switch', detail: 'Expand LAN A without replacing existing links' },
-  router: { icon: '◆', title: 'Install Router', detail: 'Insert routing into the existing trunk' },
-  branch: { icon: '▦', title: 'Build LAN B', detail: 'Add a second source network' },
-  server2: { icon: '▥', title: 'Build Server B', detail: 'Add a second destination network' },
+  ethernet: {
+    icon: '⇄',
+    title: 'Ethernet Link',
+    detail: 'Connect the first client to Server A',
+  },
+  switch: {
+    icon: '▤',
+    title: 'Install Switch',
+    detail: 'Expand LAN A without replacing existing links',
+  },
+  router: {
+    icon: '◆',
+    title: 'Install Router',
+    detail: 'Insert routing into the existing trunk',
+  },
+  branch: {
+    icon: '▦',
+    title: 'Build LAN B',
+    detail: 'Add a second source network',
+  },
+  server2: {
+    icon: '▥',
+    title: 'Build Server B',
+    detail: 'Add a second destination network',
+  },
 };
 
 export class Hud {
@@ -50,6 +70,12 @@ export class Hud {
     this.selection = null;
     this.buildOpen = false;
     this.lastState = null;
+
+    // Interactive DOM nodes must stay stable between pointer-down and click.
+    // These keys only rebuild structure when the available controls actually change.
+    this.buildStructureKey = null;
+    this.inspectorStructureKey = null;
+    this.routeStructureKey = null;
 
     this.el = {
       money: document.querySelector('#money-value'),
@@ -88,6 +114,7 @@ export class Hud {
 
     this.el.inspectorClose.addEventListener('click', () => {
       this.selection = null;
+      this.inspectorStructureKey = null;
       onInspectorClose?.();
       this.#syncPanels();
     });
@@ -112,18 +139,31 @@ export class Hud {
     });
 
     const pauseButton = document.querySelector('.speed-box > [data-speed="0"]');
-    pauseButton?.addEventListener('click', () => onSpeed(this.currentSpeed === 0 ? 1 : 0));
+    pauseButton?.addEventListener(
+      'click',
+      () => onSpeed(this.currentSpeed === 0 ? 1 : 0),
+    );
 
     document.querySelectorAll('.speed-popover [data-speed]').forEach((button) => {
-      button.addEventListener('click', () => onSpeed(Number(button.dataset.speed)));
+      button.addEventListener(
+        'click',
+        () => onSpeed(Number(button.dataset.speed)),
+      );
     });
 
     this.el.reset.addEventListener('click', onReset);
   }
 
   setSelection(selection) {
+    if (this.selection !== selection) {
+      this.inspectorStructureKey = null;
+      this.routeStructureKey = null;
+    }
+
     this.selection = selection;
+
     if (selection) this.buildOpen = false;
+
     this.#syncPanels();
   }
 
@@ -144,11 +184,16 @@ export class Hud {
     this.#syncPanels();
 
     document.querySelectorAll('[data-speed]').forEach((button) => {
-      button.classList.toggle('active', Number(button.dataset.speed) === state.simulationSpeed);
+      button.classList.toggle(
+        'active',
+        Number(button.dataset.speed) === state.simulationSpeed,
+      );
     });
 
     const pauseButton = document.querySelector('.speed-box > [data-speed="0"]');
-    if (pauseButton) pauseButton.textContent = state.simulationSpeed === 0 ? '▶' : 'Ⅱ';
+    if (pauseButton) {
+      pauseButton.textContent = state.simulationSpeed === 0 ? '▶' : 'Ⅱ';
+    }
   }
 
   #syncPanels() {
@@ -188,79 +233,172 @@ export class Hud {
 
   #renderBuildMenu(state) {
     const options = this.#getBuildOptions(state);
-    this.el.buildList.replaceChildren();
+    const structureKey = options.map((option) => option.key).join('|');
+
+    if (structureKey !== this.buildStructureKey) {
+      this.buildStructureKey = structureKey;
+      this.el.buildList.replaceChildren();
+
+      for (const option of options) {
+        const meta = ACTION_META[option.key];
+        const button = document.createElement('button');
+
+        button.type = 'button';
+        button.className = 'build-option';
+        button.dataset.build = option.key;
+
+        button.innerHTML = `
+          <span class="build-option-icon">${meta.icon}</span>
+          <span class="build-option-copy">
+            <strong>${meta.title}</strong>
+            <small>${meta.detail}</small>
+          </span>
+          <span class="build-option-cost"></span>
+        `;
+
+        this.el.buildList.append(button);
+      }
+    }
 
     for (const option of options) {
-      const meta = ACTION_META[option.key];
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'build-option';
-      button.dataset.build = option.key;
+      const button = this.el.buildList.querySelector(
+        `[data-build="${option.key}"]`,
+      );
+
+      if (!button) continue;
+
       button.disabled = state.money < option.cost;
 
-      button.innerHTML = `
-        <span class="build-option-icon">${meta.icon}</span>
-        <span class="build-option-copy">
-          <strong>${meta.title}</strong>
-          <small>${meta.detail}</small>
-        </span>
-        <span class="build-option-cost">${money(option.cost)}</span>
-      `;
-
-      this.el.buildList.append(button);
+      const cost = button.querySelector('.build-option-cost');
+      if (cost) cost.textContent = money(option.cost);
     }
 
     this.el.buildEmpty.classList.toggle('hidden', options.length > 0);
 
-    const available = options.filter((option) => state.money >= option.cost).length;
-    const suffix = options.length > 0 ? ` ${available}/${options.length}` : '';
-    this.el.buildButton.querySelector('span:last-child').textContent = `BUILD${suffix}`;
+    const available = options.filter(
+      (option) => state.money >= option.cost,
+    ).length;
+
+    const suffix = options.length > 0
+      ? ` ${available}/${options.length}`
+      : '';
+
+    this.el.buildButton.querySelector('span:last-child').textContent =
+      `BUILD${suffix}`;
   }
 
   #renderInspector(state) {
     if (!this.selection) return;
 
     const view = this.#getInspectorView(state, this.selection);
+
     if (!view) {
       this.selection = null;
+      this.inspectorStructureKey = null;
+      this.routeStructureKey = null;
+      this.#syncPanels();
       return;
+    }
+
+    const showRoutes = this.selection === 'router' && state.router.built;
+    const structureKey = JSON.stringify({
+      selection: this.selection,
+      stats: view.stats.map((stat) => stat.label),
+      actions: view.actions.map((action) => [
+        action.command,
+        action.type ?? '',
+        action.title,
+        action.detail,
+      ]),
+      showRoutes,
+    });
+
+    if (structureKey !== this.inspectorStructureKey) {
+      this.inspectorStructureKey = structureKey;
+      this.#buildInspectorStructure(view);
     }
 
     this.el.inspectorKicker.textContent = view.kicker;
     this.el.inspectorTitle.textContent = view.title;
     this.el.inspectorSubtitle.textContent = view.subtitle;
 
+    const statRows = [...this.el.inspectorStats.children];
+
+    view.stats.forEach((stat, index) => {
+      const row = statRows[index];
+      if (!row) return;
+
+      const value = row.querySelector('strong');
+      if (!value) return;
+
+      value.textContent = stat.value;
+      value.className = stat.className ?? '';
+    });
+
+    const actionButtons = [
+      ...this.el.inspectorActions.querySelectorAll('[data-command]'),
+    ];
+
+    view.actions.forEach((action, index) => {
+      const button = actionButtons[index];
+      if (!button) return;
+
+      button.disabled = Boolean(action.disabled);
+
+      const price = button.querySelector('.buy-pill');
+      if (price) price.textContent = action.costLabel;
+    });
+
+    this.el.inspectorRoutes.classList.toggle('hidden', !showRoutes);
+
+    if (showRoutes) {
+      this.#renderRouteTable(state);
+    }
+  }
+
+  #buildInspectorStructure(view) {
     this.el.inspectorStats.replaceChildren();
+
     for (const stat of view.stats) {
       const row = document.createElement('div');
       row.className = 'inspector-stat';
-      row.innerHTML = `<span>${stat.label}</span><strong class="${stat.className ?? ''}">${stat.value}</strong>`;
+
+      const label = document.createElement('span');
+      label.textContent = stat.label;
+
+      const value = document.createElement('strong');
+
+      row.append(label, value);
       this.el.inspectorStats.append(row);
     }
 
     this.el.inspectorActions.replaceChildren();
+
     for (const action of view.actions) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'inspector-action';
       button.dataset.command = action.command;
+
       if (action.type) button.dataset.type = action.type;
-      button.disabled = Boolean(action.disabled);
 
-      button.innerHTML = `
-        <span class="inspector-action-copy">
-          <strong>${action.title}</strong>
-          <small>${action.detail}</small>
-        </span>
-        <span class="buy-pill">${action.costLabel}</span>
-      `;
+      const copy = document.createElement('span');
+      copy.className = 'inspector-action-copy';
 
+      const title = document.createElement('strong');
+      title.textContent = action.title;
+
+      const detail = document.createElement('small');
+      detail.textContent = action.detail;
+
+      copy.append(title, detail);
+
+      const price = document.createElement('span');
+      price.className = 'buy-pill';
+
+      button.append(copy, price);
       this.el.inspectorActions.append(button);
     }
-
-    const showRoutes = this.selection === 'router' && state.router.built;
-    this.el.inspectorRoutes.classList.toggle('hidden', !showRoutes);
-    if (showRoutes) this.#renderRouteTable(state);
   }
 
   #getInspectorView(state, selection) {
@@ -269,28 +407,54 @@ export class Hud {
 
     if (selection === 'lanA') {
       const addCost = getAddClientCost(state);
+
       return {
         kicker: 'NETWORK',
         title: 'LAN A',
         subtitle: '10.0.1.0/24',
         stats: [
-          { label: 'CLIENTS', value: `${state.client.count} / ${ECONOMY.maxClients}` },
-          { label: 'DEMAND', value: `${getPrimaryDemandMbps(state).toFixed(0)} Mb/s` },
-          { label: 'PER CLIENT', value: `${state.client.trafficMbps} Mb/s` },
-          { label: 'UPLINK', value: `${state.link.capacityMbps} Mb/s` },
+          {
+            label: 'CLIENTS',
+            value: `${state.client.count} / ${ECONOMY.maxClients}`,
+          },
+          {
+            label: 'DEMAND',
+            value: `${getPrimaryDemandMbps(state).toFixed(0)} Mb/s`,
+          },
+          {
+            label: 'PER CLIENT',
+            value: `${state.client.trafficMbps} Mb/s`,
+          },
+          {
+            label: 'UPLINK',
+            value: `${state.link.capacityMbps} Mb/s`,
+          },
         ],
         actions: [
           {
             command: 'add-client',
             title: 'Add client',
             detail: 'Connect another endpoint to LAN A',
-            costLabel: state.client.count >= ECONOMY.maxClients ? 'MAX' : money(addCost),
-            disabled: !state.switch.built
+            costLabel: state.client.count >= ECONOMY.maxClients
+              ? 'MAX'
+              : money(addCost),
+            disabled:
+              !state.switch.built
               || state.client.count >= ECONOMY.maxClients
               || state.money < addCost,
           },
-          this.#upgradeAction(state, 'client', 'Client NIC', '+5 Mb/s demand per client'),
-          this.#upgradeAction(state, 'link', 'LAN A uplink', '+20 Mb/s capacity'),
+          this.#upgradeAction(
+            state,
+            'client',
+            'Client NIC',
+            '+5 Mb/s demand per client',
+          ),
+          this.#upgradeAction(
+            state,
+            'link',
+            'LAN A uplink',
+            '+20 Mb/s capacity',
+          ),
         ],
       };
     }
@@ -301,22 +465,52 @@ export class Hud {
         title: 'LAN A Switch',
         subtitle: 'Local switching fabric',
         stats: [
-          { label: 'FABRIC', value: `${state.switch.capacityMbps} Mb/s` },
-          { label: 'BUFFER', value: `${state.switch.bufferMb} Mb` },
-          { label: 'QUEUE', value: `${state.switch.queueMb.toFixed(0)} Mb` },
-          { label: 'STATUS', value: state.router.built ? 'LOCAL' : bottleneck === 'switch' ? 'BOTTLENECK' : 'ONLINE', className: bottleneck === 'switch' ? 'metric-warning' : '' },
+          {
+            label: 'FABRIC',
+            value: `${state.switch.capacityMbps} Mb/s`,
+          },
+          {
+            label: 'BUFFER',
+            value: `${state.switch.bufferMb} Mb`,
+          },
+          {
+            label: 'QUEUE',
+            value: `${state.switch.queueMb.toFixed(0)} Mb`,
+          },
+          {
+            label: 'STATUS',
+            value: state.router.built
+              ? 'LOCAL'
+              : bottleneck === 'switch'
+                ? 'BOTTLENECK'
+                : 'ONLINE',
+            className: bottleneck === 'switch' ? 'metric-warning' : '',
+          },
         ],
         actions: [
-          this.#upgradeAction(state, 'switch', 'Switch fabric', '+25 Mb/s switching'),
+          this.#upgradeAction(
+            state,
+            'switch',
+            'Switch fabric',
+            '+25 Mb/s switching',
+          ),
           ...(!state.router.built
-            ? [this.#upgradeAction(state, 'buffer', 'Switch buffer', '+40 Mb queue')]
+            ? [
+              this.#upgradeAction(
+                state,
+                'buffer',
+                'Switch buffer',
+                '+40 Mb queue',
+              ),
+            ]
             : []),
         ],
       };
     }
 
     if (selection === 'router' && state.router.built) {
-      const totalQueue = state.router.queueMb
+      const totalQueue =
+        state.router.queueMb
         + state.router.routeQueuesMb.primary
         + state.router.routeQueuesMb.secondary;
 
@@ -325,58 +519,134 @@ export class Hud {
         title: 'Core Router',
         subtitle: 'Routes traffic between subnets',
         stats: [
-          { label: 'CORE', value: `${state.router.capacityMbps} Mb/s` },
-          { label: 'INGRESS', value: `${getRouterIngressMbps(state).toFixed(0)} Mb/s` },
-          { label: 'QUEUE', value: `${totalQueue.toFixed(0)} Mb` },
-          { label: 'LATENCY', value: `${getLatencyMs(state).toFixed(0)} ms` },
-          { label: 'LOSS', value: `${loss.toFixed(loss < 1 ? 1 : 0)}%`, className: loss > 0 ? 'metric-danger' : '' },
-          { label: 'BOTTLENECK', value: bottleneck === 'none' ? 'NONE' : bottleneck.toUpperCase(), className: bottleneck === 'router' ? 'metric-warning' : '' },
+          {
+            label: 'CORE',
+            value: `${state.router.capacityMbps} Mb/s`,
+          },
+          {
+            label: 'INGRESS',
+            value: `${getRouterIngressMbps(state).toFixed(0)} Mb/s`,
+          },
+          {
+            label: 'QUEUE',
+            value: `${totalQueue.toFixed(0)} Mb`,
+          },
+          {
+            label: 'LATENCY',
+            value: `${getLatencyMs(state).toFixed(0)} ms`,
+          },
+          {
+            label: 'LOSS',
+            value: `${loss.toFixed(loss < 1 ? 1 : 0)}%`,
+            className: loss > 0 ? 'metric-danger' : '',
+          },
+          {
+            label: 'BOTTLENECK',
+            value: bottleneck === 'none'
+              ? 'NONE'
+              : bottleneck.toUpperCase(),
+            className: bottleneck === 'router'
+              ? 'metric-warning'
+              : '',
+          },
         ],
         actions: [
-          this.#upgradeAction(state, 'router', 'Router core', '+40 Mb/s routed capacity'),
+          this.#upgradeAction(
+            state,
+            'router',
+            'Router core',
+            '+40 Mb/s routed capacity',
+          ),
         ],
       };
     }
 
     if (selection === 'serverA') {
+      const serverIsBottleneck =
+        bottleneck === 'server-a' || bottleneck === 'server';
+
       return {
         kicker: 'DESTINATION',
         title: 'Server A',
         subtitle: '10.0.10.0/24',
         stats: [
-          { label: 'CAPACITY', value: `${state.server.capacityMbps} Mb/s` },
-          { label: 'TRAFFIC', value: state.router.built ? `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s` : `${getThroughputMbps(state).toFixed(0)} Mb/s` },
-          { label: 'ROUTE QUEUE', value: state.router.built ? `${state.router.routeQueuesMb.primary.toFixed(0)} Mb` : '—' },
-          { label: 'STATUS', value: bottleneck === 'server-a' || bottleneck === 'server' ? 'BOTTLENECK' : 'ONLINE', className: bottleneck === 'server-a' || bottleneck === 'server' ? 'metric-warning' : '' },
+          {
+            label: 'CAPACITY',
+            value: `${state.server.capacityMbps} Mb/s`,
+          },
+          {
+            label: 'TRAFFIC',
+            value: state.router.built
+              ? `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s`
+              : `${getThroughputMbps(state).toFixed(0)} Mb/s`,
+          },
+          {
+            label: 'ROUTE QUEUE',
+            value: state.router.built
+              ? `${state.router.routeQueuesMb.primary.toFixed(0)} Mb`
+              : '—',
+          },
+          {
+            label: 'STATUS',
+            value: serverIsBottleneck ? 'BOTTLENECK' : 'ONLINE',
+            className: serverIsBottleneck ? 'metric-warning' : '',
+          },
         ],
         actions: [
-          this.#upgradeAction(state, 'server', 'Server A capacity', '+15 Mb/s service capacity'),
+          this.#upgradeAction(
+            state,
+            'server',
+            'Server A capacity',
+            '+15 Mb/s service capacity',
+          ),
         ],
       };
     }
 
     if (selection === 'lanB' && state.branch.built) {
       const addCost = getAddBranchClientCost(state);
+
       return {
         kicker: 'NETWORK',
         title: 'LAN B',
         subtitle: '10.0.2.0/24',
         stats: [
-          { label: 'CLIENTS', value: `${state.branch.clientCount} / ${ECONOMY.maxBranchClients}` },
-          { label: 'DEMAND', value: `${getBranchDemandMbps(state).toFixed(0)} Mb/s` },
-          { label: 'PER CLIENT', value: `${state.branch.clientTrafficMbps} Mb/s` },
-          { label: 'UPLINK', value: `${state.branch.linkCapacityMbps} Mb/s` },
+          {
+            label: 'CLIENTS',
+            value: `${state.branch.clientCount} / ${ECONOMY.maxBranchClients}`,
+          },
+          {
+            label: 'DEMAND',
+            value: `${getBranchDemandMbps(state).toFixed(0)} Mb/s`,
+          },
+          {
+            label: 'PER CLIENT',
+            value: `${state.branch.clientTrafficMbps} Mb/s`,
+          },
+          {
+            label: 'UPLINK',
+            value: `${state.branch.linkCapacityMbps} Mb/s`,
+          },
         ],
         actions: [
           {
             command: 'add-branch-client',
             title: 'Add client',
             detail: 'Connect another endpoint to LAN B',
-            costLabel: state.branch.clientCount >= ECONOMY.maxBranchClients ? 'MAX' : money(addCost),
-            disabled: state.branch.clientCount >= ECONOMY.maxBranchClients
+            costLabel:
+              state.branch.clientCount >= ECONOMY.maxBranchClients
+                ? 'MAX'
+                : money(addCost),
+            disabled:
+              state.branch.clientCount >= ECONOMY.maxBranchClients
               || state.money < addCost,
           },
-          this.#upgradeAction(state, 'branch', 'LAN B uplink', '+20 Mb/s capacity'),
+          this.#upgradeAction(
+            state,
+            'branch',
+            'LAN B uplink',
+            '+20 Mb/s capacity',
+          ),
         ],
       };
     }
@@ -387,14 +657,39 @@ export class Hud {
         title: 'Server B',
         subtitle: '10.0.20.0/24',
         stats: [
-          { label: 'CAPACITY', value: `${state.secondaryServer.capacityMbps} Mb/s` },
-          { label: 'UPLINK', value: `${state.secondaryServer.linkCapacityMbps} Mb/s` },
-          { label: 'TRAFFIC', value: `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s` },
-          { label: 'ROUTE QUEUE', value: `${state.router.routeQueuesMb.secondary.toFixed(0)} Mb` },
-          { label: 'STATUS', value: bottleneck === 'server-b' ? 'BOTTLENECK' : 'ONLINE', className: bottleneck === 'server-b' ? 'metric-warning' : '' },
+          {
+            label: 'CAPACITY',
+            value: `${state.secondaryServer.capacityMbps} Mb/s`,
+          },
+          {
+            label: 'UPLINK',
+            value: `${state.secondaryServer.linkCapacityMbps} Mb/s`,
+          },
+          {
+            label: 'TRAFFIC',
+            value: `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s`,
+          },
+          {
+            label: 'ROUTE QUEUE',
+            value: `${state.router.routeQueuesMb.secondary.toFixed(0)} Mb`,
+          },
+          {
+            label: 'STATUS',
+            value: bottleneck === 'server-b'
+              ? 'BOTTLENECK'
+              : 'ONLINE',
+            className: bottleneck === 'server-b'
+              ? 'metric-warning'
+              : '',
+          },
         ],
         actions: [
-          this.#upgradeAction(state, 'server2', 'Server B capacity', '+20 Mb/s service + uplink'),
+          this.#upgradeAction(
+            state,
+            'server2',
+            'Server B capacity',
+            '+20 Mb/s service + uplink',
+          ),
         ],
       };
     }
@@ -404,6 +699,7 @@ export class Hud {
 
   #upgradeAction(state, type, title, detail) {
     const cost = getUpgradeCost(state, type);
+
     return {
       command: 'upgrade',
       type,
@@ -415,24 +711,33 @@ export class Hud {
   }
 
   #renderRouteTable(state) {
-    this.el.routeTableBody.replaceChildren();
+    const routes = getRouteTable(state);
+    const structureKey = routes
+      .map((route) => `${route.destination}:${route.nextHop}`)
+      .join('|');
 
-    for (const route of getRouteTable(state)) {
-      const row = document.createElement('div');
-      row.className = 'route-row';
+    if (structureKey !== this.routeStructureKey) {
+      this.routeStructureKey = structureKey;
+      this.el.routeTableBody.replaceChildren();
 
-      const destination = document.createElement('span');
-      destination.textContent = route.destination;
+      for (const route of routes) {
+        const row = document.createElement('div');
+        row.className = 'route-row';
 
-      const nextHop = document.createElement('span');
-      nextHop.textContent = route.nextHop;
+        const destination = document.createElement('span');
+        destination.textContent = route.destination;
 
-      row.append(destination, nextHop);
-      this.el.routeTableBody.append(row);
+        const nextHop = document.createElement('span');
+        nextHop.textContent = route.nextHop;
+
+        row.append(destination, nextHop);
+        this.el.routeTableBody.append(row);
+      }
     }
 
     this.el.routeAThroughput.textContent =
       `${state.router.lastThroughputMbps.primary.toFixed(0)} Mb/s`;
+
     this.el.routeBThroughput.textContent = state.secondaryServer.built
       ? `${state.router.lastThroughputMbps.secondary.toFixed(0)} Mb/s`
       : '—';
@@ -442,42 +747,54 @@ export class Hud {
     const bottleneck = getBottleneck(state);
 
     if (!state.linkBuilt) {
-      this.el.objective.textContent = 'Open BUILD and connect the first Ethernet link.';
+      this.el.objective.textContent =
+        'Open BUILD and connect the first Ethernet link.';
       return;
     }
 
     if (!state.switch.built) {
-      this.el.objective.textContent = 'Add a switch. Existing links will stay where they are.';
+      this.el.objective.textContent =
+        'Add a switch. Existing links will stay where they are.';
       return;
     }
 
     if (!state.router.built) {
-      this.el.objective.textContent = 'Insert a router into the existing trunk.';
+      this.el.objective.textContent =
+        'Insert a router into the existing trunk.';
       return;
     }
 
     if (!state.branch.built || !state.secondaryServer.built) {
-      this.el.objective.textContent = 'Expand the existing map with another network or server.';
+      this.el.objective.textContent =
+        'Expand the existing map with another network or server.';
       return;
     }
 
     if (bottleneck !== 'none') {
-      this.el.objective.textContent = `Bottleneck: ${bottleneck}. Click that element to upgrade it.`;
+      this.el.objective.textContent =
+        `Bottleneck: ${bottleneck}. Click that element to upgrade it.`;
       return;
     }
 
     if (this.selection) {
-      this.el.objective.textContent = 'Selected element shows only its own upgrades.';
+      this.el.objective.textContent =
+        'Selected element shows only its own upgrades.';
       return;
     }
 
-    this.el.objective.textContent = 'Network stable. Click any device or LAN to inspect it.';
+    this.el.objective.textContent =
+      'Network stable. Click any device or LAN to inspect it.';
   }
 
   toast(message) {
     this.el.toast.textContent = message;
     this.el.toast.classList.add('show');
+
     clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => this.el.toast.classList.remove('show'), 1500);
+
+    this.toastTimer = setTimeout(
+      () => this.el.toast.classList.remove('show'),
+      1500,
+    );
   }
 }
