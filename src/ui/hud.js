@@ -30,13 +30,16 @@ export class Hud {
     document.querySelectorAll('[data-upgrade]').forEach((button) => {
       button.addEventListener('click', () => onUpgrade(button.dataset.upgrade));
     });
-    document.querySelectorAll('[data-speed]').forEach((button) => {
+    const pauseButton = document.querySelector('.speed-box > [data-speed="0"]');
+    pauseButton?.addEventListener('click', () => onSpeed(this.currentSpeed === 0 ? 1 : 0));
+    document.querySelectorAll('.speed-popover [data-speed]').forEach((button) => {
       button.addEventListener('click', () => onSpeed(Number(button.dataset.speed)));
     });
     this.el.reset.addEventListener('click', onReset);
   }
 
   render(state) {
+    this.currentSpeed = state.simulationSpeed;
     const throughput = getThroughputMbps(state);
     const income = getIncomePerSecond(state);
 
