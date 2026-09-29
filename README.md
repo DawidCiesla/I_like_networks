@@ -4,23 +4,28 @@ A network-management incremental game prototype. You begin with a single client 
 
 ## Current development status
 
-**Phase 1 — First Network**
+**Phase 2 — Switches and Bottlenecks**
 
-The current build is intentionally small and exists to validate the core loop before adding switches, congestion, routing, contracts and failures.
+The current build adds the first optimization layer on top of the Phase 1 traffic loop.
 
 Implemented now:
 
-- client → Ethernet → server flow,
-- live aggregate throughput,
-- animated packet visualization,
-- money earned from serviced traffic,
-- upgrades for traffic generation, link capacity and server capacity,
+- client → switch → server topology,
+- up to four clients,
+- aggregate traffic demand,
+- switch fabric capacity,
+- finite queue buffer,
+- queueing latency,
+- packet drops after buffer saturation,
+- bottleneck identification,
+- upgrades for client demand, switch fabric, buffer, uplink and server,
+- congestion visualization directly on the map,
 - pause / 1× / 2× / 4× speed,
 - pan + zoom,
-- local browser save,
+- versioned local save with Phase 1 migration,
 - dependency-free simulation tests.
 
-See [`docs/phase-1.md`](docs/phase-1.md) for the phase gate and intentionally deferred mechanics.
+See [`docs/phase-2.md`](docs/phase-2.md) for the current phase gate.
 
 ## Run locally
 
