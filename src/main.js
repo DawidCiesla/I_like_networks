@@ -16,65 +16,86 @@ import { Hud } from './ui/hud.js';
 
 const canvas = document.querySelector('#network-canvas');
 let state = loadState();
+let hud;
 
-const renderer = new NetworkRenderer(canvas);
-const hud = new Hud({
-  onConnect: () => {
-    const result = buildEthernet(state);
-    if (result.ok) hud.toast('Ethernet link online.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
-  },
+const toastFailure = (result) => {
+  const messages = {
+    'insufficient-funds': 'Not enough funds.',
+    'link-required': 'Build Ethernet first.',
+    'switch-required': 'Install the switch first.',
+    'router-required': 'Install the router first.',
+    'branch-required': 'Build LAN B first.',
+    'secondary-server-required': 'Build Server B first.',
+    'client-limit': 'Client limit reached.',
+    'already-built': 'That element is already online.',
+  };
 
-  onBuildSwitch: () => {
-    const result = buildSwitch(state);
-    if (result.ok) hud.toast('LAN A switch online.');
-    else if (result.reason === 'link-required') hud.toast('Build Ethernet first.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
-  },
+  hud.toast(messages[result.reason] ?? 'Action unavailable.');
+};
 
-  onBuildRouter: () => {
-    const result = buildRouter(state);
-    if (result.ok) hud.toast('Router online. Routing table initialized.');
-    else if (result.reason === 'switch-required') hud.toast('Install the switch first.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
+const renderer = new NetworkRenderer(canvas, {
+  onSelectionChanged: (selection) => hud?.setSelection(selection),
+});
+
+hud = new Hud({
+  onBuild: (type) => {
+    const buildActions = {
+      ethernet: {
+        run: () => buildEthernet(state),
+        selection: 'lanA',
+        success: 'Ethernet online. Existing route established.',
+      },
+      switch: {
+        run: () => buildSwitch(state),
+        selection: 'switch',
+        success: 'Switch installed on the existing LAN.',
+      },
+      router: {
+        run: () => buildRouter(state),
+        selection: 'router',
+        success: 'Router inserted into the existing trunk.',
+      },
+      branch: {
+        run: () => buildBranchNetwork(state),
+        selection: 'lanB',
+        success: 'LAN B added to the existing network.',
+      },
+      server2: {
+        run: () => buildSecondaryServer(state),
+        selection: 'serverB',
+        success: 'Server B and its new route are online.',
+      },
+    };
+
+    const action = buildActions[type];
+    if (!action) return;
+
+    const result = action.run();
+
+    if (result.ok) {
+      hud.setSelection(action.selection);
+      hud.toast(action.success);
+    } else {
+      toastFailure(result);
+    }
   },
 
   onAddClient: () => {
     const result = addClient(state);
     if (result.ok) hud.toast('LAN A client connected.');
-    else if (result.reason === 'client-limit') hud.toast('LAN A client limit reached.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
-  },
-
-  onBuildBranch: () => {
-    const result = buildBranchNetwork(state);
-    if (result.ok) hud.toast('LAN B online. New route installed.');
-    else if (result.reason === 'router-required') hud.toast('Install the router first.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
+    else toastFailure(result);
   },
 
   onAddBranchClient: () => {
     const result = addBranchClient(state);
     if (result.ok) hud.toast('LAN B client connected.');
-    else if (result.reason === 'branch-required') hud.toast('Build LAN B first.');
-    else if (result.reason === 'client-limit') hud.toast('LAN B client limit reached.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
-  },
-
-  onBuildSecondaryServer: () => {
-    const result = buildSecondaryServer(state);
-    if (result.ok) hud.toast('Server B online. New destination route active.');
-    else if (result.reason === 'router-required') hud.toast('Install the router first.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
+    else toastFailure(result);
   },
 
   onUpgrade: (type) => {
     const result = buyUpgrade(state, type);
     if (result.ok) hud.toast(`${type.toUpperCase()} upgraded.`);
-    else if (result.reason === 'router-required') hud.toast('Install the router first.');
-    else if (result.reason === 'branch-required') hud.toast('Build LAN B first.');
-    else if (result.reason === 'secondary-server-required') hud.toast('Build Server B first.');
-    else if (result.reason === 'insufficient-funds') hud.toast('Not enough funds.');
+    else toastFailure(result);
   },
 
   onSpeed: (speed) => setSimulationSpeed(state, speed),
@@ -97,6 +118,7 @@ function frame(now) {
   hud.render(state);
 
   saveAccumulator += delta;
+
   if (saveAccumulator >= 2) {
     saveState(state);
     saveAccumulator = 0;
@@ -106,5 +128,6 @@ function frame(now) {
 }
 
 window.addEventListener('beforeunload', () => saveState(state));
+
 hud.render(state);
 requestAnimationFrame(frame);
