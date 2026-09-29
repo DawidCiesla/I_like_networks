@@ -1,17 +1,24 @@
-import { getIncomePerSecond, getThroughputMbps, getUtilization } from '../simulation/model.js';
-
-const CLIENT = { x: -315, y: 150, w: 112, h: 132 };
-const SERVER = { x: 285, y: -145, w: 126, h: 126 };
-
-const ROUTE = [
-  { x: CLIENT.x + 57, y: 150 },
-  { x: -122, y: 150 },
-  { x: -78, y: 106 },
-  { x: -78, y: -145 },
-  { x: SERVER.x - 66, y: -145 },
-];
+import {
+  getIncomePerSecond,
+  getPacketLossPercent,
+  getQueueFillRatio,
+  getThroughputMbps,
+  getTotalDemandMbps,
+} from '../simulation/model.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const DIRECT_CLIENT = { x: -315, y: 145, w: 100, h: 108 };
+const DIRECT_SERVER = { x: 300, y: -135, w: 118, h: 118 };
+
+const SWITCH = { x: 0, y: 0, w: 104, h: 76 };
+const SERVER = { x: 345, y: 0, w: 118, h: 118 };
+const CLIENT_POSITIONS = [
+  { x: -355, y: -210 },
+  { x: -355, y: -70 },
+  { x: -355, y: 70 },
+  { x: -355, y: 210 },
+];
 
 function routeMetrics(points) {
   const segments = [];
@@ -25,22 +32,45 @@ function routeMetrics(points) {
     segments.push({ a, b, dx, dy, length, start: total });
     total += length;
   }
-  return { segments, total };
+  return { points, segments, total };
 }
 
-const ROUTE_METRICS = routeMetrics(ROUTE);
-
-function pointOnRoute(distance) {
-  const wrapped = ((distance % ROUTE_METRICS.total) + ROUTE_METRICS.total) % ROUTE_METRICS.total;
-  const segment = ROUTE_METRICS.segments.find((item) => wrapped <= item.start + item.length) ?? ROUTE_METRICS.segments.at(-1);
+function pointOnRoute(metrics, distance) {
+  if (metrics.total <= 0) return { x: 0, y: 0, tx: 1, ty: 0 };
+  const wrapped = ((distance % metrics.total) + metrics.total) % metrics.total;
+  const segment = metrics.segments.find((item) => wrapped <= item.start + item.length) ?? metrics.segments.at(-1);
   const local = clamp((wrapped - segment.start) / segment.length, 0, 1);
-  const tangentLength = Math.max(1, segment.length);
   return {
     x: segment.a.x + segment.dx * local,
     y: segment.a.y + segment.dy * local,
-    tx: segment.dx / tangentLength,
-    ty: segment.dy / tangentLength,
+    tx: segment.dx / Math.max(1, segment.length),
+    ty: segment.dy / Math.max(1, segment.length),
   };
+}
+
+const DIRECT_ROUTE = routeMetrics([
+  { x: DIRECT_CLIENT.x + 52, y: DIRECT_CLIENT.y },
+  { x: -120, y: DIRECT_CLIENT.y },
+  { x: -75, y: 100 },
+  { x: -75, y: DIRECT_SERVER.y },
+  { x: DIRECT_SERVER.x - 62, y: DIRECT_SERVER.y },
+]);
+
+const TRUNK_ROUTE = routeMetrics([
+  { x: SWITCH.x + 54, y: 0 },
+  { x: 175, y: 0 },
+  { x: 225, y: -25 },
+  { x: SERVER.x - 63, y: -25 },
+  { x: SERVER.x - 63, y: 0 },
+]);
+
+function branchRoute(position) {
+  return routeMetrics([
+    { x: position.x + 45, y: position.y },
+    { x: -210, y: position.y },
+    { x: -135, y: position.y * 0.35 },
+    { x: SWITCH.x - 55, y: 0 },
+  ]);
 }
 
 export class NetworkRenderer {
@@ -110,16 +140,20 @@ export class NetworkRenderer {
   #selectAt(clientX, clientY) {
     const point = this.#screenToWorld(clientX, clientY);
     const hit = (node) => (
-      point.x >= node.x - node.w / 2 &&
-      point.x <= node.x + node.w / 2 &&
-      point.y >= node.y - node.h / 2 &&
-      point.y <= node.y + node.h / 2
+      point.x >= node.x - node.w / 2
+      && point.x <= node.x + node.w / 2
+      && point.y >= node.y - node.h / 2
+      && point.y <= node.y + node.h / 2
     );
-    this.selectedNode = hit(CLIENT) ? 'client' : hit(SERVER) ? 'server' : null;
+
+    if (hit(SWITCH)) this.selectedNode = 'switch';
+    else if (hit(SERVER) || hit(DIRECT_SERVER)) this.selectedNode = 'server';
+    else this.selectedNode = null;
   }
 
   render(state, deltaSeconds) {
     this.time += deltaSeconds;
+
     const ctx = this.ctx;
     const width = this.canvas.width / this.dpr;
     const height = this.canvas.height / this.dpr;
@@ -134,17 +168,8 @@ export class NetworkRenderer {
     ctx.scale(this.camera.zoom, this.camera.zoom);
     ctx.translate(this.camera.x, this.camera.y);
 
-    if (state.linkBuilt) this.#drawActiveRoute(ctx, state);
-    else this.#drawGhostRoute(ctx);
-
-    this.#drawClient(ctx, state);
-    this.#drawServer(ctx, state);
-
-    if (state.linkBuilt) {
-      this.#drawRelay(ctx, pointOnRoute(ROUTE_METRICS.total * 0.27), state.link.capacityMbps);
-      this.#drawRelay(ctx, pointOnRoute(ROUTE_METRICS.total * 0.70), state.link.capacityMbps);
-      this.#drawRevenuePulse(ctx, state);
-    }
+    if (state.switch.built) this.#drawSwitchedNetwork(ctx, state);
+    else this.#drawDirectNetwork(ctx, state);
 
     ctx.restore();
   }
@@ -166,235 +191,224 @@ export class NetworkRenderer {
         ctx.fillRect(px, py - 2, 1, 5);
       }
     }
+  }
 
-    ctx.fillStyle = 'rgba(52,52,52,.45)';
-    for (let x = offsetX + spacing / 2; x < width; x += spacing * 2) {
-      for (let y = offsetY + spacing / 2; y < height; y += spacing * 2) {
-        ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
-      }
+  #drawDirectNetwork(ctx, state) {
+    if (state.linkBuilt) {
+      this.#drawRoute(ctx, DIRECT_ROUTE, '#008fdc', getThroughputMbps(state), false);
+      this.#drawRouteBadge(ctx, DIRECT_ROUTE, `${getThroughputMbps(state).toFixed(0)} Mb/s`);
+    } else {
+      this.#drawGhostRoute(ctx, DIRECT_ROUTE);
+    }
+
+    this.#drawClient(ctx, DIRECT_CLIENT.x, DIRECT_CLIENT.y, 1, state.client.trafficMbps, true);
+    this.#drawServer(ctx, DIRECT_SERVER.x, DIRECT_SERVER.y, state.server.capacityMbps);
+
+    if (state.linkBuilt) this.#drawRevenuePulse(ctx, DIRECT_SERVER.x + 74, DIRECT_SERVER.y + 25, state);
+  }
+
+  #drawSwitchedNetwork(ctx, state) {
+    const queueFill = getQueueFillRatio(state);
+    const loss = getPacketLossPercent(state);
+
+    for (let index = 0; index < state.client.count; index += 1) {
+      const position = CLIENT_POSITIONS[index];
+      const route = branchRoute(position);
+      this.#drawRoute(ctx, route, '#d02be3', state.client.trafficMbps, false);
+      this.#drawClient(ctx, position.x, position.y, index + 1, state.client.trafficMbps, false);
+    }
+
+    const trunkColor = loss > 0
+      ? '#e91e47'
+      : queueFill >= 0.5
+        ? '#f4ca00'
+        : '#0797ec';
+
+    this.#drawRoute(ctx, TRUNK_ROUTE, trunkColor, getThroughputMbps(state), queueFill >= 0.9);
+    this.#drawRouteBadge(ctx, TRUNK_ROUTE, `${getThroughputMbps(state).toFixed(0)} Mb/s`);
+
+    this.#drawSwitch(ctx, state);
+    this.#drawServer(ctx, SERVER.x, SERVER.y, state.server.capacityMbps);
+    this.#drawQueue(ctx, state);
+    this.#drawRevenuePulse(ctx, SERVER.x + 74, SERVER.y + 25, state);
+
+    if (loss > 0) this.#drawDroppedPackets(ctx, state);
+  }
+
+  #traceRoute(ctx, metrics) {
+    ctx.beginPath();
+    ctx.moveTo(metrics.points[0].x, metrics.points[0].y);
+    for (let i = 1; i < metrics.points.length; i += 1) {
+      ctx.lineTo(metrics.points[i].x, metrics.points[i].y);
     }
   }
 
-  #traceRoute(ctx) {
-    ctx.beginPath();
-    ctx.moveTo(ROUTE[0].x, ROUTE[0].y);
-    for (let i = 1; i < ROUTE.length; i += 1) ctx.lineTo(ROUTE[i].x, ROUTE[i].y);
-  }
-
-  #drawGhostRoute(ctx) {
+  #drawGhostRoute(ctx, metrics) {
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.setLineDash([5, 7]);
     ctx.strokeStyle = '#393939';
     ctx.lineWidth = 12;
-    this.#traceRoute(ctx);
+    this.#traceRoute(ctx, metrics);
     ctx.stroke();
     ctx.strokeStyle = '#676767';
     ctx.lineWidth = 2;
-    this.#traceRoute(ctx);
+    this.#traceRoute(ctx, metrics);
     ctx.stroke();
     ctx.setLineDash([]);
-    this.#drawTrackTies(ctx, '#4a4a4a', 16, 8);
     ctx.restore();
   }
 
-  #drawActiveRoute(ctx, state) {
-    const utilization = getUtilization(state);
-    const glow = clamp(utilization, 0, 1);
-
+  #drawRoute(ctx, metrics, color, flowMbps, danger) {
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
-    ctx.strokeStyle = '#03111b';
+    ctx.strokeStyle = '#050505';
     ctx.lineWidth = 16;
-    this.#traceRoute(ctx);
+    this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
-    ctx.strokeStyle = '#005b92';
-    ctx.lineWidth = 12;
-    this.#traceRoute(ctx);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = danger ? 13 : 11;
+    this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
-    ctx.strokeStyle = '#161616';
+    ctx.strokeStyle = '#171717';
     ctx.lineWidth = 6;
-    this.#traceRoute(ctx);
+    this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
-    ctx.strokeStyle = glow > 0.9 ? '#24c1ff' : '#008fdc';
-    ctx.lineWidth = 2;
-    this.#traceRoute(ctx);
-    ctx.stroke();
-
-    this.#drawTrackTies(ctx, glow > 0.9 ? '#00b8ff' : '#0076ba', 13, 11);
-    this.#drawPackets(ctx, state);
-
-    const labelPoint = pointOnRoute(ROUTE_METRICS.total * 0.48);
-    this.#drawThroughputBadge(ctx, labelPoint.x, labelPoint.y, state);
+    this.#drawTrackTies(ctx, metrics, color);
+    this.#drawPackets(ctx, metrics, flowMbps, color);
 
     ctx.restore();
   }
 
-  #drawTrackTies(ctx, color, every, width) {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#061018';
-    for (let distance = 4; distance < ROUTE_METRICS.total; distance += every) {
-      const point = pointOnRoute(distance);
+  #drawTrackTies(ctx, metrics, color) {
+    for (let distance = 5; distance < metrics.total; distance += 14) {
+      const point = pointOnRoute(metrics, distance);
       const nx = -point.ty;
       const ny = point.tx;
-      ctx.beginPath();
-      ctx.moveTo(point.x - nx * (width / 2 + 1), point.y - ny * (width / 2 + 1));
-      ctx.lineTo(point.x + nx * (width / 2 + 1), point.y + ny * (width / 2 + 1));
-      ctx.stroke();
-    }
 
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = color;
-    for (let distance = 4; distance < ROUTE_METRICS.total; distance += every) {
-      const point = pointOnRoute(distance);
-      const nx = -point.ty;
-      const ny = point.tx;
+      ctx.strokeStyle = '#050505';
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(point.x - nx * width / 2, point.y - ny * width / 2);
-      ctx.lineTo(point.x + nx * width / 2, point.y + ny * width / 2);
+      ctx.moveTo(point.x - nx * 7, point.y - ny * 7);
+      ctx.lineTo(point.x + nx * 7, point.y + ny * 7);
+      ctx.stroke();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(point.x - nx * 6, point.y - ny * 6);
+      ctx.lineTo(point.x + nx * 6, point.y + ny * 6);
       ctx.stroke();
     }
   }
 
-  #drawPackets(ctx, state) {
-    const throughput = getThroughputMbps(state);
-    if (throughput <= 0) return;
+  #drawPackets(ctx, metrics, flowMbps, color) {
+    if (flowMbps <= 0) return;
 
-    const count = Math.min(18, Math.max(3, Math.ceil(throughput / 2.5)));
-    const speed = 35 + Math.min(throughput, 120) * 0.9;
+    const count = Math.min(14, Math.max(2, Math.ceil(flowMbps / 4)));
+    const speed = 30 + Math.min(flowMbps, 120) * 0.8;
 
     for (let i = 0; i < count; i += 1) {
-      const distance = this.time * speed + (i / count) * ROUTE_METRICS.total;
-      const point = pointOnRoute(distance);
-      ctx.fillStyle = '#d9fbff';
+      const point = pointOnRoute(metrics, this.time * speed + (i / count) * metrics.total);
+      ctx.fillStyle = '#f0ffff';
       ctx.fillRect(Math.round(point.x) - 2, Math.round(point.y) - 2, 5, 5);
-      ctx.fillStyle = '#00a8ef';
+      ctx.fillStyle = color;
       ctx.fillRect(Math.round(point.x) - 1, Math.round(point.y) - 1, 3, 3);
     }
   }
 
-  #drawThroughputBadge(ctx, x, y, state) {
-    const throughput = getThroughputMbps(state);
-    const label = `${throughput.toFixed(0)} Mb/s`;
-
+  #drawRouteBadge(ctx, metrics, text) {
+    const point = pointOnRoute(metrics, metrics.total * 0.55);
     ctx.font = '10px "Lucida Console", monospace';
-    const textWidth = ctx.measureText(label).width;
-    const width = Math.ceil(textWidth + 15);
+    const width = Math.ceil(ctx.measureText(text).width + 16);
 
     ctx.fillStyle = '#151515';
-    ctx.strokeStyle = '#565656';
+    ctx.strokeStyle = '#606060';
     ctx.lineWidth = 2;
-    ctx.fillRect(Math.round(x - width / 2), Math.round(y - 28), width, 20);
-    ctx.strokeRect(Math.round(x - width / 2), Math.round(y - 28), width, 20);
+    ctx.fillRect(Math.round(point.x - width / 2), Math.round(point.y - 30), width, 20);
+    ctx.strokeRect(Math.round(point.x - width / 2), Math.round(point.y - 30), width, 20);
 
-    ctx.fillStyle = '#e5e5dc';
+    ctx.fillStyle = '#efeee8';
     ctx.textAlign = 'center';
-    ctx.fillText(label, Math.round(x), Math.round(y - 14));
+    ctx.fillText(text, Math.round(point.x), Math.round(point.y - 16));
   }
 
-  #drawRelay(ctx, point, capacity) {
-    const x = Math.round(point.x);
-    const y = Math.round(point.y);
-
-    ctx.fillStyle = '#0d0d0d';
-    ctx.strokeStyle = '#00a6ee';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(x, y, 17, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.strokeStyle = '#005b92';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 12, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = '#008ee1';
-    ctx.fillRect(x - 7, y - 7, 14, 14);
-    ctx.fillStyle = '#00588e';
-    ctx.fillRect(x - 4, y - 4, 8, 8);
-
-    const value = Math.round(capacity);
-    ctx.font = '9px "Lucida Console", monospace';
-    const width = value >= 100 ? 27 : 23;
-    ctx.fillStyle = '#262626';
-    ctx.strokeStyle = '#008ee1';
-    ctx.lineWidth = 2;
-    ctx.fillRect(x - width / 2, y - 31, width, 17);
-    ctx.strokeRect(x - width / 2, y - 31, width, 17);
-    ctx.fillStyle = '#f1f0e9';
-    ctx.textAlign = 'center';
-    ctx.fillText(String(value), x, y - 19);
-  }
-
-  #drawClient(ctx, state) {
-    const x = Math.round(CLIENT.x);
-    const y = Math.round(CLIENT.y);
-    const selected = this.selectedNode === 'client';
-
-    if (selected) this.#drawSelection(ctx, CLIENT, '#ee3154');
+  #drawClient(ctx, x, y, index, demand, large) {
+    const width = large ? 96 : 76;
+    const height = large ? 110 : 70;
 
     ctx.fillStyle = '#050505';
-    ctx.fillRect(x - 54, y - 64, 108, 128);
+    ctx.fillRect(x - width / 2 - 4, y - height / 2 - 4, width + 8, height + 8);
 
-    ctx.fillStyle = '#f0efe8';
-    ctx.fillRect(x - 48, y - 60, 96, 120);
-    this.#pixelCutCorners(ctx, x - 48, y - 60, 96, 120, '#1a1a1a', 6);
-
-    ctx.fillStyle = '#a7aaa6';
-    ctx.fillRect(x - 41, y - 52, 82, 104);
-    ctx.fillStyle = '#d6d5cd';
-    ctx.fillRect(x - 35, y - 45, 70, 42);
+    ctx.fillStyle = '#efeee7';
+    ctx.fillRect(x - width / 2, y - height / 2, width, height);
+    ctx.fillStyle = '#9c9f9b';
+    ctx.fillRect(x - width / 2 + 7, y - height / 2 + 7, width - 14, height - 14);
 
     ctx.fillStyle = '#171717';
-    ctx.fillRect(x - 27, y - 37, 54, 28);
-    ctx.fillStyle = '#2a3538';
-    ctx.fillRect(x - 20, y - 31, 40, 16);
-
-    ctx.fillStyle = '#111';
-    ctx.fillRect(x - 28, y + 10, 56, 31);
-    ctx.fillStyle = '#242424';
-    ctx.fillRect(x - 21, y + 16, 42, 18);
+    ctx.fillRect(x - width * 0.28, y - height * 0.27, width * 0.56, height * 0.33);
+    ctx.fillStyle = '#293539';
+    ctx.fillRect(x - width * 0.20, y - height * 0.20, width * 0.40, height * 0.18);
 
     ctx.fillStyle = '#e91e47';
-    ctx.fillRect(x - 37, y + 45, 9, 5);
-    ctx.fillStyle = '#555';
-    ctx.fillRect(x - 18, y + 45, 20, 5);
+    ctx.fillRect(x - width / 2 + 10, y + height / 2 - 14, 8, 5);
+
+    ctx.fillStyle = '#f1f0e8';
+    ctx.font = '9px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(large ? 'CLIENT' : `CLIENT ${index}`, x, y + height / 2 + 17);
+
+    this.#drawNodeValue(ctx, x, y - height / 2 - 17, demand, '#e91e47');
+  }
+
+  #drawSwitch(ctx, state) {
+    const x = SWITCH.x;
+    const y = SWITCH.y;
+
+    if (this.selectedNode === 'switch') this.#drawSelection(ctx, SWITCH, '#10c927');
+
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(x - 54, y - 40, 108, 80);
+
+    ctx.fillStyle = '#efeee8';
+    ctx.fillRect(x - 49, y - 35, 98, 70);
+    ctx.fillStyle = '#767b77';
+    ctx.fillRect(x - 43, y - 29, 86, 58);
+    ctx.fillStyle = '#171717';
+    ctx.fillRect(x - 36, y - 18, 72, 36);
+
+    for (let i = 0; i < 6; i += 1) {
+      const px = x - 29 + i * 12;
+      ctx.fillStyle = i < state.client.count ? '#d02be3' : '#3b3b3b';
+      ctx.fillRect(px, y - 8, 7, 7);
+      ctx.fillStyle = '#10d433';
+      ctx.fillRect(px + 1, y + 5, 5, 3);
+    }
 
     ctx.fillStyle = '#f1f0e8';
     ctx.font = '10px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('CLIENT', x, y + 83);
-
-    this.#drawNodeValue(ctx, x, y - 78, state.client.trafficMbps, '#e91e47');
+    ctx.fillText('SWITCH', x, y + 57);
+    this.#drawNodeValue(ctx, x, y - 55, state.switch.capacityMbps, '#10c927');
   }
 
-  #drawServer(ctx, state) {
-    const x = Math.round(SERVER.x);
-    const y = Math.round(SERVER.y);
-    const selected = this.selectedNode === 'server';
-
-    if (selected) this.#drawSelection(ctx, SERVER, '#10c927');
+  #drawServer(ctx, x, y, capacity) {
+    if (this.selectedNode === 'server') {
+      this.#drawSelection(ctx, { x, y, w: 118, h: 118 }, '#10c927');
+    }
 
     ctx.fillStyle = '#050505';
     ctx.fillRect(x - 61, y - 61, 122, 122);
-
-    ctx.fillStyle = '#f0efe8';
+    ctx.fillStyle = '#efeee8';
     ctx.fillRect(x - 56, y - 56, 112, 112);
-    this.#pixelCutCorners(ctx, x - 56, y - 56, 112, 112, '#1a1a1a', 7);
-
-    ctx.fillStyle = '#939792';
+    ctx.fillStyle = '#929691';
     ctx.fillRect(x - 47, y - 47, 94, 94);
-    ctx.fillStyle = '#b9bbb5';
-    ctx.fillRect(x - 39, y - 39, 78, 78);
-
     ctx.fillStyle = '#151515';
     ctx.fillRect(x - 27, y - 31, 54, 62);
     ctx.strokeStyle = '#efeee7';
@@ -411,9 +425,47 @@ export class NetworkRenderer {
     ctx.fillStyle = '#f1f0e8';
     ctx.font = '10px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('SERVER', x, y + 79);
+    ctx.fillText('SERVER', x, y + 78);
+    this.#drawNodeValue(ctx, x, y - 76, capacity, '#10c927');
+  }
 
-    this.#drawNodeValue(ctx, x, y - 75, state.server.capacityMbps, '#10c927');
+  #drawQueue(ctx, state) {
+    const fill = getQueueFillRatio(state);
+    const slots = 10;
+    const filled = Math.ceil(fill * slots);
+    const x = SWITCH.x + 82;
+    const y = SWITCH.y + 47;
+
+    ctx.fillStyle = '#151515';
+    ctx.strokeStyle = fill >= 0.9 ? '#e91e47' : fill >= 0.5 ? '#f4ca00' : '#656565';
+    ctx.lineWidth = 2;
+    ctx.fillRect(x - 6, y - 8, 150, 29);
+    ctx.strokeRect(x - 6, y - 8, 150, 29);
+
+    for (let i = 0; i < slots; i += 1) {
+      ctx.fillStyle = i < filled
+        ? (fill >= 0.9 ? '#e91e47' : fill >= 0.5 ? '#f4ca00' : '#0797ec')
+        : '#2c2c2c';
+      ctx.fillRect(x + i * 10, y, 7, 7);
+    }
+
+    ctx.fillStyle = '#efeee8';
+    ctx.font = '9px "Lucida Console", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`QUEUE ${state.switch.queueMb.toFixed(0)}/${state.switch.bufferMb} Mb`, x, y + 17);
+  }
+
+  #drawDroppedPackets(ctx, state) {
+    const loss = getPacketLossPercent(state);
+    const count = Math.min(8, Math.max(2, Math.ceil(loss / 3)));
+
+    for (let i = 0; i < count; i += 1) {
+      const phase = (this.time * 1.8 + i / count) % 1;
+      const x = SWITCH.x + 60 + phase * 80;
+      const y = -16 - phase * 34 + i * 2;
+      ctx.fillStyle = '#ff3155';
+      ctx.fillRect(Math.round(x), Math.round(y), 5, 5);
+    }
   }
 
   #drawNodeValue(ctx, x, y, value, color) {
@@ -432,30 +484,24 @@ export class NetworkRenderer {
     ctx.fillText(text, x, y + 4);
   }
 
-  #drawRevenuePulse(ctx, state) {
+  #drawRevenuePulse(ctx, x, y, state) {
     const income = getIncomePerSecond(state);
     if (income <= 0) return;
 
     const phase = this.time % 2.2;
-    const rise = phase * 8;
     const alpha = clamp(1 - phase / 2.2, 0.15, 1);
-    const x = SERVER.x + 78;
-    const y = SERVER.y + 26 - rise;
+    const py = y - phase * 8;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#ffe000';
     ctx.beginPath();
-    ctx.arc(x, y, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#594b00';
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.arc(x, py, 9, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#b9ff8b';
     ctx.font = '12px "Lucida Console", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`+${income.toFixed(1)}`, x + 14, y + 4);
+    ctx.fillText(`+${income.toFixed(1)}`, x + 14, py + 4);
     ctx.globalAlpha = 1;
   }
 
@@ -470,13 +516,5 @@ export class NetworkRenderer {
       node.h + 16,
     );
     ctx.setLineDash([]);
-  }
-
-  #pixelCutCorners(ctx, x, y, width, height, color, size) {
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, size, size);
-    ctx.fillRect(x + width - size, y, size, size);
-    ctx.fillRect(x, y + height - size, size, size);
-    ctx.fillRect(x + width - size, y + height - size, size, size);
   }
 }
