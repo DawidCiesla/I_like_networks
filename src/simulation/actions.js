@@ -298,13 +298,6 @@ export function buyUpgrade(state, type) {
     return { ok: false, reason: 'depot-required' };
   }
 
-  if (
-    (type === 'shelter2' || type === 'catchment2')
-    && !state.line2.built
-  ) {
-    return { ok: false, reason: 'line-required' };
-  }
-
   const cost =
     getUpgradeCost(state, type);
 
@@ -314,25 +307,9 @@ export function buyUpgrade(state, type) {
 
   state.money -= cost;
 
-  if (type === 'shelter1') {
-    state.line1.shelterLevel += 1;
-    state.line1.waitingCapacityPassengers +=
-      config.delta;
-  } else if (type === 'catchment1') {
-    state.line1.catchmentLevel += 1;
-    state.line1.demandPerStopPpm +=
-      config.delta;
-  } else if (type === 'depot') {
+  if (type === 'depot') {
     state.depot.level += 1;
     state.depot.garageSlots +=
-      config.delta;
-  } else if (type === 'shelter2') {
-    state.line2.shelterLevel += 1;
-    state.line2.waitingCapacityPassengers +=
-      config.delta;
-  } else if (type === 'catchment2') {
-    state.line2.catchmentLevel += 1;
-    state.line2.demandPerStopPpm +=
       config.delta;
   }
 
