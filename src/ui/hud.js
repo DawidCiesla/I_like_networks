@@ -1,22 +1,21 @@
 import {
   ECONOMY,
-  PLACES,
+  STOP_NAMES,
   TRANSPORT_MODES,
+  canBuildDepot,
+  canUnlockLine2,
   getAbandonmentPercent,
-  getAddStopACost,
-  getAddStopBCost,
   getAverageWaitMinutes,
   getBottleneck,
-  getCorridorADemandPpm,
-  getCorridorBDemandPpm,
   getDeliveredPassengersPpm,
+  getGarageUsed,
   getIncomePerSecond,
-  getInterchangeIngressPpm,
   getLineCapacityPpm,
+  getLineDemandPpm,
   getLineFrequencyPerHour,
   getLineHeadwayMinutes,
   getLineOneWayMinutes,
-  getServiceBoard,
+  getNextStopCost,
   getUpgradeCost,
   getVehiclePurchaseCost,
 } from '../simulation/model.js';
@@ -35,77 +34,43 @@ const compact = (value) => {
 
 const money = (value) => `$${compact(value)}`;
 
-const BUILD_META = {
-  lineA: {
-    icon: '▰',
-    title: 'Start Bus Line 1',
-    detail: 'Includes 2 buses · Northside → Central Station',
-  },
-  terminalA: {
-    icon: '▤',
-    title: 'Build Northside Terminal',
-    detail: 'Unlock more stops and waiting capacity',
-  },
-  interchange: {
-    icon: '◆',
-    title: 'Build Central Interchange',
-    detail: 'Connect multiple corridors and destinations',
-  },
-  corridorB: {
-    icon: '▰',
-    title: 'Open Bus Line 2',
-    detail: 'Includes 2 buses · Riverside → Central Interchange',
-  },
-  stationB: {
-    icon: '▥',
-    title: 'Build Harbor Station',
-    detail: 'Extend Line 2 to a second destination',
-  },
-};
-
 const formatMinutes = (value) =>
-  `${value.toFixed(value < 10 ? 1 : 0)} min`;
+  Number.isFinite(value)
+    ? `${value.toFixed(value < 10 ? 1 : 0)} min`
+    : '—';
 
 export class Hud {
   constructor({
-    onBuild,
-    onAddStopA,
-    onAddStopB,
-    onAddVehicleA,
-    onAddVehicleB,
+    onBuildStop1,
+    onBuildStop2,
+    onBuildDepot,
+    onBuildLine2,
+    onAddVehicle1,
+    onAddVehicle2,
     onUpgrade,
     onSpeed,
     onReset,
     onInspectorClose,
   }) {
     this.handlers = {
-      onBuild,
-      onAddStopA,
-      onAddStopB,
-      onAddVehicleA,
-      onAddVehicleB,
+      onBuildStop1,
+      onBuildStop2,
+      onBuildDepot,
+      onBuildLine2,
+      onAddVehicle1,
+      onAddVehicle2,
       onUpgrade,
     };
 
     this.selection = null;
-    this.buildOpen = false;
-    this.lastState = null;
-
-    this.buildStructureKey = null;
     this.inspectorStructureKey = null;
-    this.serviceStructureKey = null;
 
     this.el = {
       money: document.querySelector('#money-value'),
       throughput: document.querySelector('#throughput-value'),
       income: document.querySelector('#income-value'),
       objective: document.querySelector('#objective-text'),
-
-      buildButton: document.querySelector('#build-menu-button'),
-      buildPanel: document.querySelector('#build-panel'),
-      buildClose: document.querySelector('#build-panel-close'),
-      buildList: document.querySelector('#build-list'),
-      buildEmpty: document.querySelector('#build-empty'),
+      progress: document.querySelector('#progress-text'),
 
       inspector: document.querySelector('#inspector-panel'),
       inspectorClose: document.querySelector('#inspector-close'),
@@ -115,64 +80,63 @@ export class Hud {
       inspectorStats: document.querySelector('#inspector-stats'),
       inspectorActions: document.querySelector('#inspector-actions'),
 
-      inspectorServices: document.querySelector('#inspector-services'),
-      serviceBoardBody: document.querySelector('#service-board-body'),
-      serviceAThroughput: document.querySelector('#service-a-throughput'),
-      serviceBThroughput: document.querySelector('#service-b-throughput'),
-
       toast: document.querySelector('#toast'),
       reset: document.querySelector('#reset-button'),
     };
 
-    this.el.buildButton.addEventListener('click', () => {
-      this.buildOpen = !this.buildOpen;
-      this.#syncPanels();
-    });
-
-    this.el.buildClose.addEventListener('click', () => {
-      this.buildOpen = false;
-      this.#syncPanels();
-    });
-
-    this.el.inspectorClose.addEventListener('click', () => {
-      this.selection = null;
-      this.inspectorStructureKey = null;
-      this.serviceStructureKey = null;
-      onInspectorClose?.();
-      this.#syncPanels();
-    });
-
-    this.el.buildList.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-build]');
-      if (!button || button.disabled) return;
-
-      this.handlers.onBuild(button.dataset.build);
-    });
-
-    this.el.inspectorActions.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-command]');
-      if (!button || button.disabled) return;
-
-      if (button.dataset.command === 'upgrade') {
-        this.handlers.onUpgrade(button.dataset.type);
-      } else if (button.dataset.command === 'add-stop-a') {
-        this.handlers.onAddStopA();
-      } else if (button.dataset.command === 'add-stop-b') {
-        this.handlers.onAddStopB();
-      } else if (button.dataset.command === 'add-vehicle-a') {
-        this.handlers.onAddVehicleA();
-      } else if (button.dataset.command === 'add-vehicle-b') {
-        this.handlers.onAddVehicleB();
-      }
-    });
-
-    const pauseButton = document.querySelector(
-      '.speed-box > [data-speed="0"]',
+    this.el.inspectorClose.addEventListener(
+      'click',
+      () => {
+        this.selection = null;
+        this.inspectorStructureKey = null;
+        onInspectorClose?.();
+        this.#syncInspector();
+      },
     );
+
+    this.el.inspectorActions.addEventListener(
+      'click',
+      (event) => {
+        const button =
+          event.target.closest('[data-command]');
+
+        if (!button || button.disabled) return;
+
+        const command =
+          button.dataset.command;
+
+        if (command === 'build-stop-1') {
+          this.handlers.onBuildStop1();
+        } else if (command === 'build-stop-2') {
+          this.handlers.onBuildStop2();
+        } else if (command === 'build-depot') {
+          this.handlers.onBuildDepot();
+        } else if (command === 'build-line-2') {
+          this.handlers.onBuildLine2();
+        } else if (command === 'add-vehicle-1') {
+          this.handlers.onAddVehicle1();
+        } else if (command === 'add-vehicle-2') {
+          this.handlers.onAddVehicle2();
+        } else if (command === 'upgrade') {
+          this.handlers.onUpgrade(
+            button.dataset.type,
+          );
+        }
+      },
+    );
+
+    const pauseButton =
+      document.querySelector(
+        '.speed-box > [data-speed="0"]',
+      );
 
     pauseButton?.addEventListener(
       'click',
-      () => onSpeed(this.currentSpeed === 0 ? 1 : 0),
+      () => onSpeed(
+        this.currentSpeed === 0
+          ? 1
+          : 0,
+      ),
     );
 
     document.querySelectorAll(
@@ -180,47 +144,58 @@ export class Hud {
     ).forEach((button) => {
       button.addEventListener(
         'click',
-        () => onSpeed(Number(button.dataset.speed)),
+        () => onSpeed(
+          Number(button.dataset.speed),
+        ),
       );
     });
 
-    this.el.reset.addEventListener('click', onReset);
+    this.el.reset.addEventListener(
+      'click',
+      onReset,
+    );
   }
 
   setSelection(selection) {
-    if (this.selection !== selection) {
+    if (selection !== this.selection) {
       this.inspectorStructureKey = null;
-      this.serviceStructureKey = null;
     }
 
     this.selection = selection;
-
-    if (selection) {
-      this.buildOpen = false;
-    }
-
-    this.#syncPanels();
+    this.#syncInspector();
   }
 
   render(state) {
-    this.lastState = state;
-    this.currentSpeed = state.simulationSpeed;
+    this.currentSpeed =
+      state.simulationSpeed;
 
-    const delivered = getDeliveredPassengersPpm(state);
-    const income = getIncomePerSecond(state);
+    const delivered =
+      getDeliveredPassengersPpm(state);
 
-    this.el.money.textContent = compact(state.money);
+    const income =
+      getIncomePerSecond(state);
+
+    this.el.money.textContent =
+      compact(state.money);
+
     this.el.throughput.textContent =
       `${delivered.toFixed(1)} pax/min`;
+
     this.el.income.textContent =
       `+${compact(income)}/s`;
 
-    this.#renderBuildMenu(state);
+    if (this.el.progress) {
+      this.el.progress.textContent =
+        this.#getProgressText(state);
+    }
+
     this.#renderInspector(state);
     this.#renderObjective(state);
-    this.#syncPanels();
+    this.#syncInspector();
 
-    document.querySelectorAll('[data-speed]').forEach((button) => {
+    document.querySelectorAll(
+      '[data-speed]',
+    ).forEach((button) => {
       button.classList.toggle(
         'active',
         Number(button.dataset.speed)
@@ -228,9 +203,10 @@ export class Hud {
       );
     });
 
-    const pauseButton = document.querySelector(
-      '.speed-box > [data-speed="0"]',
-    );
+    const pauseButton =
+      document.querySelector(
+        '.speed-box > [data-speed="0"]',
+      );
 
     if (pauseButton) {
       pauseButton.textContent =
@@ -240,231 +216,126 @@ export class Hud {
     }
   }
 
-  #syncPanels() {
-    this.el.buildPanel.classList.toggle(
-      'hidden',
-      !this.buildOpen,
-    );
-
-    this.el.buildButton.classList.toggle(
-      'active',
-      this.buildOpen,
-    );
-
+  #syncInspector() {
     this.el.inspector.classList.toggle(
       'hidden',
       !this.selection,
     );
   }
 
-  #getBuildOptions(state) {
-    if (!state.corridorA.lineBuilt) {
-      return [{
-        key: 'lineA',
-        cost: ECONOMY.firstLineBuildCost,
-      }];
-    }
-
-    if (!state.terminalA.built) {
-      return [{
-        key: 'terminalA',
-        cost: ECONOMY.terminalBuildCost,
-      }];
-    }
-
-    if (!state.interchange.built) {
-      return [{
-        key: 'interchange',
-        cost: ECONOMY.interchangeBuildCost,
-      }];
-    }
-
-    const options = [];
-
-    if (!state.corridorB.built) {
-      options.push({
-        key: 'corridorB',
-        cost: ECONOMY.corridorBBuildCost,
-      });
-    }
-
-    if (!state.stationB.built) {
-      options.push({
-        key: 'stationB',
-        cost: ECONOMY.stationBBuildCost,
-      });
-    }
-
-    return options;
-  }
-
-  #renderBuildMenu(state) {
-    const options = this.#getBuildOptions(state);
-
-    const structureKey = options
-      .map((option) => option.key)
-      .join('|');
-
-    if (structureKey !== this.buildStructureKey) {
-      this.buildStructureKey = structureKey;
-      this.el.buildList.replaceChildren();
-
-      for (const option of options) {
-        const meta = BUILD_META[option.key];
-        const button = document.createElement('button');
-
-        button.type = 'button';
-        button.className = 'build-option';
-        button.dataset.build = option.key;
-
-        button.innerHTML = `
-          <span class="build-option-icon">${meta.icon}</span>
-          <span class="build-option-copy">
-            <strong>${meta.title}</strong>
-            <small>${meta.detail}</small>
-          </span>
-          <span class="build-option-cost"></span>
-        `;
-
-        this.el.buildList.append(button);
-      }
-    }
-
-    for (const option of options) {
-      const button = this.el.buildList.querySelector(
-        `[data-build="${option.key}"]`,
-      );
-
-      if (!button) continue;
-
-      button.disabled =
-        state.money < option.cost;
-
-      const cost =
-        button.querySelector('.build-option-cost');
-
-      if (cost) {
-        cost.textContent = money(option.cost);
-      }
-    }
-
-    this.el.buildEmpty.classList.toggle(
-      'hidden',
-      options.length > 0,
-    );
-
-    const available = options.filter(
-      (option) => state.money >= option.cost,
-    ).length;
-
-    const suffix =
-      options.length > 0
-        ? ` ${available}/${options.length}`
-        : '';
-
-    this.el.buildButton
-      .querySelector('span:last-child')
-      .textContent = `BUILD${suffix}`;
-  }
-
   #renderInspector(state) {
     if (!this.selection) return;
 
-    const view = this.#getInspectorView(
-      state,
-      this.selection,
-    );
+    const view =
+      this.#getInspectorView(
+        state,
+        this.selection,
+      );
 
     if (!view) {
       this.selection = null;
       this.inspectorStructureKey = null;
-      this.serviceStructureKey = null;
-      this.#syncPanels();
+      this.#syncInspector();
       return;
     }
 
-    const showServices =
-      this.selection === 'interchange'
-      && state.interchange.built;
-
-    const structureKey = JSON.stringify({
-      selection: this.selection,
-      stats: view.stats.map((stat) => stat.label),
-      actions: view.actions.map((action) => [
-        action.command,
-        action.type ?? '',
-        action.title,
-        action.detail,
-      ]),
-      showServices,
-    });
+    const structureKey =
+      JSON.stringify({
+        selection: this.selection,
+        stats: view.stats.map(
+          (stat) => stat.label,
+        ),
+        actions: view.actions.map(
+          (action) => [
+            action.command,
+            action.type ?? '',
+            action.title,
+            action.detail,
+          ],
+        ),
+      });
 
     if (
-      structureKey !== this.inspectorStructureKey
+      structureKey
+      !== this.inspectorStructureKey
     ) {
-      this.inspectorStructureKey = structureKey;
+      this.inspectorStructureKey =
+        structureKey;
+
       this.#buildInspectorStructure(view);
     }
 
-    this.el.inspectorKicker.textContent = view.kicker;
-    this.el.inspectorTitle.textContent = view.title;
-    this.el.inspectorSubtitle.textContent = view.subtitle;
+    this.el.inspectorKicker.textContent =
+      view.kicker;
+
+    this.el.inspectorTitle.textContent =
+      view.title;
+
+    this.el.inspectorSubtitle.textContent =
+      view.subtitle;
 
     const statRows = [
       ...this.el.inspectorStats.children,
     ];
 
-    view.stats.forEach((stat, index) => {
-      const row = statRows[index];
-      if (!row) return;
+    view.stats.forEach(
+      (stat, index) => {
+        const row = statRows[index];
+        if (!row) return;
 
-      const value = row.querySelector('strong');
-      if (!value) return;
+        const value =
+          row.querySelector('strong');
 
-      value.textContent = stat.value;
-      value.className = stat.className ?? '';
-    });
+        if (!value) return;
+
+        value.textContent = stat.value;
+        value.className =
+          stat.className ?? '';
+      },
+    );
 
     const actionButtons = [
       ...this.el.inspectorActions
         .querySelectorAll('[data-command]'),
     ];
 
-    view.actions.forEach((action, index) => {
-      const button = actionButtons[index];
-      if (!button) return;
+    view.actions.forEach(
+      (action, index) => {
+        const button =
+          actionButtons[index];
 
-      button.disabled = Boolean(action.disabled);
+        if (!button) return;
 
-      const price =
-        button.querySelector('.buy-pill');
+        button.disabled =
+          Boolean(action.disabled);
 
-      if (price) {
-        price.textContent = action.costLabel;
-      }
-    });
+        const price =
+          button.querySelector('.buy-pill');
 
-    this.el.inspectorServices.classList.toggle(
-      'hidden',
-      !showServices,
+        if (price) {
+          price.textContent =
+            action.costLabel;
+        }
+      },
     );
-
-    if (showServices) {
-      this.#renderServiceBoard(state);
-    }
   }
 
   #buildInspectorStructure(view) {
     this.el.inspectorStats.replaceChildren();
 
     for (const stat of view.stats) {
-      const row = document.createElement('div');
+      const row =
+        document.createElement('div');
+
       row.className = 'inspector-stat';
 
-      const label = document.createElement('span');
+      const label =
+        document.createElement('span');
+
       label.textContent = stat.label;
 
-      const value = document.createElement('strong');
+      const value =
+        document.createElement('strong');
 
       row.append(label, value);
       this.el.inspectorStats.append(row);
@@ -473,407 +344,483 @@ export class Hud {
     this.el.inspectorActions.replaceChildren();
 
     for (const action of view.actions) {
-      const button = document.createElement('button');
+      const button =
+        document.createElement('button');
+
       button.type = 'button';
       button.className = 'inspector-action';
-      button.dataset.command = action.command;
+      button.dataset.command =
+        action.command;
 
       if (action.type) {
-        button.dataset.type = action.type;
+        button.dataset.type =
+          action.type;
       }
 
-      const copy = document.createElement('span');
-      copy.className = 'inspector-action-copy';
+      const copy =
+        document.createElement('span');
 
-      const title = document.createElement('strong');
+      copy.className =
+        'inspector-action-copy';
+
+      const title =
+        document.createElement('strong');
+
       title.textContent = action.title;
 
-      const detail = document.createElement('small');
-      detail.textContent = action.detail;
+      const detail =
+        document.createElement('small');
+
+      detail.textContent =
+        action.detail;
 
       copy.append(title, detail);
 
-      const price = document.createElement('span');
+      const price =
+        document.createElement('span');
+
       price.className = 'buy-pill';
 
       button.append(copy, price);
-      this.el.inspectorActions.append(button);
+
+      this.el.inspectorActions.append(
+        button,
+      );
     }
   }
 
-  #getLineView(state, corridorKey) {
-    const isA = corridorKey === 'corridorA';
-    const corridor = state[corridorKey];
-    const mode = TRANSPORT_MODES[corridor.mode];
+  #getInspectorView(state, selection) {
+    if (selection === 'line1') {
+      return this.#getLineView(
+        state,
+        'line1',
+      );
+    }
 
-    const demand = isA
-      ? getCorridorADemandPpm(state)
-      : getCorridorBDemandPpm(state);
+    if (selection === 'line2') {
+      return this.#getLineView(
+        state,
+        'line2',
+      );
+    }
 
-    const addStopCost = isA
-      ? getAddStopACost(state)
-      : getAddStopBCost(state);
+    if (selection === 'futureStop1') {
+      const index =
+        state.line1.stopCount;
 
-    const maxStops = isA
-      ? ECONOMY.maxStopsA
-      : ECONOMY.maxStopsB;
+      return {
+        kicker: 'EXPANSION',
+        title:
+          STOP_NAMES.line1[index],
+        subtitle:
+          'Extend Bus Line 1 to this stop',
+        stats: [
+          {
+            label: 'LINE',
+            value: '1 BUS',
+          },
+          {
+            label: 'NEW SEGMENT',
+            value: '+0.9 km',
+          },
+          {
+            label: 'NEW DEMAND',
+            value:
+              `+${state.line1.demandPerStopPpm.toFixed(1)} pax/min`,
+          },
+          {
+            label: 'AFTER BUILD',
+            value:
+              state.line1.stopCount === 1
+                ? 'SERVICE STARTS'
+                : 'LINE EXTENDS',
+          },
+        ],
+        actions: [
+          {
+            command: 'build-stop-1',
+            title: 'Build stop',
+            detail:
+              state.line1.stopCount === 1
+                ? 'Creates the first service segment and includes one starter bus'
+                : 'Extends the existing line without moving earlier stops',
+            costLabel: money(
+              getNextStopCost(
+                state,
+                'line1',
+              ),
+            ),
+            disabled:
+              state.money
+              < getNextStopCost(
+                state,
+                'line1',
+              ),
+          },
+        ],
+      };
+    }
 
-    const vehicleCost = getVehiclePurchaseCost(
-      state,
-      corridorKey,
-    );
+    if (selection === 'futureStop2') {
+      const index =
+        state.line2.stopCount;
 
-    const fleetFull =
-      corridor.fleetCount
-      >= ECONOMY.maxVehiclesPerLine;
+      return {
+        kicker: 'EXPANSION',
+        title:
+          STOP_NAMES.line2[index],
+        subtitle:
+          'Extend Bus Line 2 to this stop',
+        stats: [
+          {
+            label: 'LINE',
+            value: '2 BUS',
+          },
+          {
+            label: 'NEW SEGMENT',
+            value: '+0.8 km',
+          },
+          {
+            label: 'NEW DEMAND',
+            value:
+              `+${state.line2.demandPerStopPpm.toFixed(1)} pax/min`,
+          },
+        ],
+        actions: [
+          {
+            command: 'build-stop-2',
+            title: 'Build stop',
+            detail:
+              'Extends Line 2 along the visible ghost segment',
+            costLabel: money(
+              getNextStopCost(
+                state,
+                'line2',
+              ),
+            ),
+            disabled:
+              state.money
+              < getNextStopCost(
+                state,
+                'line2',
+              ),
+          },
+        ],
+      };
+    }
 
-    const stopFull =
-      corridor.stopCount >= maxStops;
+    if (selection === 'futureDepot') {
+      return {
+        kicker: 'NEW FACILITY',
+        title: 'Bus Depot',
+        subtitle:
+          'Unlocked after reaching the third stop',
+        stats: [
+          {
+            label: 'STARTING SLOTS',
+            value: '4 buses',
+          },
+          {
+            label: 'PURPOSE',
+            value: 'FLEET',
+          },
+          {
+            label: 'LINE 1 FLEET',
+            value:
+              `${state.line1.fleetCount} bus`,
+          },
+        ],
+        actions: [
+          {
+            command: 'build-depot',
+            title: 'Build Bus Depot',
+            detail:
+              'Unlocks purchasing additional buses and garage upgrades',
+            costLabel: money(
+              ECONOMY.depotBuildCost,
+            ),
+            disabled:
+              state.money
+              < ECONOMY.depotBuildCost,
+          },
+        ],
+      };
+    }
+
+    if (selection === 'depot') {
+      return this.#getDepotView(state);
+    }
+
+    if (selection === 'futureLine2') {
+      return {
+        kicker: 'NEW SERVICE',
+        title: 'Bus Line 2',
+        subtitle:
+          'City Park → Riverside',
+        stats: [
+          {
+            label: 'MODE',
+            value: 'BUS',
+          },
+          {
+            label: 'STARTER FLEET',
+            value: '1 bus',
+          },
+          {
+            label: 'STARTER STOPS',
+            value: '2',
+          },
+          {
+            label: 'REQUIRES',
+            value: 'STABLE LINE 1',
+          },
+        ],
+        actions: [
+          {
+            command: 'build-line-2',
+            title: 'Open Bus Line 2',
+            detail:
+              'Creates a new branch from City Park with one starter bus',
+            costLabel: money(
+              ECONOMY.line2BuildCost,
+            ),
+            disabled:
+              state.money
+                < ECONOMY.line2BuildCost
+              || !canUnlockLine2(state),
+          },
+        ],
+      };
+    }
+
+    return null;
+  }
+
+  #getLineView(state, lineKey) {
+    const line = state[lineKey];
+    const isLine1 =
+      lineKey === 'line1';
+
+    if (
+      !line.built
+      && !(isLine1 && line.stopCount === 1)
+    ) {
+      return null;
+    }
+
+    const lineNumber =
+      isLine1 ? 1 : 2;
+
+    const demand =
+      getLineDemandPpm(
+        state,
+        lineKey,
+      );
+
+    const capacity =
+      getLineCapacityPpm(
+        state,
+        lineKey,
+      );
+
+    const mode =
+      TRANSPORT_MODES[line.mode];
+
+    const actions = [];
+
+    if (line.built) {
+      actions.push(
+        this.#upgradeAction(
+          state,
+          isLine1
+            ? 'shelter1'
+            : 'shelter2',
+          'Improve stops',
+          '+30 passengers of waiting capacity',
+        ),
+      );
+    }
+
+    const catchmentUnlocked =
+      isLine1
+        ? line.stopCount >= 4
+        : line.stopCount >= 3;
+
+    if (catchmentUnlocked) {
+      actions.push(
+        this.#upgradeAction(
+          state,
+          isLine1
+            ? 'catchment1'
+            : 'catchment2',
+          'Expand catchment',
+          '+0.5 pax/min demand per outer stop',
+        ),
+      );
+    }
 
     return {
-      kicker: 'LINE',
-      title: isA ? 'Bus Line 1' : 'Bus Line 2',
-      subtitle: isA
-        ? `${PLACES.corridorA.label} → ${PLACES.stationA.label}`
-        : `${PLACES.corridorB.label} → ${state.stationB.built ? PLACES.stationB.label : 'Central Interchange'}`,
+      kicker: 'SERVICE',
+      title: `Bus Line ${lineNumber}`,
+      subtitle:
+        `${line.stopCount} stop${line.stopCount === 1 ? '' : 's'} · ${mode.label}`,
       stats: [
         {
-          label: 'MODE',
-          value: mode.label.toUpperCase(),
-        },
-        {
           label: 'FLEET',
-          value: `${corridor.fleetCount} buses`,
-        },
-        {
-          label: 'VEHICLE CAP.',
-          value: `${mode.vehicleCapacity} pax`,
+          value:
+            `${line.fleetCount} bus${line.fleetCount === 1 ? '' : 'es'}`,
         },
         {
           label: 'HEADWAY',
           value: formatMinutes(
             getLineHeadwayMinutes(
               state,
-              corridorKey,
+              lineKey,
             ),
           ),
         },
         {
           label: 'FREQUENCY',
-          value: `${getLineFrequencyPerHour(state, corridorKey).toFixed(1)}/h`,
+          value:
+            `${getLineFrequencyPerHour(state, lineKey).toFixed(1)}/h`,
         },
         {
           label: 'ONE-WAY',
           value: formatMinutes(
             getLineOneWayMinutes(
               state,
-              corridorKey,
+              lineKey,
             ),
           ),
         },
         {
           label: 'CAPACITY',
-          value: `${getLineCapacityPpm(state, corridorKey).toFixed(1)} pax/min`,
+          value:
+            `${capacity.toFixed(1)} pax/min`,
         },
         {
           label: 'DEMAND',
-          value: `${demand.toFixed(1)} pax/min`,
+          value:
+            `${demand.toFixed(1)} pax/min`,
           className:
-            demand
-              > getLineCapacityPpm(
-                state,
-                corridorKey,
-              )
+            demand > capacity
+              ? 'metric-warning'
+              : '',
+        },
+        {
+          label: 'WAITING',
+          value:
+            `${line.queuePassengers.toFixed(0)} pax`,
+          className:
+            line.queuePassengers > 0
               ? 'metric-warning'
               : '',
         },
       ],
-      actions: [
-        {
-          command: isA
-            ? 'add-vehicle-a'
-            : 'add-vehicle-b',
-          title: 'Buy another bus',
-          detail:
-            'Adds one vehicle and shortens service headway',
-          costLabel: fleetFull
-            ? 'MAX'
-            : money(vehicleCost),
-          disabled:
-            fleetFull
-            || state.money < vehicleCost,
-        },
-        {
-          command: isA
-            ? 'add-stop-a'
-            : 'add-stop-b',
-          title: 'Add stop',
-          detail: isA
-            ? 'Extends Line 1 and increases passenger demand'
-            : 'Extends Line 2 and increases passenger demand',
-          costLabel: stopFull
-            ? 'MAX'
-            : money(addStopCost),
-          disabled:
-            stopFull
-            || (isA && !state.terminalA.built)
-            || state.money < addStopCost,
-        },
-        ...(isA
-          ? [
-            this.#upgradeAction(
-              state,
-              'catchmentA',
-              'Expand catchment',
-              '+1 pax/min demand per stop',
-            ),
-          ]
-          : []),
-      ],
+      actions,
     };
   }
 
-  #getInspectorView(state, selection) {
-    const bottleneck = getBottleneck(state);
-    const abandonment =
-      getAbandonmentPercent(state);
-    const averageWait =
-      getAverageWaitMinutes(state);
+  #getDepotView(state) {
+    const used =
+      getGarageUsed(state);
 
-    if (selection === 'corridorA') {
-      return this.#getLineView(
+    const vehicleCost =
+      getVehiclePurchaseCost(state);
+
+    const garageFull =
+      used >= state.depot.garageSlots;
+
+    const line1Full =
+      state.line1.fleetCount
+      >= ECONOMY.maxVehiclesPerLine;
+
+    const line2Full =
+      state.line2.fleetCount
+      >= ECONOMY.maxVehiclesPerLine;
+
+    const actions = [
+      {
+        command: 'add-vehicle-1',
+        title: 'Buy bus for Line 1',
+        detail:
+          'Adds one vehicle, reduces headway and raises line capacity',
+        costLabel:
+          line1Full
+            ? 'MAX'
+            : garageFull
+              ? 'GARAGE FULL'
+              : money(vehicleCost),
+        disabled:
+          line1Full
+          || garageFull
+          || state.money < vehicleCost,
+      },
+    ];
+
+    if (state.line2.built) {
+      actions.push({
+        command: 'add-vehicle-2',
+        title: 'Buy bus for Line 2',
+        detail:
+          'Assigns a new bus directly to Line 2',
+        costLabel:
+          line2Full
+            ? 'MAX'
+            : garageFull
+              ? 'GARAGE FULL'
+              : money(vehicleCost),
+        disabled:
+          line2Full
+          || garageFull
+          || state.money < vehicleCost,
+      });
+    }
+
+    actions.push(
+      this.#upgradeAction(
         state,
-        'corridorA',
-      );
-    }
+        'depot',
+        'Expand garage',
+        '+2 bus storage slots',
+      ),
+    );
 
-    if (
-      selection === 'terminalA'
-      && state.terminalA.built
-    ) {
-      return {
-        kicker: 'TERMINAL',
-        title: 'Northside Terminal',
-        subtitle: 'Local passenger collection point',
-        stats: [
-          {
-            label: 'PLATFORM',
-            value: `${state.terminalA.platformCapacityPpm} pax/min`,
-          },
-          {
-            label: 'WAITING',
-            value: `${state.terminalA.queuePassengers.toFixed(0)} pax`,
-          },
-          {
-            label: 'WAITING AREA',
-            value: `${state.terminalA.waitingCapacityPassengers} pax`,
-          },
-          {
-            label: 'STATUS',
-            value:
-              bottleneck === 'terminal-a'
-                ? 'BOTTLENECK'
-                : 'OPEN',
-            className:
-              bottleneck === 'terminal-a'
-                ? 'metric-warning'
-                : '',
-          },
-        ],
-        actions: [
-          this.#upgradeAction(
-            state,
-            'terminalA',
-            'Platform throughput',
-            '+5 pax/min terminal capacity',
-          ),
-          ...(!state.interchange.built
-            ? [
-              this.#upgradeAction(
-                state,
-                'waitingArea',
-                'Expand waiting area',
-                '+40 passenger waiting capacity',
-              ),
-            ]
-            : []),
-        ],
-      };
-    }
-
-    if (
-      selection === 'interchange'
-      && state.interchange.built
-    ) {
-      const totalWaiting =
-        state.interchange.queuePassengers
-        + state.interchange
-          .destinationQueuesPassengers.primary
-        + state.interchange
-          .destinationQueuesPassengers.secondary;
-
-      return {
-        kicker: 'HUB',
-        title: 'Central Interchange',
-        subtitle: 'Transfers passengers between services',
-        stats: [
-          {
-            label: 'TRANSFER CAP.',
-            value: `${state.interchange.transferCapacityPpm} pax/min`,
-          },
-          {
-            label: 'INGRESS',
-            value: `${getInterchangeIngressPpm(state).toFixed(1)} pax/min`,
-          },
-          {
-            label: 'WAITING',
-            value: `${totalWaiting.toFixed(0)} pax`,
-          },
-          {
-            label: 'AVG WAIT',
-            value: `${averageWait.toFixed(1)} min`,
-            className:
-              averageWait > 5
-                ? 'metric-warning'
-                : '',
-          },
-          {
-            label: 'LEFT QUEUE',
-            value: `${abandonment.toFixed(abandonment < 1 ? 1 : 0)}%`,
-            className:
-              abandonment > 0
-                ? 'metric-danger'
-                : '',
-          },
-          {
-            label: 'BOTTLENECK',
-            value:
-              bottleneck === 'none'
-                ? 'NONE'
-                : bottleneck.toUpperCase(),
-            className:
-              bottleneck === 'interchange'
-                ? 'metric-warning'
-                : '',
-          },
-        ],
-        actions: [
-          this.#upgradeAction(
-            state,
-            'interchange',
-            'Expand interchange',
-            '+10 pax/min transfer capacity',
-          ),
-        ],
-      };
-    }
-
-    if (selection === 'stationA') {
-      const stationIsBottleneck =
-        bottleneck === 'station-a';
-
-      return {
-        kicker: 'DESTINATION',
-        title: PLACES.stationA.label,
-        subtitle: 'Primary passenger destination',
-        stats: [
-          {
-            label: 'CAPACITY',
-            value: `${state.stationA.capacityPpm} pax/min`,
-          },
-          {
-            label: 'ARRIVALS',
-            value: state.interchange.built
-              ? `${state.interchange.lastDeliveredPpm.primary.toFixed(1)} pax/min`
-              : `${getDeliveredPassengersPpm(state).toFixed(1)} pax/min`,
-          },
-          {
-            label: 'WAITING TO ARRIVE',
-            value: state.interchange.built
-              ? `${state.interchange.destinationQueuesPassengers.primary.toFixed(0)} pax`
-              : '—',
-          },
-          {
-            label: 'STATUS',
-            value:
-              stationIsBottleneck
-                ? 'BOTTLENECK'
-                : 'OPEN',
-            className:
-              stationIsBottleneck
-                ? 'metric-warning'
-                : '',
-          },
-        ],
-        actions: [
-          this.#upgradeAction(
-            state,
-            'stationA',
-            'Expand platforms',
-            '+5 pax/min station capacity',
-          ),
-        ],
-      };
-    }
-
-    if (
-      selection === 'corridorB'
-      && state.corridorB.built
-    ) {
-      return this.#getLineView(
-        state,
-        'corridorB',
-      );
-    }
-
-    if (
-      selection === 'stationB'
-      && state.stationB.built
-    ) {
-      const stationIsBottleneck =
-        bottleneck === 'station-b';
-
-      return {
-        kicker: 'DESTINATION',
-        title: PLACES.stationB.label,
-        subtitle: 'Second passenger destination',
-        stats: [
-          {
-            label: 'CAPACITY',
-            value: `${state.stationB.capacityPpm} pax/min`,
-          },
-          {
-            label: 'ARRIVALS',
-            value: `${state.interchange.lastDeliveredPpm.secondary.toFixed(1)} pax/min`,
-          },
-          {
-            label: 'WAITING TO ARRIVE',
-            value: `${state.interchange.destinationQueuesPassengers.secondary.toFixed(0)} pax`,
-          },
-          {
-            label: 'STATUS',
-            value:
-              stationIsBottleneck
-                ? 'BOTTLENECK'
-                : 'OPEN',
-            className:
-              stationIsBottleneck
-                ? 'metric-warning'
-                : '',
-          },
-        ],
-        actions: [
-          this.#upgradeAction(
-            state,
-            'stationB',
-            'Expand platforms',
-            '+5 pax/min station capacity',
-          ),
-        ],
-      };
-    }
-
-    return null;
+    return {
+      kicker: 'FACILITY',
+      title: 'Bus Depot',
+      subtitle:
+        'Buy and assign vehicles to active lines',
+      stats: [
+        {
+          label: 'GARAGE',
+          value:
+            `${used} / ${state.depot.garageSlots}`,
+          className:
+            garageFull
+              ? 'metric-warning'
+              : '',
+        },
+        {
+          label: 'LINE 1',
+          value:
+            `${state.line1.fleetCount} buses`,
+        },
+        {
+          label: 'LINE 2',
+          value:
+            state.line2.built
+              ? `${state.line2.fleetCount} buses`
+              : 'LOCKED',
+        },
+        {
+          label: 'NEXT BUS',
+          value:
+            money(vehicleCost),
+        },
+      ],
+      actions,
+    };
   }
 
   #upgradeAction(
@@ -882,10 +829,8 @@ export class Hud {
     title,
     detail,
   ) {
-    const cost = getUpgradeCost(
-      state,
-      type,
-    );
+    const cost =
+      getUpgradeCost(state, type);
 
     return {
       command: 'upgrade',
@@ -893,128 +838,108 @@ export class Hud {
       title,
       detail,
       costLabel: money(cost),
-      disabled: state.money < cost,
+      disabled:
+        state.money < cost,
     };
   }
 
-  #renderServiceBoard(state) {
-    const services = getServiceBoard(state);
-
-    const structureKey = services
-      .map((service) =>
-        `${service.destination}:${service.service}:${service.mode}`,
-      )
-      .join('|');
-
-    if (
-      structureKey !== this.serviceStructureKey
-    ) {
-      this.serviceStructureKey = structureKey;
-      this.el.serviceBoardBody.replaceChildren();
-
-      for (const service of services) {
-        const row = document.createElement('div');
-        row.className = 'route-row service-row';
-
-        const destination =
-          document.createElement('span');
-
-        destination.textContent =
-          service.destination;
-
-        const line =
-          document.createElement('span');
-
-        line.textContent =
-          `${service.service} ${service.mode.toUpperCase()}`;
-
-        const headway =
-          document.createElement('span');
-
-        headway.textContent =
-          `${service.headwayMinutes.toFixed(1)}m`;
-
-        row.append(
-          destination,
-          line,
-          headway,
-        );
-
-        this.el.serviceBoardBody.append(row);
-      }
+  #getProgressText(state) {
+    if (!state.line1.built) {
+      return '1 / 5 STOPS';
     }
 
-    this.el.serviceAThroughput.textContent =
-      `${state.interchange.lastDeliveredPpm.primary.toFixed(1)} pax/min`;
+    if (!state.depot.built) {
+      return `${state.line1.stopCount} / 5 STOPS · DEPOT LOCKED`;
+    }
 
-    this.el.serviceBThroughput.textContent =
-      state.stationB.built
-        ? `${state.interchange.lastDeliveredPpm.secondary.toFixed(1)} pax/min`
-        : '—';
+    if (!state.line2.built) {
+      return canUnlockLine2(state)
+        ? 'LINE 2 UNLOCKED'
+        : `${state.line1.stopCount} / 5 STOPS · BUILD LINE 1`;
+    }
+
+    return `2 LINES · ${getGarageUsed(state)} BUSES`;
   }
 
   #renderObjective(state) {
-    const bottleneck = getBottleneck(state);
+    const bottleneck =
+      getBottleneck(state);
 
-    if (!state.corridorA.lineBuilt) {
+    if (!state.line1.built) {
       this.el.objective.textContent =
-        'Open BUILD and start Bus Line 1.';
+        'Click the ghost stop on the map to start Bus Line 1.';
       return;
     }
 
     if (
-      bottleneck === 'line-a'
-      && state.terminalA.built
+      state.line1.stopCount < 3
     ) {
       this.el.objective.textContent =
-        'Line 1 is overcrowded. Click it and add a bus.';
-      return;
-    }
-
-    if (!state.terminalA.built) {
-      this.el.objective.textContent =
-        'Build Northside Terminal to add more stops.';
-      return;
-    }
-
-    if (!state.interchange.built) {
-      this.el.objective.textContent =
-        'Build Central Interchange. Existing Line 1 stays in place.';
+        'Let Line 1 earn money, then click the next ghost stop to extend it.';
       return;
     }
 
     if (
-      bottleneck === 'line-b'
-      && state.corridorB.built
+      canBuildDepot(state)
     ) {
       this.el.objective.textContent =
-        'Line 2 is overcrowded. Add another bus to shorten headway.';
+        'Bus Depot unlocked. Click its ghost building beside City Park.';
       return;
     }
 
     if (
-      !state.corridorB.built
-      || !state.stationB.built
+      bottleneck === 'line-1'
+      && state.depot.built
     ) {
       this.el.objective.textContent =
-        'Expand the city with another line or destination.';
+        'Line 1 is overloaded. Open the depot and assign another bus.';
       return;
     }
 
-    if (bottleneck !== 'none') {
+    if (
+      state.line1.stopCount
+      < ECONOMY.maxLine1Stops
+    ) {
       this.el.objective.textContent =
-        `Passenger bottleneck: ${bottleneck}. Click that element to improve it.`;
+        'Extend Line 1 by buying the next visible stop.';
       return;
     }
 
-    if (this.selection) {
+    if (
+      canUnlockLine2(state)
+    ) {
       this.el.objective.textContent =
-        'Fleet size now determines frequency and line capacity.';
+        'Line 2 unlocked. Click the yellow branch at City Park.';
+      return;
+    }
+
+    if (
+      !state.line2.built
+    ) {
+      this.el.objective.textContent =
+        'Stabilize Line 1 with enough buses to unlock a second service.';
+      return;
+    }
+
+    if (
+      bottleneck === 'line-2'
+    ) {
+      this.el.objective.textContent =
+        'Line 2 is overloaded. Buy another bus from the depot.';
+      return;
+    }
+
+    if (
+      state.line2.stopCount
+      < ECONOMY.maxLine2Stops
+    ) {
+      this.el.objective.textContent =
+        'Grow Line 2 by purchasing the next yellow stop.';
       return;
     }
 
     this.el.objective.textContent =
-      'Services stable. Add stops carefully: longer routes need more vehicles.';
+      'Bus network established. The next era can introduce new transport modes.';
   }
 
   toast(message) {
