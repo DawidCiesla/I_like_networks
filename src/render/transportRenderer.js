@@ -3,10 +3,6 @@ import {
   STOP_NAMES,
   canBuildDepot,
   canUnlockLine2,
-  getAverageWaitMinutes,
-  getBottleneck,
-  getDeliveredPassengersPpm,
-  getLastFareEventValue,
   getLineDemandPpm,
   getNextStopCost,
   getStopWaitingPassengers,
@@ -361,10 +357,6 @@ export class TransportRenderer {
       this.#drawFutureLine2(ctx, state);
     }
 
-    this.#drawSystemReadout(
-      ctx,
-      state,
-    );
   }
 
   #drawLine(
@@ -594,7 +586,7 @@ export class TransportRenderer {
     ctx.arc(
       rect.x,
       rect.y,
-      30,
+      22,
       0,
       Math.PI * 2,
     );
@@ -607,7 +599,7 @@ export class TransportRenderer {
     ctx.arc(
       rect.x,
       rect.y,
-      26,
+      18,
       Math.PI * 0.1,
       Math.PI * 1.1,
     );
@@ -619,7 +611,7 @@ export class TransportRenderer {
     ctx.arc(
       rect.x,
       rect.y,
-      26,
+      18,
       Math.PI * 1.1,
       Math.PI * 2.1,
     );
@@ -669,16 +661,6 @@ export class TransportRenderer {
     ctx.lineWidth = 4;
     this.#traceRoute(ctx, metrics);
     ctx.stroke();
-
-    ctx.setLineDash([10, 14]);
-    ctx.strokeStyle = '#efeee8';
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = 1;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
 
     for (
       let distance = 105;
@@ -805,34 +787,44 @@ export class TransportRenderer {
     const onboard =
       getVehicleOnboardPassengers(vehicle);
 
-    if (onboard > 0.05) {
+    if (onboard > 0.5) {
+      const loadText =
+        String(Math.round(onboard));
+
+      ctx.font =
+        '7px "Lucida Console", monospace';
+
+      const width =
+        Math.max(
+          14,
+          ctx.measureText(loadText).width + 7,
+        );
+
       ctx.fillStyle = '#111';
-      ctx.strokeStyle = '#efeee8';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
 
       ctx.fillRect(
-        point.x - 14,
-        point.y - 23,
-        28,
-        14,
+        point.x - width / 2,
+        point.y - 19,
+        width,
+        11,
       );
 
       ctx.strokeRect(
-        point.x - 14,
-        point.y - 23,
-        28,
-        14,
+        point.x - width / 2,
+        point.y - 19,
+        width,
+        11,
       );
 
       ctx.fillStyle = '#efeee8';
-      ctx.font =
-        '8px "Lucida Console", monospace';
       ctx.textAlign = 'center';
 
       ctx.fillText(
-        `${Math.round(onboard)} pax`,
+        loadText,
         point.x,
-        point.y - 13,
+        point.y - 11,
       );
     }
   }
@@ -918,14 +910,32 @@ export class TransportRenderer {
       y - 12,
     );
 
-    ctx.fillStyle = '#f3f2eb';
+    const stopLabel =
+      label.toUpperCase();
+
     ctx.font =
       '8px "Lucida Console", monospace';
 
+    const labelWidth =
+      ctx.measureText(stopLabel).width + 8;
+
+    ctx.fillStyle = '#151515';
+    ctx.globalAlpha = 0.9;
+
+    ctx.fillRect(
+      x - labelWidth / 2,
+      y + 23,
+      labelWidth,
+      13,
+    );
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#f3f2eb';
+
     ctx.fillText(
-      label.toUpperCase(),
+      stopLabel,
       x,
-      y + 31,
+      y + 32,
     );
   }
 
@@ -946,71 +956,95 @@ export class TransportRenderer {
 
     if (waiting <= 0.05) return;
 
+    const side =
+      lineKey === 'line1'
+        ? (stopIndex % 2 === 0 ? -1 : 1)
+        : (stopIndex % 2 === 0 ? 1 : -1);
+
     const visible =
       clamp(
         Math.ceil(waiting),
         1,
-        8,
+        5,
       );
 
-    const startX =
-      rect.x - 22;
+    const baseX =
+      rect.x + side * 34;
 
-    const y =
-      rect.y + 36;
+    const baseY =
+      rect.y - 14;
 
     for (
       let index = 0;
       index < visible;
       index += 1
     ) {
-      const px =
-        startX + index * 7;
+      const py =
+        baseY + index * 7;
 
       ctx.fillStyle = '#efeee8';
       ctx.fillRect(
-        px,
-        y,
+        baseX - 1,
+        py,
         3,
         3,
       );
 
       ctx.fillStyle = color;
       ctx.fillRect(
-        px - 1,
-        y + 4,
+        baseX - 2,
+        py + 4,
         5,
-        6,
+        4,
       );
     }
 
-    ctx.fillStyle = '#151515';
+    const countText =
+      String(
+        Math.round(waiting),
+      );
+
+    ctx.font =
+      '7px "Lucida Console", monospace';
+
+    const badgeWidth =
+      Math.max(
+        14,
+        ctx.measureText(countText).width + 7,
+      );
+
+    const badgeX =
+      rect.x + side * 47
+      - badgeWidth / 2;
+
+    const badgeY =
+      rect.y - 31;
+
+    ctx.fillStyle = '#111';
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
 
     ctx.fillRect(
-      rect.x - 19,
-      rect.y + 49,
-      38,
-      14,
+      badgeX,
+      badgeY,
+      badgeWidth,
+      11,
     );
 
     ctx.strokeRect(
-      rect.x - 19,
-      rect.y + 49,
-      38,
-      14,
+      badgeX,
+      badgeY,
+      badgeWidth,
+      11,
     );
 
     ctx.fillStyle = '#efeee8';
-    ctx.font =
-      '8px "Lucida Console", monospace';
     ctx.textAlign = 'center';
 
     ctx.fillText(
-      `${waiting.toFixed(waiting < 10 ? 1 : 0)} WAIT`,
-      rect.x,
-      rect.y + 59,
+      countText,
+      badgeX + badgeWidth / 2,
+      badgeY + 8,
     );
   }
 
@@ -1462,86 +1496,6 @@ export class TransportRenderer {
 
       ctx.globalAlpha = 1;
     }
-  }
-
-  #drawSystemReadout(ctx, state) {
-    if (!state.line1.built) return;
-
-    const delivered =
-      getDeliveredPassengersPpm(state);
-
-    const wait =
-      getAverageWaitMinutes(state);
-
-    const bottleneck =
-      getBottleneck(state);
-
-    const lastFare =
-      getLastFareEventValue(state);
-
-    const x = -35;
-    const y = -250;
-
-    ctx.fillStyle = '#151515';
-    ctx.strokeStyle = '#4e4e4e';
-    ctx.lineWidth = 2;
-
-    ctx.fillRect(
-      x - 112,
-      y - 18,
-      224,
-      66,
-    );
-
-    ctx.strokeRect(
-      x - 112,
-      y - 18,
-      224,
-      66,
-    );
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font =
-      '9px "Lucida Console", monospace';
-    ctx.textAlign = 'left';
-
-    ctx.fillText(
-      `RECENT ARRIVALS ${delivered.toFixed(1)} pax/min`,
-      x - 102,
-      y,
-    );
-
-    ctx.fillStyle =
-      wait > 5
-        ? '#f4ca00'
-        : '#aaa9a2';
-
-    ctx.fillText(
-      `AVG WAIT ${wait.toFixed(1)} min`,
-      x - 102,
-      y + 14,
-    );
-
-    ctx.fillStyle =
-      bottleneck === 'none'
-        ? '#aaa9a2'
-        : '#e91e47';
-
-    ctx.fillText(
-      `STATUS ${bottleneck.toUpperCase()}`,
-      x - 102,
-      y + 28,
-    );
-
-    ctx.fillStyle = '#b9ff8b';
-
-    ctx.fillText(
-      lastFare > 0
-        ? `LAST ARRIVAL +$${lastFare.toFixed(0)}`
-        : 'LAST ARRIVAL —',
-      x - 102,
-      y + 42,
-    );
   }
 
   #drawSelection(
