@@ -92,7 +92,7 @@ static func _rounded_polyline(points: Array, radius: float = 38.0, steps: int = 
 		var next := spread_points[index + 1]
 		var incoming := previous.distance_to(corner)
 		var outgoing := corner.distance_to(next)
-		var effective_radius := min(radius, incoming * 0.38, outgoing * 0.38)
+		var effective_radius := min(radius, min(incoming * 0.38, outgoing * 0.38))
 		var entry := _point_toward(corner, previous, effective_radius)
 		var exit := _point_toward(corner, next, effective_radius)
 		result.append(entry)
