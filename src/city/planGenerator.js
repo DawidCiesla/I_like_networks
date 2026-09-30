@@ -925,6 +925,9 @@ function generateDistrictRoads(
             index,
           ),
           reservations,
+          {
+            terrainSeed: seed,
+          },
         );
 
       if (right.ok) {
@@ -962,6 +965,9 @@ function generateDistrictRoads(
           roads,
           candidate,
           reservations,
+          {
+            terrainSeed: seed,
+          },
         );
 
       if (added.ok) {
