@@ -992,6 +992,8 @@ export class ThreeTransportRenderer {
       new THREE.Raycaster();
 
     this.pointerDown = null;
+    this.dynamicMeshes =
+      new Map();
     this.worldSeed = null;
     this.bounds = null;
     this.citySignature = null;
@@ -2730,10 +2732,62 @@ export class ThreeTransportRenderer {
     );
   }
 
-  #updateVehicles(state) {
-    clearGroup(
-      this.vehicleGroup,
+  #dynamicVehicleMesh(
+    key,
+    {
+      width,
+      height,
+      depth,
+      color,
+      emissive = 0,
+      emissiveIntensity = 0,
+    },
+  ) {
+    if (
+      this.dynamicMeshes.has(key)
+    ) {
+      return this.dynamicMeshes.get(
+        key,
+      );
+    }
+
+    const mesh =
+      new THREE.Mesh(
+        new THREE.BoxGeometry(
+          width,
+          height,
+          depth,
+        ),
+        new THREE.MeshStandardMaterial({
+          color,
+          emissive,
+          emissiveIntensity,
+          roughness: 0.6,
+          metalness: 0.06,
+        }),
+      );
+
+    mesh.castShadow = true;
+
+    this.dynamicMeshes.set(
+      key,
+      mesh,
     );
+
+    this.vehicleGroup.add(
+      mesh,
+    );
+
+    return mesh;
+  }
+
+  #updateVehicles(state) {
+    for (
+      const mesh
+      of this.dynamicMeshes.values()
+    ) {
+      mesh.visible = false;
+    }
 
     const drawLineVehicles = (
       lineKey,
@@ -2764,19 +2818,19 @@ export class ThreeTransportRenderer {
           );
 
         const bus =
-          new THREE.Mesh(
-            new THREE.BoxGeometry(
-              13,
-              7,
-              6.5,
-            ),
-            new THREE.MeshStandardMaterial({
+          this.#dynamicVehicleMesh(
+            `bus-${lineKey}-${vehicle.id}`,
+            {
+              width: 13,
+              height: 7,
+              depth: 6.5,
               color,
               emissive: color,
               emissiveIntensity: 0.2,
-              roughness: 0.58,
-            }),
+            },
           );
+
+        bus.visible = true;
 
         bus.position.set(
           point.x,
@@ -2791,10 +2845,6 @@ export class ThreeTransportRenderer {
           );
 
         bus.castShadow = true;
-
-        this.vehicleGroup.add(
-          bus,
-        );
       }
     };
 
@@ -2906,22 +2956,21 @@ export class ThreeTransportRenderer {
           );
 
         const car =
-          new THREE.Mesh(
-            new THREE.BoxGeometry(
-              4.6,
-              2.1,
-              2.2,
-            ),
-            new THREE.MeshStandardMaterial({
+          this.#dynamicVehicleMesh(
+            `ambient-${index}`,
+            {
+              width: 4.6,
+              height: 2.1,
+              depth: 2.2,
               color:
                 carColors[
                   index
                   % carColors.length
                 ],
-              roughness: 0.62,
-              metalness: 0.08,
-            }),
+            },
           );
+
+        car.visible = true;
 
         car.position.set(
           laneX,
@@ -2936,10 +2985,6 @@ export class ThreeTransportRenderer {
           );
 
         car.castShadow = true;
-
-        this.vehicleGroup.add(
-          car,
-        );
       }
     }
   }
