@@ -177,7 +177,7 @@ const DISTRICT_SPECS = Object.freeze([
     parentRoadId: 'arterial-line4-0',
     branchSide: 1,
     depth: 350,
-    halfWidth: 300,
+    halfWidth: 165,
     crossRoadCount: 2,
   },
   {
