@@ -7,16 +7,20 @@ const Layout = preload("res://scripts/transport/transport_layout.gd")
 @export var margin := 560.0
 
 var _trees: MultiMeshInstance3D
+var _tree_data: Array[Dictionary] = []
+var _occupancy_signature := ""
 
 func _ready() -> void:
 	rebuild()
+	GameStore.city_changed.connect(_sync_city_occupancy)
+	GameStore.state_changed.connect(_sync_city_occupancy)
 
 func rebuild() -> void:
 	for child in get_children():
 		child.queue_free()
 
+	_tree_data.clear()
 	var bounds := _world_bounds()
-	var transforms: Array[Transform3D] = []
 
 	var x := bounds.position.x
 	while x <= bounds.end.x:
@@ -28,16 +32,13 @@ func rebuild() -> void:
 			var pz := z + jitter_z
 
 			if _should_place_tree(px, pz):
-				var scale := 0.75 + _pseudo(px, pz, 4) * 0.75
-				var transform := Transform3D.IDENTITY
-				transform = transform.rotated(Vector3.UP, _pseudo(px, pz, 5) * TAU)
-				transform = transform.scaled(Vector3.ONE * scale)
-				transform.origin = Vector3(
-					px,
-					Terrain.height(GameStore.city_seed, px, pz) + 8.5 * scale,
-					pz
-				)
-				transforms.append(transform)
+				_tree_data.append({
+					"x": px,
+					"z": pz,
+					"scale": 0.75 + _pseudo(px, pz, 4) * 0.75,
+					"rotation": _pseudo(px, pz, 5) * TAU,
+					"ground": Terrain.height(GameStore.city_seed, px, pz),
+				})
 			z += spacing
 		x += spacing
 
@@ -55,16 +56,115 @@ func rebuild() -> void:
 
 	var multi := MultiMesh.new()
 	multi.transform_format = MultiMesh.TRANSFORM_3D
-	multi.instance_count = transforms.size()
+	multi.instance_count = _tree_data.size()
 	multi.mesh = tree_mesh
-
-	for index in range(transforms.size()):
-		multi.set_instance_transform(index, transforms[index])
 
 	_trees = MultiMeshInstance3D.new()
 	_trees.multimesh = multi
 	_trees.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_trees)
+
+	_occupancy_signature = ""
+	_sync_city_occupancy(true)
+
+func _sync_city_occupancy(force: bool = false) -> void:
+	if _trees == null or _trees.multimesh == null:
+		return
+
+	var signature := _city_occupancy_signature()
+	if not force and signature == _occupancy_signature:
+		return
+	_occupancy_signature = signature
+
+	var active_roads: Array = []
+	if not GameStore.city.is_empty():
+		for road in GameStore.city.get("roads", []):
+			if str(road.get("status", "")) in ["built", "constructing"]:
+				active_roads.append(road)
+
+	var parcel_lookup: Dictionary = {}
+	if not GameStore.city.is_empty():
+		for parcel in GameStore.city.get("parcels", []):
+			parcel_lookup[str(parcel["id"])] = parcel
+
+	var occupied_parcels: Array = []
+	if not GameStore.city.is_empty():
+		for building in GameStore.city.get("buildings", []):
+			var parcel: Dictionary = parcel_lookup.get(str(building.get("parcelId", "")), {})
+			if not parcel.is_empty():
+				occupied_parcels.append(parcel)
+
+	for index in range(_tree_data.size()):
+		var tree: Dictionary = _tree_data[index]
+		var point := Vector2(float(tree["x"]), float(tree["z"]))
+		var blocked := false
+
+		for road in active_roads:
+			if _point_near_road(point, road, 13.0):
+				blocked = true
+				break
+
+		if not blocked:
+			for parcel in occupied_parcels:
+				if _point_in_parcel(point, parcel, 8.0):
+					blocked = true
+					break
+
+		var scale := 0.0001 if blocked else float(tree["scale"])
+		var transform := Transform3D.IDENTITY
+		transform = transform.rotated(Vector3.UP, float(tree["rotation"]))
+		transform = transform.scaled(Vector3.ONE * scale)
+		transform.origin = Vector3(
+			float(tree["x"]),
+			float(tree["ground"]) + 8.5 * scale,
+			float(tree["z"])
+		)
+		_trees.multimesh.set_instance_transform(index, transform)
+
+func _city_occupancy_signature() -> String:
+	if GameStore.city.is_empty():
+		return "empty"
+
+	var road_parts: Array[String] = []
+	for road in GameStore.city.get("roads", []):
+		if str(road.get("status", "")) in ["built", "constructing"]:
+			road_parts.append(str(road["id"]))
+	road_parts.sort()
+
+	var building_parts: Array[String] = []
+	for building in GameStore.city.get("buildings", []):
+		building_parts.append(str(building["parcelId"]))
+	building_parts.sort()
+
+	return "%s::%s" % ["|".join(road_parts), "|".join(building_parts)]
+
+func _point_near_road(point: Vector2, road: Dictionary, extra: float) -> bool:
+	var width := 15.0
+	match str(road.get("class", "local")):
+		"arterial":
+			width = 31.0
+		"collector":
+			width = 21.0
+		"service":
+			width = 12.0
+
+	var points: Array = road.get("points", [])
+	for index in range(points.size() - 1):
+		var a_raw: Dictionary = points[index]
+		var b_raw: Dictionary = points[index + 1]
+		var a := Vector2(float(a_raw["x"]), float(a_raw["y"]))
+		var b := Vector2(float(b_raw["x"]), float(b_raw["y"]))
+		if _distance_to_segment(point, a, b) < width * 0.5 + extra:
+			return true
+	return false
+
+func _point_in_parcel(point: Vector2, parcel: Dictionary, padding: float) -> bool:
+	var half_w := float(parcel.get("w", 0.0)) * 0.5 + padding
+	var half_h := float(parcel.get("h", 0.0)) * 0.5 + padding
+	return (
+		abs(point.x - float(parcel["x"])) <= half_w
+		and abs(point.y - float(parcel["y"])) <= half_h
+	)
 
 func _should_place_tree(x: float, z: float) -> bool:
 	var forest := Terrain.forest_potential(GameStore.city_seed, x, z)
