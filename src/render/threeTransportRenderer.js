@@ -878,10 +878,26 @@ export class ThreeTransportRenderer {
     this.onSelectionChanged =
       onSelectionChanged;
 
+    const initialRect =
+      canvas.getBoundingClientRect();
+
+    const initialViewportPixels =
+      Math.max(
+        1,
+        initialRect.width,
+      )
+      * Math.max(
+        1,
+        initialRect.height,
+      );
+
     this.renderer =
       new THREE.WebGLRenderer({
         canvas,
-        antialias: true,
+        antialias:
+          initialViewportPixels
+          < RENDER_PERFORMANCE
+            .largeViewportPixels,
         alpha: false,
         powerPreference:
           'high-performance',
@@ -901,6 +917,12 @@ export class ThreeTransportRenderer {
 
     this.renderer.shadowMap.type =
       THREE.PCFShadowMap;
+
+    this.renderer.shadowMap.autoUpdate =
+      false;
+
+    this.renderer.shadowMap.needsUpdate =
+      true;
 
     this.scene =
       new THREE.Scene();
@@ -2407,7 +2429,7 @@ export class ThreeTransportRenderer {
     group.add(mesh);
     this.buildingGroup.add(group);
 
-    return {
+    const entry = {
       group,
       mesh,
       roof: null,
@@ -2415,7 +2437,22 @@ export class ThreeTransportRenderer {
       ground,
       status:
         building.status,
+      shadowBucket: -1,
     };
+
+    if (
+      building.status === 'built'
+    ) {
+      this.#addBuildingRoof(
+        entry,
+        building,
+      );
+    }
+
+    this.renderer.shadowMap.needsUpdate =
+      true;
+
+    return entry;
   }
 
   #addBuildingRoof(
@@ -2575,6 +2612,22 @@ export class ThreeTransportRenderer {
           + 0.7,
         building.y,
       );
+
+      const shadowBucket =
+        Math.floor(
+          progress * 10,
+        );
+
+      if (
+        entry.shadowBucket
+        !== shadowBucket
+      ) {
+        entry.shadowBucket =
+          shadowBucket;
+
+        this.renderer.shadowMap.needsUpdate =
+          true;
+      }
     }
 
     for (
@@ -2651,6 +2704,9 @@ export class ThreeTransportRenderer {
     }
 
     this.#buildDepot(state);
+
+    this.renderer.shadowMap.needsUpdate =
+      true;
   }
 
   #buildTransitRibbon(
