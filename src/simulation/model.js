@@ -1,4 +1,10 @@
-export const GAME_VERSION = 7;
+import {
+  advanceCitySimulation,
+  createInitialCityState,
+  ensureCityRuntime,
+} from '../city/cityModel.js';
+
+export const GAME_VERSION = 8;
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
@@ -166,6 +172,8 @@ export function createInitialState() {
     money: ECONOMY.startingMoney,
     elapsedSeconds: 0,
     simulationSpeed: 1,
+
+    city: createInitialCityState(),
 
     line1: createLineState('line1'),
 
@@ -1218,4 +1226,13 @@ export function advanceSimulation(
     'line2',
     deltaMinutes,
   );
+
+  advanceCitySimulation(
+    state,
+    deltaSeconds,
+  );
 }
+
+export {
+  ensureCityRuntime,
+};
