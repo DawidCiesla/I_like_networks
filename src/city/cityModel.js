@@ -1,0 +1,983 @@
+import {
+  generateCityMasterPlan,
+} from './planGenerator.js';
+
+export const CITY_VERSION = 1;
+export const DEFAULT_CITY_SEED = 284731;
+
+const MAX_ACTIVE_PROJECTS = 2;
+
+function clamp(value, min, max) {
+  return Math.min(
+    max,
+    Math.max(min, value),
+  );
+}
+
+function transportUnlockSatisfied(
+  state,
+  unlock,
+) {
+  if (!unlock) return true;
+
+  if (unlock.districtId) {
+    return Boolean(
+      state.city.districts.find(
+        (district) =>
+          district.id
+          === unlock.districtId,
+      )?.status === 'active',
+    );
+  }
+
+  const line =
+    unlock.lineKey === 'line1'
+      ? state.line1
+      : state.line2;
+
+  if (!line) return false;
+
+  if (
+    unlock.lineKey === 'line2'
+    && !state.line2.built
+  ) {
+    return false;
+  }
+
+  return (
+    line.stopCount
+    >= (unlock.stopCount ?? 0)
+  );
+}
+
+function districtShouldBeActive(
+  state,
+  district,
+) {
+  if (district.lineKey === 'line1') {
+    return (
+      state.line1.stopCount
+      > district.stopIndex
+    );
+  }
+
+  return (
+    state.line2.built
+    && state.line2.stopCount
+      > district.stopIndex
+  );
+}
+
+function getDistrictLine(
+  state,
+  district,
+) {
+  return (
+    district.lineKey === 'line1'
+      ? state.line1
+      : state.line2
+  );
+}
+
+function getDistrictPressure(
+  state,
+  district,
+) {
+  const line =
+    getDistrictLine(
+      state,
+      district,
+    );
+
+  const age =
+    Math.max(
+      0,
+      state.city.timeSeconds
+      - (district.activatedAt ?? 0),
+    );
+
+  const ageScore =
+    Math.min(
+      3.5,
+      age / 40,
+    );
+
+  const stopScore =
+    Math.max(
+      0,
+      line.stopCount - 1,
+    ) * 0.35;
+
+  const ridershipScore =
+    Math.min(
+      2.5,
+      (line.lastDeliveredPpm ?? 0)
+      / 8,
+    );
+
+  const fleetScore =
+    Math.min(
+      1.5,
+      (line.fleetCount ?? 0)
+      * 0.25,
+    );
+
+  const interchangeBonus =
+    district.id === 'park'
+    && state.line2.built
+      ? 1.2
+      : 0;
+
+  const centralBonus =
+    district.theme === 'central'
+      ? 0.8
+      : 0;
+
+  return (
+    0.6
+    + ageScore
+    + stopScore
+    + ridershipScore
+    + fleetScore
+    + interchangeBonus
+    + centralBonus
+  );
+}
+
+function projectDurationForRoad(
+  road,
+) {
+  const pointCount =
+    road.points?.length ?? 2;
+
+  return (
+    road.class === 'service'
+      ? 8
+      : 7 + pointCount * 1.5
+  );
+}
+
+function buildingProfileFor(
+  district,
+  parcel,
+  pressure,
+) {
+  const density = clamp(
+    parcel.density
+      + Math.floor(
+        Math.max(
+          0,
+          pressure - 3.8,
+        ) / 2.2,
+      ),
+    1,
+    4,
+  );
+
+  if (parcel.zone === 'industrial') {
+    return {
+      kind:
+        density >= 3
+          ? 'warehouse'
+          : 'workshop',
+      floors:
+        density >= 3 ? 2 : 1,
+      density,
+    };
+  }
+
+  if (parcel.zone === 'civic') {
+    return {
+      kind:
+        district.theme === 'campus'
+          ? 'campus'
+          : 'civic',
+      floors:
+        density >= 3 ? 4 : 3,
+      density,
+    };
+  }
+
+  if (parcel.zone === 'commercial') {
+    if (
+      district.theme === 'central'
+      && density >= 4
+    ) {
+      return {
+        kind: 'tower',
+        floors:
+          8 + Math.min(4, density),
+        density,
+      };
+    }
+
+    return {
+      kind:
+        density >= 3
+          ? 'midrise'
+          : 'shop',
+      floors:
+        density >= 3
+          ? 4 + density
+          : 1,
+      density,
+    };
+  }
+
+  if (parcel.zone === 'mixed') {
+    if (
+      district.theme === 'central'
+      && density >= 4
+    ) {
+      return {
+        kind: 'tower',
+        floors: 9,
+        density,
+      };
+    }
+
+    if (density >= 3) {
+      return {
+        kind: 'midrise',
+        floors: 4 + density,
+        density,
+      };
+    }
+
+    return {
+      kind: 'shop',
+      floors: 2,
+      density,
+    };
+  }
+
+  if (density >= 3) {
+    return {
+      kind: 'apartment',
+      floors: 3 + density,
+      density,
+    };
+  }
+
+  if (density >= 2) {
+    return {
+      kind: 'townhouse',
+      floors: 2,
+      density,
+    };
+  }
+
+  return {
+    kind: 'house',
+    floors: 1,
+    density,
+  };
+}
+
+function buildingDuration(profile) {
+  if (profile.kind === 'tower') {
+    return 48;
+  }
+
+  if (
+    profile.kind === 'midrise'
+    || profile.kind === 'campus'
+    || profile.kind === 'civic'
+  ) {
+    return 32;
+  }
+
+  if (
+    profile.kind === 'apartment'
+    || profile.kind === 'warehouse'
+  ) {
+    return 24;
+  }
+
+  return 15;
+}
+
+function activeProjectCount(city) {
+  return city.projects.filter(
+    (project) =>
+      project.status === 'active',
+  ).length;
+}
+
+function nextProjectId(city) {
+  const id =
+    `project-${city.nextProjectId}`;
+
+  city.nextProjectId += 1;
+  return id;
+}
+
+function scheduleRoadProjects(
+  state,
+  district,
+) {
+  const city = state.city;
+
+  const roads =
+    city.roads
+      .filter(
+        (road) =>
+          road.districtId
+          === district.id
+          && road.source === 'city'
+          && road.status === 'planned',
+      )
+      .sort(
+        (a, b) =>
+          a.buildOrder - b.buildOrder,
+      );
+
+  roads.forEach(
+    (road, index) => {
+      const exists =
+        city.projects.some(
+          (project) =>
+            project.targetType === 'road'
+            && project.targetId
+              === road.id,
+        );
+
+      if (exists) return;
+
+      city.projects.push({
+        id:
+          nextProjectId(city),
+        type: 'road',
+        targetType: 'road',
+        targetId: road.id,
+        districtId:
+          district.id,
+        status: 'queued',
+        queuedAt:
+          city.timeSeconds,
+        eligibleAt:
+          city.timeSeconds
+          + 5
+          + index * 8,
+        startedAt: null,
+        duration:
+          projectDurationForRoad(
+            road,
+          ),
+        progress: 0,
+      });
+    },
+  );
+}
+
+function syncPrimaryRoads(state) {
+  for (const road of state.city.roads) {
+    if (
+      road.source
+      !== 'transport-corridor'
+      && road.source
+        !== 'depot-access'
+    ) {
+      continue;
+    }
+
+    if (
+      transportUnlockSatisfied(
+        state,
+        road.unlock,
+      )
+    ) {
+      road.status = 'built';
+      road.constructionProgress = 1;
+    }
+  }
+}
+
+function syncDistrictActivation(state) {
+  for (
+    const district
+    of state.city.districts
+  ) {
+    if (
+      district.status === 'locked'
+      && districtShouldBeActive(
+        state,
+        district,
+      )
+    ) {
+      district.status = 'active';
+      district.activatedAt =
+        state.city.timeSeconds;
+
+      for (
+        const blockId
+        of district.blockIds
+      ) {
+        const block =
+          state.city.blocks.find(
+            (candidate) =>
+              candidate.id
+              === blockId,
+          );
+
+        if (block) {
+          block.status = 'active';
+        }
+      }
+
+      scheduleRoadProjects(
+        state,
+        district,
+      );
+    }
+  }
+}
+
+function roadSupportForParcel(
+  state,
+  parcel,
+) {
+  const district =
+    state.city.districts.find(
+      (candidate) =>
+        candidate.id
+        === parcel.districtId,
+    );
+
+  if (!district) return false;
+
+  const districtRoads =
+    state.city.roads.filter(
+      (road) =>
+        road.districtId
+        === district.id
+        && road.source === 'city',
+    );
+
+  if (districtRoads.length === 0) {
+    return true;
+  }
+
+  return districtRoads.some(
+    (road) =>
+      road.status === 'built',
+  );
+}
+
+function maybeQueueBuilding(
+  state,
+  district,
+) {
+  const city = state.city;
+
+  const existingQueued =
+    city.projects.some(
+      (project) =>
+        project.districtId
+          === district.id
+        && project.type
+          === 'building'
+        && (
+          project.status === 'queued'
+          || project.status === 'active'
+        ),
+    );
+
+  if (existingQueued) return;
+
+  const pressure =
+    getDistrictPressure(
+      state,
+      district,
+    );
+
+  const age =
+    Math.max(
+      0,
+      city.timeSeconds
+      - (district.activatedAt ?? 0),
+    );
+
+  const parcels =
+    city.parcels
+      .filter(
+        (parcel) =>
+          parcel.districtId
+            === district.id
+          && parcel.status
+            === 'vacant'
+          && roadSupportForParcel(
+            state,
+            parcel,
+          ),
+      )
+      .sort(
+        (a, b) =>
+          a.developmentOrder
+          - b.developmentOrder,
+      );
+
+  for (
+    let index = 0;
+    index < parcels.length;
+    index += 1
+  ) {
+    const parcel = parcels[index];
+
+    const minimumAge =
+      12
+      + index * 9
+      + parcel.developmentOrder * 8;
+
+    const requiredPressure =
+      1.2
+      + index * 0.38
+      + parcel.density * 0.18;
+
+    if (
+      age < minimumAge
+      || pressure
+        < requiredPressure
+    ) {
+      continue;
+    }
+
+    const profile =
+      buildingProfileFor(
+        district,
+        parcel,
+        pressure,
+      );
+
+    parcel.status = 'reserved';
+    parcel.reservedAt =
+      city.timeSeconds;
+
+    city.projects.push({
+      id:
+        nextProjectId(city),
+      type: 'building',
+      targetType: 'parcel',
+      targetId: parcel.id,
+      districtId:
+        district.id,
+      status: 'queued',
+      queuedAt:
+        city.timeSeconds,
+      eligibleAt:
+        city.timeSeconds
+        + 2,
+      startedAt: null,
+      duration:
+        buildingDuration(profile),
+      progress: 0,
+      profile,
+    });
+
+    return;
+  }
+}
+
+function queueDevelopmentProjects(
+  state,
+) {
+  for (
+    const district
+    of state.city.districts
+  ) {
+    if (
+      district.status !== 'active'
+    ) {
+      continue;
+    }
+
+    maybeQueueBuilding(
+      state,
+      district,
+    );
+  }
+}
+
+function startEligibleProjects(city) {
+  let freeSlots =
+    MAX_ACTIVE_PROJECTS
+    - activeProjectCount(city);
+
+  if (freeSlots <= 0) return;
+
+  const eligible =
+    city.projects
+      .filter(
+        (project) =>
+          project.status === 'queued'
+          && project.eligibleAt
+            <= city.timeSeconds,
+      )
+      .sort(
+        (a, b) => {
+          if (
+            a.type !== b.type
+          ) {
+            return (
+              a.type === 'road'
+                ? -1
+                : 1
+            );
+          }
+
+          return (
+            a.eligibleAt
+            - b.eligibleAt
+          );
+        },
+      );
+
+  for (
+    const project
+    of eligible
+  ) {
+    if (freeSlots <= 0) break;
+
+    project.status = 'active';
+    project.startedAt =
+      city.timeSeconds;
+    freeSlots -= 1;
+
+    if (project.type === 'road') {
+      const road =
+        city.roads.find(
+          (candidate) =>
+            candidate.id
+            === project.targetId,
+        );
+
+      if (road) {
+        road.status =
+          'constructing';
+      }
+    }
+
+    if (project.type === 'building') {
+      const parcel =
+        city.parcels.find(
+          (candidate) =>
+            candidate.id
+            === project.targetId,
+        );
+
+      if (parcel) {
+        const buildingId =
+          `building-${parcel.id}`;
+
+        parcel.buildingId =
+          buildingId;
+        parcel.status =
+          'constructing';
+
+        city.buildings.push({
+          id: buildingId,
+          districtId:
+            project.districtId,
+          parcelId:
+            parcel.id,
+          x: parcel.x,
+          y: parcel.y,
+          zone: parcel.zone,
+          profile: {
+            ...project.profile,
+          },
+          status:
+            'constructing',
+          constructionProgress: 0,
+          createdAt:
+            city.timeSeconds,
+          completedAt: null,
+        });
+      }
+    }
+  }
+}
+
+function finishProject(
+  city,
+  project,
+) {
+  project.status = 'complete';
+  project.progress = 1;
+  project.completedAt =
+    city.timeSeconds;
+
+  if (project.type === 'road') {
+    const road =
+      city.roads.find(
+        (candidate) =>
+          candidate.id
+          === project.targetId,
+      );
+
+    if (road) {
+      road.status = 'built';
+      road.constructionProgress = 1;
+    }
+
+    return;
+  }
+
+  const parcel =
+    city.parcels.find(
+      (candidate) =>
+        candidate.id
+        === project.targetId,
+    );
+
+  if (parcel) {
+    parcel.status = 'built';
+  }
+
+  const building =
+    city.buildings.find(
+      (candidate) =>
+        candidate.parcelId
+        === project.targetId,
+    );
+
+  if (building) {
+    building.status = 'built';
+    building.constructionProgress = 1;
+    building.completedAt =
+      city.timeSeconds;
+  }
+}
+
+function progressActiveProjects(
+  city,
+  deltaSeconds,
+) {
+  for (
+    const project
+    of city.projects
+  ) {
+    if (
+      project.status !== 'active'
+    ) {
+      continue;
+    }
+
+    project.progress = clamp(
+      project.progress
+      + deltaSeconds
+        / Math.max(
+          0.01,
+          project.duration,
+        ),
+      0,
+      1,
+    );
+
+    if (project.type === 'road') {
+      const road =
+        city.roads.find(
+          (candidate) =>
+            candidate.id
+            === project.targetId,
+        );
+
+      if (road) {
+        road.constructionProgress =
+          project.progress;
+      }
+    }
+
+    if (project.type === 'building') {
+      const building =
+        city.buildings.find(
+          (candidate) =>
+            candidate.parcelId
+            === project.targetId,
+        );
+
+      if (building) {
+        building.constructionProgress =
+          project.progress;
+      }
+    }
+
+    if (project.progress >= 1) {
+      finishProject(
+        city,
+        project,
+      );
+    }
+  }
+}
+
+function updateDevelopmentLevels(
+  state,
+) {
+  for (
+    const district
+    of state.city.districts
+  ) {
+    const total =
+      district.parcelIds.length;
+
+    if (total === 0) {
+      district.developmentLevel = 0;
+      continue;
+    }
+
+    const built =
+      state.city.parcels.filter(
+        (parcel) =>
+          parcel.districtId
+            === district.id
+          && parcel.status
+            === 'built',
+      ).length;
+
+    district.developmentLevel =
+      built / total;
+  }
+}
+
+export function createInitialCityState(
+  seed = DEFAULT_CITY_SEED,
+) {
+  const masterPlan =
+    generateCityMasterPlan(seed);
+
+  return {
+    version: CITY_VERSION,
+    seed,
+    timeSeconds: 0,
+    nextProjectId: 1,
+    nodes: masterPlan.nodes,
+    roads: masterPlan.roads,
+    districts:
+      masterPlan.districts,
+    blocks:
+      masterPlan.blocks,
+    parcels:
+      masterPlan.parcels,
+    buildings: [],
+    projects: [],
+  };
+}
+
+export function ensureCityRuntime(
+  state,
+) {
+  if (
+    !state.city
+    || state.city.version
+      !== CITY_VERSION
+  ) {
+    state.city =
+      createInitialCityState(
+        state.city?.seed
+        ?? DEFAULT_CITY_SEED,
+      );
+  }
+
+  state.city.nextProjectId =
+    Number.isFinite(
+      state.city.nextProjectId,
+    )
+      ? state.city.nextProjectId
+      : 1;
+
+  state.city.timeSeconds =
+    Number.isFinite(
+      state.city.timeSeconds,
+    )
+      ? state.city.timeSeconds
+      : 0;
+
+  state.city.buildings =
+    Array.isArray(
+      state.city.buildings,
+    )
+      ? state.city.buildings
+      : [];
+
+  state.city.projects =
+    Array.isArray(
+      state.city.projects,
+    )
+      ? state.city.projects
+      : [];
+
+  syncCityWithTransport(state);
+  return state.city;
+}
+
+export function syncCityWithTransport(
+  state,
+) {
+  if (!state.city) return;
+
+  syncDistrictActivation(state);
+  syncPrimaryRoads(state);
+  updateDevelopmentLevels(state);
+}
+
+export function advanceCitySimulation(
+  state,
+  deltaSeconds,
+) {
+  if (
+    !Number.isFinite(deltaSeconds)
+    || deltaSeconds <= 0
+  ) {
+    return;
+  }
+
+  ensureCityRuntime(state);
+
+  state.city.timeSeconds +=
+    deltaSeconds;
+
+  syncCityWithTransport(state);
+  progressActiveProjects(
+    state.city,
+    deltaSeconds,
+  );
+  queueDevelopmentProjects(state);
+  startEligibleProjects(
+    state.city,
+  );
+  updateDevelopmentLevels(state);
+}
+
+export function getCitySummary(state) {
+  ensureCityRuntime(state);
+
+  return {
+    seed: state.city.seed,
+    timeSeconds:
+      state.city.timeSeconds,
+    activeDistricts:
+      state.city.districts.filter(
+        (district) =>
+          district.status
+          === 'active',
+      ).length,
+    builtRoads:
+      state.city.roads.filter(
+        (road) =>
+          road.status === 'built',
+      ).length,
+    activeProjects:
+      state.city.projects.filter(
+        (project) =>
+          project.status
+          === 'active',
+      ).length,
+    builtBuildings:
+      state.city.buildings.filter(
+        (building) =>
+          building.status
+          === 'built',
+      ).length,
+  };
+}
