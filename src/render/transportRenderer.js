@@ -23,6 +23,10 @@ import {
   pointOnRoute,
 } from './transportLayout.js';
 
+import {
+  drawCity,
+} from './cityRenderer.js';
+
 const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, value));
 
@@ -66,6 +70,7 @@ export class TransportRenderer {
 
     this.passengerAnimations = [];
     this.farePopups = [];
+    this.cityTime = 0;
 
     this.#bindInput();
     this.resize();
@@ -203,6 +208,7 @@ export class TransportRenderer {
 
   render(state, deltaSeconds) {
     this.hitTargets = [];
+    this.cityTime += deltaSeconds;
 
     this.#capturePassengerEvents(
       state,
@@ -263,6 +269,12 @@ export class TransportRenderer {
     ctx.translate(
       this.camera.x,
       this.camera.y,
+    );
+
+    drawCity(
+      ctx,
+      state,
+      this.cityTime,
     );
 
     this.#drawBusEra(ctx, state);
@@ -648,25 +660,30 @@ export class TransportRenderer {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
-    ctx.strokeStyle = '#050505';
-    ctx.lineWidth = 15;
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 7;
     this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 10;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#171717';
     ctx.lineWidth = 4;
     this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
+    ctx.setLineDash([10, 14]);
+    ctx.strokeStyle = '#efeee8';
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+    this.#traceRoute(ctx, metrics);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
     for (
-      let distance = 8;
+      let distance = 105;
       distance < metrics.total;
-      distance += 15
+      distance += 180
     ) {
       const point =
         pointOnRoute(
@@ -674,36 +691,7 @@ export class TransportRenderer {
           distance,
         );
 
-      const nx = -point.ty;
-      const ny = point.tx;
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-
-      ctx.beginPath();
-      ctx.moveTo(
-        point.x + nx * 6,
-        point.y + ny * 6,
-      );
-      ctx.lineTo(
-        point.x - nx * 6,
-        point.y - ny * 6,
-      );
-      ctx.stroke();
-    }
-
-    for (
-      let distance = 90;
-      distance < metrics.total;
-      distance += 165
-    ) {
-      const point =
-        pointOnRoute(
-          metrics,
-          distance,
-        );
-
-      ctx.fillStyle = '#121212';
+      ctx.fillStyle = '#111';
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
 
@@ -741,16 +729,11 @@ export class TransportRenderer {
     if (metrics.points.length < 2) return;
 
     ctx.save();
-    ctx.setLineDash([6, 8]);
+    ctx.setLineDash([8, 10]);
     ctx.lineCap = 'round';
 
-    ctx.strokeStyle = '#303030';
-    ctx.lineWidth = 12;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.48;
+    ctx.globalAlpha = 0.58;
     ctx.lineWidth = 3;
     this.#traceRoute(ctx, metrics);
     ctx.stroke();
@@ -800,18 +783,22 @@ export class TransportRenderer {
     ctx.rotate(angle);
 
     ctx.fillStyle = '#050505';
-    ctx.fillRect(-11, -7, 22, 14);
+    ctx.fillRect(-14, -6, 28, 12);
+
+    ctx.fillStyle = '#d7d7cf';
+    ctx.fillRect(-13, -5, 26, 10);
 
     ctx.fillStyle = color;
-    ctx.fillRect(-10, -6, 20, 12);
+    ctx.fillRect(-13, 2, 26, 3);
 
-    ctx.fillStyle = '#d9f6ff';
-    ctx.fillRect(-7, -5, 5, 4);
-    ctx.fillRect(1, -5, 5, 4);
+    ctx.fillStyle = '#26383f';
+    ctx.fillRect(-10, -4, 5, 4);
+    ctx.fillRect(-3, -4, 5, 4);
+    ctx.fillRect(4, -4, 5, 4);
 
     ctx.fillStyle = '#111';
-    ctx.fillRect(-8, 6, 4, 2);
-    ctx.fillRect(4, 6, 4, 2);
+    ctx.fillRect(-10, 5, 5, 2);
+    ctx.fillRect(5, 5, 5, 2);
 
     ctx.restore();
 
@@ -869,60 +856,76 @@ export class TransportRenderer {
       );
     }
 
-    const width = origin ? 48 : 38;
-    const height = origin ? 50 : 42;
+    const shelterWidth = origin ? 38 : 30;
+    const shelterHeight = origin ? 28 : 23;
 
-    ctx.fillStyle = '#050505';
-
+    ctx.fillStyle = '#101010';
     ctx.fillRect(
-      x - width / 2 - 3,
-      y - height / 2 - 3,
-      width + 6,
-      height + 6,
+      x - shelterWidth / 2 - 3,
+      y - shelterHeight / 2 - 3,
+      shelterWidth + 6,
+      shelterHeight + 6,
     );
 
-    ctx.fillStyle = '#efeee8';
-
+    ctx.fillStyle = '#d8d8d0';
     ctx.fillRect(
-      x - width / 2,
-      y - height / 2,
-      width,
-      height,
+      x - shelterWidth / 2,
+      y - shelterHeight / 2,
+      shelterWidth,
+      shelterHeight,
     );
 
-    ctx.fillStyle = '#2b2b2b';
-
+    ctx.fillStyle = '#343b3d';
     ctx.fillRect(
-      x - width / 2 + 6,
-      y - height / 2 + 6,
-      width - 12,
-      height - 12,
+      x - shelterWidth / 2 + 4,
+      y - shelterHeight / 2 + 4,
+      shelterWidth - 8,
+      shelterHeight - 8,
     );
 
     ctx.fillStyle = color;
-
     ctx.fillRect(
-      x - 4,
-      y - 15,
-      8,
-      20,
+      x - shelterWidth / 2,
+      y + shelterHeight / 2 - 4,
+      shelterWidth,
+      4,
+    );
+
+    ctx.fillStyle = '#e9e8e0';
+    ctx.fillRect(
+      x + shelterWidth / 2 + 7,
+      y - 17,
+      3,
+      28,
+    );
+
+    ctx.fillStyle = color;
+    ctx.fillRect(
+      x + shelterWidth / 2 + 3,
+      y - 19,
+      11,
+      9,
+    );
+
+    ctx.fillStyle = '#111';
+    ctx.font =
+      '7px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+
+    ctx.fillText(
+      String(number),
+      x + shelterWidth / 2 + 8.5,
+      y - 12,
     );
 
     ctx.fillStyle = '#f3f2eb';
     ctx.font =
       '8px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
-
-    ctx.fillText(
-      String(number),
-      x,
-      y - 22,
-    );
 
     ctx.fillText(
       label.toUpperCase(),
       x,
-      y + height / 2 + 16,
+      y + 31,
     );
   }
 
