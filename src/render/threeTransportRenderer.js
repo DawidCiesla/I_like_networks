@@ -1479,30 +1479,6 @@ export class ThreeTransportRenderer {
     );
   }
 
-  #cityStateSignature(state) {
-    const roads =
-      state.city.roads.map(
-        (road) =>
-          `${road.id}:${road.status}:`
-          + `${Math.round((road.constructionProgress ?? 0) * 20)}`,
-      ).join('|');
-
-    const buildings =
-      state.city.buildings.map(
-        (building) =>
-          `${building.id}:${building.status}:`
-          + `${Math.round((building.constructionProgress ?? 0) * 20)}`,
-      ).join('|');
-
-    return (
-      `${state.city.seed}::`
-      + roads
-      + '::'
-      + buildings
-      + `::depot:${state.depot.built}`
-    );
-  }
-
   #transportStateSignature(state) {
     return [
       state.line1.built,
@@ -1517,45 +1493,18 @@ export class ThreeTransportRenderer {
   }
 
   #syncCity(state) {
-    const signature =
-      this.#cityStateSignature(
-        state,
-      );
-
-    if (
-      signature
-      === this.citySignature
-    ) {
-      return;
-    }
-
-    this.citySignature =
-      signature;
-
-    clearGroup(
-      this.roadGroup,
-    );
-
-    clearGroup(
-      this.buildingGroup,
-    );
-
-    clearGroup(
-      this.natureGroup,
-    );
-
-    this.#buildNature(state);
-    this.#buildRoads(state);
-    this.#buildBuildings(state);
+    this.#syncNature(state);
+    this.#syncRoads(state);
+    this.#syncBuildings(state);
   }
 
-  #buildNature(state) {
+  #buildNatureBase(state) {
     const bounds =
       this.bounds;
 
-    const trees = [];
+    this.treeData = [];
 
-    const spacing = 72;
+    const spacing = 82;
 
     for (
       let x =
@@ -1649,186 +1598,343 @@ export class ThreeTransportRenderer {
           continue;
         }
 
+        const scale =
+          0.75
+          + pseudoRandom(
+            state.city.seed,
+            px,
+            pz,
+            4,
+          ) * 0.8;
+
+        this.treeData.push({
+          x: px,
+          z: pz,
+          scale,
+          ground:
+            terrainHeight(
+              state.city.seed,
+              px,
+              pz,
+            ),
+          rotation:
+            pseudoRandom(
+              state.city.seed,
+              px,
+              pz,
+              5,
+            ) * Math.PI * 2,
+        });
+      }
+    }
+
+    if (
+      this.treeData.length === 0
+    ) {
+      this.treeTrunks = null;
+      this.treeCrowns = null;
+      return;
+    }
+
+    const trunks =
+      new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(
+          1.6,
+          2.1,
+          11,
+          5,
+        ),
+        new THREE.MeshLambertMaterial({
+          color: 0x5e4d34,
+        }),
+        this.treeData.length,
+      );
+
+    const crowns =
+      new THREE.InstancedMesh(
+        new THREE.ConeGeometry(
+          9,
+          23,
+          6,
+        ),
+        new THREE.MeshLambertMaterial({
+          color: 0x315b31,
+        }),
+        this.treeData.length,
+      );
+
+    trunks.castShadow = false;
+    trunks.receiveShadow = false;
+    crowns.castShadow = false;
+    crowns.receiveShadow = false;
+
+    trunks.frustumCulled = true;
+    crowns.frustumCulled = true;
+
+    this.treeTrunks = trunks;
+    this.treeCrowns = crowns;
+
+    this.natureGroup.add(
+      trunks,
+      crowns,
+    );
+
+    this.natureOccupancySignature = null;
+    this.#updateNatureOccupancy(
+      state,
+      true,
+    );
+  }
+
+  #natureStateSignature(state) {
+    const roads =
+      state.city.roads
+        .filter(
+          (road) =>
+            road.status === 'built'
+            || road.status
+              === 'constructing',
+        )
+        .map(
+          (road) => road.id,
+        )
+        .join('|');
+
+    const buildings =
+      state.city.buildings
+        .map(
+          (building) =>
+            building.parcelId,
+        )
+        .join('|');
+
+    return (
+      roads
+      + '::'
+      + buildings
+    );
+  }
+
+  #syncNature(state) {
+    if (
+      !this.treeTrunks
+      || !this.treeCrowns
+    ) {
+      return;
+    }
+
+    this.#updateNatureOccupancy(
+      state,
+      false,
+    );
+  }
+
+  #updateNatureOccupancy(
+    state,
+    force,
+  ) {
+    const signature =
+      this.#natureStateSignature(
+        state,
+      );
+
+    if (
+      !force
+      && signature
+        === this.natureOccupancySignature
+    ) {
+      return;
+    }
+
+    this.natureOccupancySignature =
+      signature;
+
+    const activeRoads =
+      state.city.roads.filter(
+        (road) =>
+          road.status === 'built'
+          || road.status
+            === 'constructing',
+      );
+
+    const parcelById =
+      new Map(
+        state.city.parcels.map(
+          (parcel) => [
+            parcel.id,
+            parcel,
+          ],
+        ),
+      );
+
+    const occupiedParcels =
+      state.city.buildings
+        .map(
+          (building) =>
+            parcelById.get(
+              building.parcelId,
+            ),
+        )
+        .filter(Boolean);
+
+    const dummy =
+      new THREE.Object3D();
+
+    this.treeData.forEach(
+      (tree, index) => {
         const blockedByRoad =
-          state.city.roads.some(
+          activeRoads.some(
             (road) =>
-              (
-                road.status === 'built'
-                || road.status
-                  === 'constructing'
-              )
-              && pointNearRoad(
+              pointNearRoad(
                 {
-                  x: px,
-                  z: pz,
+                  x: tree.x,
+                  z: tree.z,
                 },
                 road,
                 13,
               ),
           );
 
-        if (blockedByRoad) {
-          continue;
-        }
-
         const blockedByBuilding =
-          state.city.buildings.some(
-            (building) => {
-              const parcel =
-                state.city.parcels.find(
-                  (candidate) =>
-                    candidate.id
-                    === building.parcelId,
-                );
-
-              if (!parcel) {
-                return false;
-              }
-
-              return rectangleContains(
+          !blockedByRoad
+          && occupiedParcels.some(
+            (parcel) =>
+              rectangleContains(
                 {
                   x: parcel.x,
                   y: parcel.y,
                   w: parcel.w,
                   h: parcel.h,
                 },
-                px,
-                pz,
+                tree.x,
+                tree.z,
                 8,
-              );
-            },
+              ),
           );
 
-        if (blockedByBuilding) {
-          continue;
-        }
-
-        trees.push({
-          x: px,
-          z: pz,
-          scale:
-            0.75
-            + pseudoRandom(
-              state.city.seed,
-              px,
-              pz,
-              4,
-            ) * 0.8,
-        });
-      }
-    }
-
-    if (trees.length === 0) {
-      return;
-    }
-
-    const trunkGeometry =
-      new THREE.CylinderGeometry(
-        1.6,
-        2.1,
-        11,
-        6,
-      );
-
-    const trunkMaterial =
-      new THREE.MeshStandardMaterial({
-        color: 0x5e4d34,
-        roughness: 1,
-      });
-
-    const crownGeometry =
-      new THREE.ConeGeometry(
-        9,
-        23,
-        7,
-      );
-
-    const crownMaterial =
-      new THREE.MeshStandardMaterial({
-        color: 0x315b31,
-        roughness: 1,
-      });
-
-    const trunks =
-      new THREE.InstancedMesh(
-        trunkGeometry,
-        trunkMaterial,
-        trees.length,
-      );
-
-    const crowns =
-      new THREE.InstancedMesh(
-        crownGeometry,
-        crownMaterial,
-        trees.length,
-      );
-
-    trunks.castShadow = true;
-    trunks.receiveShadow = true;
-    crowns.castShadow = true;
-
-    const dummy =
-      new THREE.Object3D();
-
-    trees.forEach(
-      (tree, index) => {
-        const ground =
-          terrainHeight(
-            state.city.seed,
-            tree.x,
-            tree.z,
-          );
+        const visibleScale =
+          blockedByRoad
+          || blockedByBuilding
+            ? 0.0001
+            : tree.scale;
 
         dummy.position.set(
           tree.x,
-          ground
-            + 5.5 * tree.scale,
+          tree.ground
+            + 5.5 * visibleScale,
           tree.z,
         );
 
         dummy.scale.set(
-          tree.scale,
-          tree.scale,
-          tree.scale,
+          visibleScale,
+          visibleScale,
+          visibleScale,
         );
 
         dummy.rotation.y =
-          pseudoRandom(
-            state.city.seed,
-            tree.x,
-            tree.z,
-            5,
-          ) * Math.PI * 2;
+          tree.rotation;
 
         dummy.updateMatrix();
 
-        trunks.setMatrixAt(
+        this.treeTrunks.setMatrixAt(
           index,
           dummy.matrix,
         );
 
         dummy.position.y =
-          ground
-          + 18.5 * tree.scale;
+          tree.ground
+          + 18.5 * visibleScale;
 
         dummy.updateMatrix();
 
-        crowns.setMatrixAt(
+        this.treeCrowns.setMatrixAt(
           index,
           dummy.matrix,
         );
       },
     );
 
-    trunks.instanceMatrix.needsUpdate =
-      true;
+    this.treeTrunks
+      .instanceMatrix
+      .needsUpdate = true;
 
-    crowns.instanceMatrix.needsUpdate =
-      true;
+    this.treeCrowns
+      .instanceMatrix
+      .needsUpdate = true;
+  }
 
-    this.natureGroup.add(
-      trunks,
-      crowns,
+  #roadVisualSignature(
+    state,
+    road,
+  ) {
+    if (road.status === 'built') {
+      return 'built';
+    }
+
+    if (
+      road.status === 'constructing'
+    ) {
+      const bucket =
+        Math.max(
+          1,
+          Math.min(
+            RENDER_PERFORMANCE
+              .roadProgressBuckets,
+            Math.floor(
+              (
+                road.constructionProgress
+                ?? 0
+              )
+              * RENDER_PERFORMANCE
+                .roadProgressBuckets,
+            ),
+          ),
+        );
+
+      return `constructing:${bucket}`;
+    }
+
+    const district =
+      state.city.districts.find(
+        (candidate) =>
+          candidate.id
+          === road.districtId,
+      );
+
+    const plannedVisible =
+      road.source === 'city'
+      && district?.status
+        === 'active'
+      && roadParentsBuilt(
+        state,
+        road,
+      );
+
+    return plannedVisible
+      ? 'planned'
+      : 'hidden';
+  }
+
+  #removeRoadObject(roadId) {
+    const entry =
+      this.roadObjects.get(
+        roadId,
+      );
+
+    if (!entry) {
+      return;
+    }
+
+    this.roadGroup.remove(
+      entry.group,
+    );
+
+    disposeObject(
+      entry.group,
+    );
+
+    this.roadObjects.delete(
+      roadId,
     );
   }
 
@@ -1836,6 +1942,7 @@ export class ThreeTransportRenderer {
     state,
     road,
     points,
+    parent,
   ) {
     if (points.length < 2) {
       return;
@@ -1865,124 +1972,218 @@ export class ThreeTransportRenderer {
       !sidewalkGeometry
       || !roadGeometry
     ) {
+      sidewalkGeometry?.dispose?.();
+      roadGeometry?.dispose?.();
       return;
     }
 
     const sidewalk =
       new THREE.Mesh(
         sidewalkGeometry,
-        new THREE.MeshStandardMaterial({
+        new THREE.MeshLambertMaterial({
           color: 0x777a74,
-          roughness: 1,
         }),
       );
 
-    sidewalk.receiveShadow =
-      true;
+    sidewalk.receiveShadow = true;
 
     const surface =
       new THREE.Mesh(
         roadGeometry,
-        new THREE.MeshStandardMaterial({
+        new THREE.MeshLambertMaterial({
           color:
             ROAD_COLORS[
               road.class
             ] ?? 0x404240,
-          roughness: 0.94,
         }),
       );
 
-    surface.receiveShadow =
-      true;
+    surface.receiveShadow = true;
 
-    this.roadGroup.add(
+    parent.add(
       sidewalk,
       surface,
     );
   }
 
-  #buildRoads(state) {
-    for (
-      const road
-      of state.city.roads
+  #buildRoadObject(
+    state,
+    road,
+    signature,
+  ) {
+    if (signature === 'hidden') {
+      return null;
+    }
+
+    const group =
+      new THREE.Group();
+
+    if (signature === 'built') {
+      this.#addRoadMesh(
+        state,
+        road,
+        road.points,
+        group,
+      );
+
+      return group;
+    }
+
+    if (
+      signature.startsWith(
+        'constructing:',
+      )
     ) {
-      if (
-        road.status === 'built'
-      ) {
-        this.#addRoadMesh(
-          state,
-          road,
+      const bucket =
+        Number(
+          signature.split(':')[1],
+        );
+
+      const progress =
+        bucket
+        / RENDER_PERFORMANCE
+          .roadProgressBuckets;
+
+      this.#addRoadMesh(
+        state,
+        road,
+        polylinePrefix(
           road.points,
-        );
+          progress,
+        ),
+        group,
+      );
 
-        continue;
-      }
+      return group;
+    }
 
-      if (
-        road.status
-          === 'constructing'
-      ) {
-        const points =
-          polylinePrefix(
-            road.points,
-            road.constructionProgress
-              ?? 0,
-          );
-
-        this.#addRoadMesh(
-          state,
-          road,
-          points,
-        );
-
-        continue;
-      }
-
-      const district =
-        state.city.districts.find(
-          (candidate) =>
-            candidate.id
-            === road.districtId,
-        );
-
-      const plannedVisible =
-        road.source === 'city'
-        && district?.status
-          === 'active'
-        && roadParentsBuilt(
-          state,
-          road,
-        );
-
-      if (!plannedVisible) {
-        continue;
-      }
-
-      const geometry =
+    const line =
+      new THREE.Line(
         lineGeometry(
           state.city.seed,
           road.points,
           0.75,
-        );
-
-      const material =
+        ),
         new THREE.LineDashedMaterial({
           color: 0x92968e,
           transparent: true,
           opacity: 0.5,
           dashSize: 9,
           gapSize: 8,
-        });
+        }),
+      );
 
-      const line =
-        new THREE.Line(
-          geometry,
-          material,
+    line.computeLineDistances();
+    group.add(line);
+
+    return group;
+  }
+
+  #syncRoads(state) {
+    const liveRoadIds =
+      new Set();
+
+    for (
+      const road
+      of state.city.roads
+    ) {
+      liveRoadIds.add(road.id);
+
+      const signature =
+        this.#roadVisualSignature(
+          state,
+          road,
         );
 
-      line.computeLineDistances();
-      this.roadGroup.add(line);
+      const existing =
+        this.roadObjects.get(
+          road.id,
+        );
+
+      if (
+        existing?.signature
+        === signature
+      ) {
+        continue;
+      }
+
+      this.#removeRoadObject(
+        road.id,
+      );
+
+      const group =
+        this.#buildRoadObject(
+          state,
+          road,
+          signature,
+        );
+
+      if (!group) {
+        continue;
+      }
+
+      this.roadGroup.add(group);
+
+      this.roadObjects.set(
+        road.id,
+        {
+          signature,
+          group,
+        },
+      );
     }
+
+    for (
+      const roadId
+      of this.roadObjects.keys()
+    ) {
+      if (
+        !liveRoadIds.has(roadId)
+      ) {
+        this.#removeRoadObject(
+          roadId,
+        );
+      }
+    }
+
+    this.#syncJunctions(state);
+  }
+
+  #syncJunctions(state) {
+    const signature =
+      state.city.roads
+        .filter(
+          (road) =>
+            road.status === 'built',
+        )
+        .map(
+          (road) => road.id,
+        )
+        .join('|');
+
+    if (
+      signature
+      === this.junctionSignature
+    ) {
+      return;
+    }
+
+    this.junctionSignature =
+      signature;
+
+    clearGroup(
+      this.junctionGroup,
+    );
+
+    const roadById =
+      new Map(
+        state.city.roads.map(
+          (road) => [
+            road.id,
+            road,
+          ],
+        ),
+      );
 
     for (
       const junction
@@ -1992,10 +2193,7 @@ export class ThreeTransportRenderer {
         junction.roadIds
           .map(
             (roadId) =>
-              state.city.roads.find(
-                (road) =>
-                  road.id === roadId,
-              ),
+              roadById.get(roadId),
           )
           .filter(
             (road) =>
@@ -2043,11 +2241,10 @@ export class ThreeTransportRenderer {
             sidewalkRadius,
             sidewalkRadius,
             0.45,
-            20,
+            12,
           ),
-          new THREE.MeshStandardMaterial({
+          new THREE.MeshLambertMaterial({
             color: 0x777a74,
-            roughness: 1,
           }),
         );
 
@@ -2065,11 +2262,10 @@ export class ThreeTransportRenderer {
             roadRadius,
             roadRadius,
             0.48,
-            20,
+            12,
           ),
-          new THREE.MeshStandardMaterial({
+          new THREE.MeshLambertMaterial({
             color: 0x3b3d3b,
-            roughness: 0.96,
           }),
         );
 
@@ -2081,7 +2277,7 @@ export class ThreeTransportRenderer {
 
       surface.receiveShadow = true;
 
-      this.roadGroup.add(
+      this.junctionGroup.add(
         sidewalk,
         surface,
       );
@@ -2129,27 +2325,210 @@ export class ThreeTransportRenderer {
     );
   }
 
-  #buildBuildings(state) {
+  #createBuildingObject(
+    state,
+    building,
+    parcel,
+  ) {
+    const dimensions =
+      buildingDimensions(
+        parcel,
+        building,
+      );
+
+    const ground =
+      terrainHeight(
+        state.city.seed,
+        building.x,
+        building.y,
+      );
+
+    const material =
+      materialForBuilding(
+        building,
+      );
+
+    if (
+      building.status !== 'built'
+    ) {
+      material.transparent = true;
+      material.opacity = 0.78;
+    }
+
+    const mesh =
+      new THREE.Mesh(
+        new THREE.BoxGeometry(
+          dimensions.width,
+          dimensions.height,
+          dimensions.depth,
+        ),
+        material,
+      );
+
+    mesh.rotation.y =
+      Number.isFinite(
+        building.rotationRadians,
+      )
+        ? -building.rotationRadians
+        : this.#buildingRotation(
+          state,
+          parcel,
+        );
+
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const group =
+      new THREE.Group();
+
+    group.add(mesh);
+    this.buildingGroup.add(group);
+
+    return {
+      group,
+      mesh,
+      roof: null,
+      dimensions,
+      ground,
+      status:
+        building.status,
+    };
+  }
+
+  #addBuildingRoof(
+    entry,
+    building,
+  ) {
+    if (
+      entry.roof
+      || ![
+        'house',
+        'townhouse',
+      ].includes(
+        building.profile?.kind,
+      )
+    ) {
+      return;
+    }
+
+    const roof =
+      new THREE.Mesh(
+        new THREE.ConeGeometry(
+          Math.max(
+            entry.dimensions.width,
+            entry.dimensions.depth,
+          ) * 0.58,
+          5.5,
+          4,
+        ),
+        new THREE.MeshLambertMaterial({
+          color: 0x654a3b,
+        }),
+      );
+
+    roof.position.set(
+      building.x,
+      entry.ground
+        + entry.dimensions.height
+        + 3.4,
+      building.y,
+    );
+
+    roof.rotation.y =
+      entry.mesh.rotation.y
+      + Math.PI / 4;
+
+    roof.castShadow = true;
+
+    entry.group.add(roof);
+    entry.roof = roof;
+  }
+
+  #syncBuildings(state) {
+    const parcelById =
+      new Map(
+        state.city.parcels.map(
+          (parcel) => [
+            parcel.id,
+            parcel,
+          ],
+        ),
+      );
+
+    const liveIds =
+      new Set();
+
     for (
       const building
       of state.city.buildings
     ) {
       const parcel =
-        state.city.parcels.find(
-          (candidate) =>
-            candidate.id
-            === building.parcelId,
+        parcelById.get(
+          building.parcelId,
         );
 
       if (!parcel) {
         continue;
       }
 
-      const dimensions =
-        buildingDimensions(
-          parcel,
-          building,
+      liveIds.add(building.id);
+
+      let entry =
+        this.buildingObjects.get(
+          building.id,
         );
+
+      if (!entry) {
+        entry =
+          this.#createBuildingObject(
+            state,
+            building,
+            parcel,
+          );
+
+        this.buildingObjects.set(
+          building.id,
+          entry,
+        );
+      }
+
+      if (
+        entry.status
+        !== building.status
+      ) {
+        entry.status =
+          building.status;
+
+        const color =
+          building.status === 'built'
+            ? (
+              BUILDING_COLORS[
+                building.zone
+              ] ?? 0xa09b88
+            )
+            : 0x777872;
+
+        entry.mesh.material
+          .color
+          .setHex(color);
+
+        entry.mesh.material.transparent =
+          building.status !== 'built';
+
+        entry.mesh.material.opacity =
+          building.status === 'built'
+            ? 1
+            : 0.78;
+
+        if (
+          building.status === 'built'
+        ) {
+          this.#addBuildingRoof(
+            entry,
+            building,
+          );
+        }
+      }
 
       const progress =
         building.status === 'built'
@@ -2162,115 +2541,43 @@ export class ThreeTransportRenderer {
             1,
           );
 
-      const visibleHeight =
-        Math.max(
-          1.2,
-          dimensions.height
-            * progress,
-        );
+      entry.mesh.scale.y =
+        progress;
 
-      const geometry =
-        new THREE.BoxGeometry(
-          dimensions.width,
-          visibleHeight,
-          dimensions.depth,
-        );
-
-      const material =
-        materialForBuilding(
-          building,
-        );
-
-      const mesh =
-        new THREE.Mesh(
-          geometry,
-          material,
-        );
-
-      const ground =
-        terrainHeight(
-          state.city.seed,
-          building.x,
-          building.y,
-        );
-
-      mesh.position.set(
+      entry.mesh.position.set(
         building.x,
-        ground
-          + visibleHeight / 2
+        entry.ground
+          + entry.dimensions.height
+            * progress / 2
           + 0.7,
         building.y,
       );
+    }
 
-      mesh.rotation.y =
-        Number.isFinite(
-          building.rotationRadians,
-        )
-          ? -building.rotationRadians
-          : this.#buildingRotation(
-            state,
-            parcel,
-          );
-
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-
+    for (
+      const [
+        buildingId,
+        entry,
+      ]
+      of this.buildingObjects.entries()
+    ) {
       if (
-        building.status
-          !== 'built'
+        liveIds.has(buildingId)
       ) {
-        material.transparent = true;
-        material.opacity = 0.78;
+        continue;
       }
 
-      this.buildingGroup.add(
-        mesh,
+      this.buildingGroup.remove(
+        entry.group,
       );
 
-      if (
-        building.status === 'built'
-        && [
-          'house',
-          'townhouse',
-        ].includes(
-          building.profile?.kind,
-        )
-      ) {
-        const roof =
-          new THREE.Mesh(
-            new THREE.ConeGeometry(
-              Math.max(
-                dimensions.width,
-                dimensions.depth,
-              ) * 0.58,
-              5.5,
-              4,
-            ),
-            new THREE.MeshStandardMaterial({
-              color: 0x654a3b,
-              roughness: 1,
-            }),
-          );
+      disposeObject(
+        entry.group,
+      );
 
-        roof.position.copy(
-          mesh.position,
-        );
-
-        roof.position.y =
-          ground
-          + dimensions.height
-          + 3.4;
-
-        roof.rotation.y =
-          mesh.rotation.y
-          + Math.PI / 4;
-
-        roof.castShadow = true;
-
-        this.buildingGroup.add(
-          roof,
-        );
-      }
+      this.buildingObjects.delete(
+        buildingId,
+      );
     }
   }
 
