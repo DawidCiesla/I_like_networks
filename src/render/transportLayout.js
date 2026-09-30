@@ -1,7 +1,39 @@
 const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, value));
 
-export const WORLD = Object.freeze({
+export const LAYOUT_SPACING_SCALE = 1.35;
+
+const LAYOUT_ANCHOR = Object.freeze({
+  x: -205,
+  y: -20,
+});
+
+function spreadPoint(point) {
+  return {
+    x:
+      LAYOUT_ANCHOR.x
+      + (point.x - LAYOUT_ANCHOR.x)
+        * LAYOUT_SPACING_SCALE,
+    y:
+      LAYOUT_ANCHOR.y
+      + (point.y - LAYOUT_ANCHOR.y)
+        * LAYOUT_SPACING_SCALE,
+  };
+}
+
+function spreadRect(rect) {
+  return {
+    ...spreadPoint(rect),
+    w: rect.w,
+    h: rect.h,
+  };
+}
+
+function spreadPolyline(points) {
+  return points.map(spreadPoint);
+}
+
+const BASE_WORLD = Object.freeze({
   line1Stops: [
     { x: -430, y: 90, w: 58, h: 64 },
     { x: -315, y: 90, w: 58, h: 64 },
@@ -23,7 +55,13 @@ export const WORLD = Object.freeze({
   },
 });
 
-const RAW_SEGMENTS = Object.freeze({
+export const WORLD = Object.freeze({
+  line1Stops: BASE_WORLD.line1Stops.map(spreadRect),
+  line2Stops: BASE_WORLD.line2Stops.map(spreadRect),
+  depot: spreadRect(BASE_WORLD.depot),
+});
+
+const BASE_SEGMENTS = Object.freeze({
   line1: [
     [
       { x: -430, y: 90 },
@@ -70,12 +108,19 @@ const RAW_SEGMENTS = Object.freeze({
   ],
 });
 
-const DEPOT_SPUR_POINTS = Object.freeze([
-  { x: -205, y: -20 },
-  { x: -300, y: -20 },
-  { x: -300, y: 120 },
-  { x: -355, y: 137 },
-]);
+const RAW_SEGMENTS = Object.freeze({
+  line1: BASE_SEGMENTS.line1.map(spreadPolyline),
+  line2: BASE_SEGMENTS.line2.map(spreadPolyline),
+});
+
+const DEPOT_SPUR_POINTS = Object.freeze(
+  spreadPolyline([
+    { x: -205, y: -20 },
+    { x: -300, y: -20 },
+    { x: -300, y: 120 },
+    { x: -355, y: 137 },
+  ]),
+);
 
 function distance(a, b) {
   return Math.hypot(
