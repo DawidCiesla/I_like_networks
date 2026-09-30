@@ -140,9 +140,10 @@ func _render_station(station_id: String) -> void:
 
 	var level := GameStore.station_level(station_id)
 	inspector_title.text = Data.station_name(station_id).to_upper()
-	inspector_body.text = "%s · %s\nQUEUE CAPACITY  %d PAX / LINE\nLOCAL UPGRADE  %d / %d" % [
+	inspector_body.text = "%s · %s\nWAITING  %.1f PAX\nQUEUE CAPACITY  %d PAX / LINE\nLOCAL UPGRADE  %d / %d" % [
 		GameStore.station_tier(station_id).to_upper(),
 		" + ".join(served_text) if not served_text.is_empty() else "NO SERVICE",
+		GameStore.station_waiting_passengers(station_id),
 		GameStore.station_capacity(station_id),
 		level,
 		int(Data.STATION_UPGRADE.max_level),
