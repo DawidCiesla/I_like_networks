@@ -1,7 +1,9 @@
 const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, value));
 
-export const LAYOUT_SPACING_SCALE = 1.35;
+// One world unit is treated approximately as one metre for city planning.
+export const WORLD_METERS_PER_UNIT = 1;
+export const LAYOUT_SPACING_SCALE = 3.2;
 
 const LAYOUT_ANCHOR = Object.freeze({
   x: -205,
@@ -146,7 +148,7 @@ function pointToward(from, to, amount) {
 
 function roundedPolyline(
   points,
-  radius = 24,
+  radius = 38,
   steps = 5,
 ) {
   if (points.length <= 2) {

@@ -1,4 +1,8 @@
 import {
+  createInitialCityState,
+} from '../city/cityModel.js';
+
+import {
   ECONOMY,
   GAME_VERSION,
   createInitialState,
@@ -116,6 +120,17 @@ function migrateBusEraV6(previous) {
     previous,
     createInitialState(),
   );
+
+  if (
+    Number.isFinite(
+      previous.city?.seed,
+    )
+  ) {
+    next.city =
+      createInitialCityState(
+        previous.city.seed,
+      );
+  }
 
   restoreBusEraLine(
     next,
@@ -333,7 +348,8 @@ function parseStored(raw) {
   }
 
   if (
-    parsed.version === 7
+    parsed.version === 8
+    || parsed.version === 7
     || parsed.version === 6
   ) {
     return migrateBusEraV6(parsed);

@@ -43,7 +43,7 @@ export class TransportRenderer {
     this.camera = {
       x: 65,
       y: 20,
-      zoom: 1,
+      zoom: 0.6,
     };
 
     this.pointer = {
@@ -153,7 +153,7 @@ export class TransportRenderer {
         this.camera.zoom = clamp(
           this.camera.zoom
             * (event.deltaY > 0 ? 0.9 : 1.1),
-          0.55,
+          0.25,
           2.2,
         );
       },
