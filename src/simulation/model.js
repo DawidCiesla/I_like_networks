@@ -717,7 +717,56 @@ export function addVehicleToLineState(state, lineKey) {
   return vehicle;
 }
 
+export function ensureStationRuntime(
+  state,
+) {
+  if (
+    !state.stations
+    || typeof state.stations
+      !== 'object'
+  ) {
+    state.stations =
+      createStationState();
+    return;
+  }
+
+  for (
+    const stationId
+    of new Set(
+      Object.values(
+        STATION_IDS,
+      ).flat(),
+    )
+  ) {
+    const previous =
+      state.stations[
+        stationId
+      ];
+
+    state.stations[
+      stationId
+    ] = {
+      level:
+        Number.isFinite(
+          previous?.level,
+        )
+          ? Math.max(
+            0,
+            Math.min(
+              STATION_UPGRADE.maxLevel,
+              Math.floor(
+                previous.level,
+              ),
+            ),
+          )
+          : 0,
+    };
+  }
+}
+
 export function ensureLineRuntime(state, lineKey) {
+  ensureStationRuntime(state);
+
   const line = getLine(state, lineKey);
   const maxStops = getMaxStops(lineKey);
 
@@ -785,20 +834,46 @@ export function ensureLineRuntime(state, lineKey) {
 }
 
 export function getLineDemandPpm(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) return 0;
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
+    return 0;
+  }
 
-  return (
-    line.stopCount
-    * line.demandPerStopPpm
-  );
+  let total = 0;
+
+  for (
+    let stopIndex = 0;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    total +=
+      getStopDemandPpm(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
 }
 
 export function getTotalDemandPpm(state) {
-  return (
-    getLineDemandPpm(state, 'line1')
-    + getLineDemandPpm(state, 'line2')
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + getLineDemandPpm(
+        state,
+        lineKey,
+      ),
+    0,
   );
 }
 
@@ -832,50 +907,139 @@ export function getRouteLengthKm(state, lineKey) {
     );
 }
 
-export function getLineOneWayMinutes(state, lineKey) {
-  const line = getLine(state, lineKey);
+function getBaseStopDwellMinutes(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) {
+  const level =
+    getStationLevel(
+      state,
+      getStationId(
+        lineKey,
+        stopIndex,
+      ),
+    );
+
+  return Math.max(
+    0.12,
+    mode.dwellMinutes
+    - (
+      STATION_UPGRADE
+        .dwellReductionByLevel[
+          level
+        ]
+      ?? 0
+    ),
+  );
+}
+
+export function getLineOneWayMinutes(state, lineKey) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
     return 0;
   }
 
-  const mode = getMode(state, lineKey);
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
   const drivingMinutes =
-    getRouteLengthKm(state, lineKey)
+    getRouteLengthKm(
+      state,
+      lineKey,
+    )
     / mode.speedKph
     * 60;
 
-  const intermediateDwell =
-    Math.max(0, line.stopCount - 1)
-    * mode.dwellMinutes;
+  let dwellMinutes = 0;
+
+  for (
+    let stopIndex = 1;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    dwellMinutes +=
+      getBaseStopDwellMinutes(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
 
   return (
     drivingMinutes
-    + intermediateDwell
+    + dwellMinutes
     + mode.turnaroundMinutes / 2
   );
 }
 
 export function getLineCycleMinutes(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) {
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
     return 0;
   }
 
-  const mode = getMode(state, lineKey);
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
   const drivingMinutes =
-    getRouteLengthKm(state, lineKey)
+    getRouteLengthKm(
+      state,
+      lineKey,
+    )
     / mode.speedKph
     * 60
     * 2;
 
-  const dwellMinutes =
-    Math.max(0, line.stopCount - 1)
-    * mode.dwellMinutes
-    * 2;
+  let dwellMinutes = 0;
+
+  for (
+    let stopIndex = 0;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    const visits =
+      stopIndex === 0
+      || stopIndex
+        === line.stopCount - 1
+        ? 1
+        : 2;
+
+    dwellMinutes +=
+      getBaseStopDwellMinutes(
+        state,
+        lineKey,
+        stopIndex,
+      ) * visits;
+  }
 
   return (
     drivingMinutes
@@ -939,38 +1103,82 @@ export function getLineCapacityPpm(state, lineKey) {
 }
 
 export function getNextStopCost(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (lineKey === 'line1') {
-    const purchasedStops =
-      Math.max(0, line.stopCount - 1);
+  const config = {
+    line1: {
+      base:
+        ECONOMY.line1StopBaseCost,
+      growth:
+        ECONOMY.line1StopCostGrowth,
+      includedStops: 1,
+    },
+    line2: {
+      base:
+        ECONOMY.line2StopBaseCost,
+      growth:
+        ECONOMY.line2StopCostGrowth,
+      includedStops: 2,
+    },
+    line3: {
+      base:
+        ECONOMY.line3StopBaseCost,
+      growth:
+        ECONOMY.line3StopCostGrowth,
+      includedStops: 2,
+    },
+    line4: {
+      base:
+        ECONOMY.line4StopBaseCost,
+      growth:
+        ECONOMY.line4StopCostGrowth,
+      includedStops: 2,
+    },
+  }[lineKey];
 
-    return Math.round(
-      ECONOMY.line1StopBaseCost
-      * ECONOMY.line1StopCostGrowth ** purchasedStops,
+  if (!config) {
+    throw new Error(
+      `Unknown line: ${lineKey}`,
     );
   }
 
-  const purchasedExtraStops =
-    Math.max(0, line.stopCount - 2);
+  const purchasedStops =
+    Math.max(
+      0,
+      line.stopCount
+      - config.includedStops,
+    );
 
   return Math.round(
-    ECONOMY.line2StopBaseCost
-    * ECONOMY.line2StopCostGrowth ** purchasedExtraStops,
+    config.base
+    * config.growth
+      ** purchasedStops,
   );
 }
 
 export function getGarageUsed(state) {
-  return (
-    state.line1.fleetCount
-    + state.line2.fleetCount
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + (
+        state[lineKey]
+          ?.fleetCount
+        ?? 0
+      ),
+    0,
   );
 }
 
 export function getVehiclePurchaseCost(state) {
   const starterVehicles =
-    (state.line1.built ? 1 : 0)
-    + (state.line2.built ? 1 : 0);
+    LINE_KEYS.filter(
+      (lineKey) =>
+        state[lineKey]?.built,
+    ).length;
 
   const purchasedVehicles = Math.max(
     0,
