@@ -123,12 +123,21 @@ const BOARDING_HOLD_MINUTES = 0.18;
 
 const LINE_CONFIG = Object.freeze({
   line1: {
-    segmentLengthKm: 0.9,
+    segmentLengthsKm: [
+      0.368,
+      0.6748566882715991,
+      0.7548566882715991,
+      0.8348566882715991,
+    ],
     demandPerStopPpm: 3.2,
     maxStops: ECONOMY.maxLine1Stops,
   },
   line2: {
-    segmentLengthKm: 0.8,
+    segmentLengthsKm: [
+      0.7068566882715991,
+      0.6908566882715991,
+      0.8028566882715991,
+    ],
     demandPerStopPpm: 2.8,
     maxStops: ECONOMY.maxLine2Stops,
   },
@@ -221,12 +230,36 @@ function getMode(state, lineKey) {
   return TRANSPORT_MODES[line.mode];
 }
 
-function getSegmentTravelMinutes(state, lineKey) {
-  const mode = getMode(state, lineKey);
-  const config = getLineConfig(lineKey);
+function getSegmentTravelMinutes(
+  state,
+  lineKey,
+  fromStopIndex,
+  toStopIndex,
+) {
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
+
+  const config =
+    getLineConfig(
+      lineKey,
+    );
+
+  const segmentIndex =
+    Math.min(
+      fromStopIndex,
+      toStopIndex,
+    );
+
+  const lengthKm =
+    config.segmentLengthsKm[
+      segmentIndex
+    ] ?? 0;
 
   return (
-    config.segmentLengthKm
+    lengthKm
     / mode.speedKph
     * 60
   );
@@ -387,13 +420,33 @@ export function getTotalDemandPpm(state) {
 }
 
 export function getRouteLengthKm(state, lineKey) {
-  const line = getLine(state, lineKey);
-  const config = getLineConfig(lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  return (
-    Math.max(0, line.stopCount - 1)
-    * config.segmentLengthKm
-  );
+  const config =
+    getLineConfig(
+      lineKey,
+    );
+
+  const segmentCount =
+    Math.max(
+      0,
+      line.stopCount - 1,
+    );
+
+  return config.segmentLengthsKm
+    .slice(
+      0,
+      segmentCount,
+    )
+    .reduce(
+      (sum, length) =>
+        sum + length,
+      0,
+    );
 }
 
 export function getLineOneWayMinutes(state, lineKey) {
@@ -1040,6 +1093,8 @@ function startTravel(
     getSegmentTravelMinutes(
       state,
       lineKey,
+      vehicle.currentStopIndex,
+      nextStopIndex,
     );
 
   vehicle.phaseDurationMinutes =
