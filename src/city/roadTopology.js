@@ -365,6 +365,65 @@ function samePoint(a, b, tolerance = 1.5) {
   );
 }
 
+function sharedEndpointOutwardDot(
+  a,
+  b,
+  c,
+  d,
+  tolerance =
+    ROAD_TOPOLOGY.intersectionTolerance,
+) {
+  const pairs = [
+    [a, b, c, d],
+    [a, b, d, c],
+    [b, a, c, d],
+    [b, a, d, c],
+  ];
+
+  for (
+    const [
+      sharedFirst,
+      awayFirst,
+      sharedSecond,
+      awaySecond,
+    ]
+    of pairs
+  ) {
+    if (
+      !samePoint(
+        sharedFirst,
+        sharedSecond,
+        tolerance,
+      )
+    ) {
+      continue;
+    }
+
+    const first =
+      normalize(
+        awayFirst.x
+          - sharedFirst.x,
+        awayFirst.y
+          - sharedFirst.y,
+      );
+
+    const second =
+      normalize(
+        awaySecond.x
+          - sharedSecond.x,
+        awaySecond.y
+          - sharedSecond.y,
+      );
+
+    return (
+      first.x * second.x
+      + first.y * second.y
+    );
+  }
+
+  return null;
+}
+
 function segmentEndpointTouch(
   intersection,
   a,
@@ -714,34 +773,20 @@ export function validateRoadCandidate(
               .parallelAngleDeg
           && separation < clearance
         ) {
-          const candidateTouchesRoad =
-            samePoint(
+          const outwardDot =
+            sharedEndpointOutwardDot(
               a,
-              c,
-              ROAD_TOPOLOGY
-                .intersectionTolerance,
-            )
-            || samePoint(
-              a,
-              d,
-              ROAD_TOPOLOGY
-                .intersectionTolerance,
-            )
-            || samePoint(
               b,
               c,
-              ROAD_TOPOLOGY
-                .intersectionTolerance,
-            )
-            || samePoint(
-              b,
               d,
-              ROAD_TOPOLOGY
-                .intersectionTolerance,
             );
 
+          const naturalContinuation =
+            outwardDot != null
+            && outwardDot < -0.55;
+
           if (
-            !candidateTouchesRoad
+            !naturalContinuation
           ) {
             return {
               ok: false,
@@ -1366,6 +1411,21 @@ export function roadCorridorsConflict(
         && separation
           < clearance
       ) {
+        const outwardDot =
+          sharedEndpointOutwardDot(
+            a,
+            b,
+            c,
+            d,
+          );
+
+        if (
+          outwardDot != null
+          && outwardDot < -0.55
+        ) {
+          continue;
+        }
+
         return {
           conflict: true,
           reason:
