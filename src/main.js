@@ -5,6 +5,7 @@ import {
 import {
   addStopA,
   addStopB,
+  addVehicle,
   buildCorridorB,
   buildFirstLine,
   buildInterchange,
@@ -42,6 +43,7 @@ const toastFailure = (result) => {
     'corridor-required': 'Open Line 2 first.',
     'station-b-required': 'Build Harbor Station first.',
     'stop-limit': 'Stop limit reached for this prototype.',
+    'fleet-limit': 'Fleet limit reached for this line.',
     'already-built': 'That infrastructure is already open.',
   };
 
@@ -109,7 +111,7 @@ hud = new Hud({
     const result = addStopA(state);
 
     if (result.ok) {
-      hud.toast('New stop added to Bus Line 1.');
+      hud.toast('New stop added to Bus Line 1. Route time increased.');
     } else {
       toastFailure(result);
     }
@@ -119,7 +121,27 @@ hud = new Hud({
     const result = addStopB(state);
 
     if (result.ok) {
-      hud.toast('New stop added to Bus Line 2.');
+      hud.toast('New stop added to Bus Line 2. Route time increased.');
+    } else {
+      toastFailure(result);
+    }
+  },
+
+  onAddVehicleA: () => {
+    const result = addVehicle(state, 'corridorA');
+
+    if (result.ok) {
+      hud.toast('Bus added to Line 1. Headway reduced.');
+    } else {
+      toastFailure(result);
+    }
+  },
+
+  onAddVehicleB: () => {
+    const result = addVehicle(state, 'corridorB');
+
+    if (result.ok) {
+      hud.toast('Bus added to Line 2. Headway reduced.');
     } else {
       toastFailure(result);
     }

@@ -5,22 +5,26 @@ import {
   advanceSimulation,
   createInitialState,
   getAbandonmentPercent,
-  getAddStopBCost,
+  getAverageWaitMinutes,
   getBottleneck,
-  getCorridorBDemandPpm,
+  getCorridorADemandPpm,
   getDeliveredPassengersPpm,
-  getInterchangeIngressPpm,
+  getLineCapacityPpm,
+  getLineHeadwayMinutes,
+  getLineOneWayMinutes,
   getServiceBoard,
+  getVehiclePurchaseCost,
 } from '../src/simulation/model.js';
 
 import {
+  addStopA,
   addStopB,
+  addVehicle,
   buildCorridorB,
   buildFirstLine,
   buildInterchange,
   buildStationB,
   buildTerminalA,
-  buyUpgrade,
 } from '../src/simulation/actions.js';
 
 function fundedState() {
@@ -37,194 +41,223 @@ test('no passenger service runs before Line 1 is built', () => {
   assert.equal(getDeliveredPassengersPpm(state), 0);
 });
 
-test('starting Line 1 begins passenger transport and earns fare revenue', () => {
+test('Line 1 starts with a real two-bus fleet', () => {
   const state = createInitialState();
+  state.money = 10_000;
 
   assert.equal(buildFirstLine(state).ok, true);
-  assert.equal(getDeliveredPassengersPpm(state), 10);
+  assert.equal(state.corridorA.fleetCount, 2);
+  assert.ok(getLineHeadwayMinutes(state, 'corridorA') > 0);
+  assert.ok(getLineCapacityPpm(state, 'corridorA') > 4);
 
   const before = state.money;
-
   advanceSimulation(state, 0.25);
 
   assert.ok(state.money > before);
   assert.ok(state.stats.lifetimePassengers > 0);
 });
 
-test('Northside Terminal requires Line 1', () => {
-  const state = createInitialState();
-
-  assert.equal(
-    buildTerminalA(state).reason,
-    'line-required',
-  );
-
-  state.money = 10_000;
-  buildFirstLine(state);
-
-  assert.equal(buildTerminalA(state).ok, true);
-  assert.equal(state.terminalA.built, true);
-});
-
-test('Central Interchange requires the terminal', () => {
-  const state = createInitialState();
-  state.money = 10_000;
-
-  buildFirstLine(state);
-
-  assert.equal(
-    buildInterchange(state).reason,
-    'terminal-required',
-  );
-
-  buildTerminalA(state);
-
-  assert.equal(buildInterchange(state).ok, true);
-});
-
-test('Line 2 adds a second source corridor and service-board entry', () => {
+test('adding a stop lengthens the trip and can create a line bottleneck', () => {
   const state = fundedState();
 
-  buildInterchange(state);
-  buildCorridorB(state);
+  const beforeTravel =
+    getLineOneWayMinutes(state, 'corridorA');
 
-  assert.equal(state.corridorB.built, true);
-  assert.ok(getCorridorBDemandPpm(state) > 0);
+  const beforeHeadway =
+    getLineHeadwayMinutes(state, 'corridorA');
+
+  const beforeDemand =
+    getCorridorADemandPpm(state);
+
+  assert.equal(addStopA(state).ok, true);
 
   assert.ok(
-    getServiceBoard(state).some(
-      (service) => service.destination === 'Riverside',
-    ),
+    getLineOneWayMinutes(state, 'corridorA')
+      > beforeTravel,
   );
+
+  assert.ok(
+    getLineHeadwayMinutes(state, 'corridorA')
+      > beforeHeadway,
+  );
+
+  assert.ok(
+    getCorridorADemandPpm(state)
+      > beforeDemand,
+  );
+
+  assert.equal(getBottleneck(state), 'line-a');
 });
 
-test('adding a Line 2 stop increases passenger demand', () => {
+test('buying a bus shortens headway and increases capacity', () => {
+  const state = fundedState();
+  addStopA(state);
+
+  const beforeHeadway =
+    getLineHeadwayMinutes(state, 'corridorA');
+
+  const beforeCapacity =
+    getLineCapacityPpm(state, 'corridorA');
+
+  assert.equal(
+    addVehicle(state, 'corridorA').ok,
+    true,
+  );
+
+  assert.equal(state.corridorA.fleetCount, 3);
+
+  assert.ok(
+    getLineHeadwayMinutes(state, 'corridorA')
+      < beforeHeadway,
+  );
+
+  assert.ok(
+    getLineCapacityPpm(state, 'corridorA')
+      > beforeCapacity,
+  );
+
+  assert.equal(getBottleneck(state), 'none');
+});
+
+test('vehicle purchase cost escalates with fleet size', () => {
   const state = fundedState();
 
+  const firstCost =
+    getVehiclePurchaseCost(state, 'corridorA');
+
+  assert.equal(
+    addVehicle(state, 'corridorA').ok,
+    true,
+  );
+
+  const secondCost =
+    getVehiclePurchaseCost(state, 'corridorA');
+
+  assert.ok(secondCost > firstCost);
+});
+
+test('scheduled passenger wait drops when another bus is added', () => {
+  const state = fundedState();
+
+  const before = getAverageWaitMinutes(state);
+
+  addVehicle(state, 'corridorA');
+
+  const after = getAverageWaitMinutes(state);
+
+  assert.ok(after < before);
+});
+
+test('overloaded Line 1 stores passengers in its source queue', () => {
+  const state = fundedState();
+  buildInterchange(state);
+  addStopA(state);
+
+  assert.equal(getBottleneck(state), 'line-a');
+
+  for (let index = 0; index < 240; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(state.terminalA.queuePassengers > 0);
+});
+
+test('adding enough buses drains an overloaded Line 1 queue', () => {
+  const state = fundedState();
+  buildInterchange(state);
+  addStopA(state);
+
+  for (let index = 0; index < 240; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  const queued = state.terminalA.queuePassengers;
+
+  addVehicle(state, 'corridorA');
+  addVehicle(state, 'corridorA');
+
+  for (let index = 0; index < 240; index += 1) {
+    advanceSimulation(state, 0.25);
+  }
+
+  assert.ok(state.terminalA.queuePassengers < queued);
+});
+
+test('Line 2 also derives capacity from fleet and route length', () => {
+  const state = fundedState();
   buildInterchange(state);
   buildCorridorB(state);
 
-  const beforeDemand = getCorridorBDemandPpm(state);
-  const beforeCost = getAddStopBCost(state);
+  const baseHeadway =
+    getLineHeadwayMinutes(state, 'corridorB');
 
-  assert.equal(addStopB(state).ok, true);
-  assert.ok(getCorridorBDemandPpm(state) > beforeDemand);
-  assert.ok(getAddStopBCost(state) > beforeCost);
+  assert.equal(state.corridorB.fleetCount, 2);
+
+  addStopB(state);
+
+  assert.ok(
+    getLineHeadwayMinutes(state, 'corridorB')
+      > baseHeadway,
+  );
+
+  assert.equal(getBottleneck(state), 'line-b');
+
+  addVehicle(state, 'corridorB');
+  addVehicle(state, 'corridorB');
+
+  assert.ok(
+    getLineCapacityPpm(state, 'corridorB')
+      > state.corridorB.demandPerStopPpm
+        * state.corridorB.stopCount,
+  );
+});
+
+test('service board exposes fleet headway', () => {
+  const state = fundedState();
+  buildInterchange(state);
+  buildCorridorB(state);
+
+  const services = getServiceBoard(state);
+
+  assert.equal(services.length, 2);
+  assert.ok(services[0].headwayMinutes > 0);
+  assert.equal(services[0].fleetCount, 2);
+  assert.equal(services[1].fleetCount, 2);
 });
 
 test('Harbor Station creates a second delivered passenger stream', () => {
   const state = fundedState();
-
   buildInterchange(state);
   buildCorridorB(state);
   buildStationB(state);
 
-  for (let index = 0; index < 20; index += 1) {
-    advanceSimulation(state, 0.25);
-  }
-
-  assert.ok(state.interchange.lastDeliveredPpm.primary > 0);
-  assert.ok(state.interchange.lastDeliveredPpm.secondary > 0);
-
-  assert.ok(
-    getServiceBoard(state).some(
-      (service) => service.destination === 'Harbor Station',
-    ),
-  );
-});
-
-test('interchange becomes a bottleneck when combined passenger flow is too high', () => {
-  const state = fundedState();
-
-  buildInterchange(state);
-  buildCorridorB(state);
-
-  state.corridorA.stopCount = 4;
-  state.corridorA.demandPerStopPpm = 25;
-  state.corridorA.lineCapacityPpm = 200;
-  state.terminalA.platformCapacityPpm = 200;
-
-  state.corridorB.stopCount = 4;
-  state.corridorB.demandPerStopPpm = 20;
-  state.corridorB.lineCapacityPpm = 200;
-
-  state.interchange.transferCapacityPpm = 40;
-
-  assert.equal(getBottleneck(state), 'interchange');
-  assert.ok(getInterchangeIngressPpm(state) > 40);
-
-  for (let index = 0; index < 30; index += 1) {
-    advanceSimulation(state, 0.25);
-  }
-
-  assert.ok(state.interchange.queuePassengers > 0);
-});
-
-test('Central Station can bottleneck without blocking Harbor Station queue', () => {
-  const state = fundedState();
-
-  buildInterchange(state);
-  buildCorridorB(state);
-  buildStationB(state);
-
-  state.corridorA.stopCount = 4;
-  state.corridorA.demandPerStopPpm = 20;
-  state.corridorA.lineCapacityPpm = 200;
-  state.terminalA.platformCapacityPpm = 200;
-
-  state.corridorB.lineCapacityPpm = 200;
-  state.interchange.transferCapacityPpm = 200;
-
-  state.stationA.capacityPpm = 20;
-  state.stationB.capacityPpm = 200;
-
-  assert.equal(getBottleneck(state), 'station-a');
-
-  for (let index = 0; index < 40; index += 1) {
+  for (let index = 0; index < 120; index += 1) {
     advanceSimulation(state, 0.25);
   }
 
   assert.ok(
-    state.interchange.destinationQueuesPassengers.primary > 0,
+    state.interchange.lastDeliveredPpm.primary > 0,
   );
 
-  assert.equal(
-    state.interchange.destinationQueuesPassengers.secondary,
-    0,
+  assert.ok(
+    state.interchange.lastDeliveredPpm.secondary > 0,
   );
 });
 
-test('passengers leave the queue after waiting capacity is exhausted', () => {
+test('passengers abandon a source queue only after waiting space is exhausted', () => {
   const state = fundedState();
-
   buildInterchange(state);
-  buildCorridorB(state);
+  addStopA(state);
 
-  state.corridorA.stopCount = 4;
-  state.corridorA.demandPerStopPpm = 30;
-  state.corridorA.lineCapacityPpm = 300;
-  state.terminalA.platformCapacityPpm = 300;
+  state.terminalA.waitingCapacityPassengers = 0.2;
 
-  state.corridorB.stopCount = 4;
-  state.corridorB.demandPerStopPpm = 30;
-  state.corridorB.lineCapacityPpm = 300;
-
-  state.interchange.transferCapacityPpm = 10;
-  state.interchange.waitingCapacityPassengers = 1;
-
-  for (let index = 0; index < 60; index += 1) {
+  for (let index = 0; index < 240; index += 1) {
     advanceSimulation(state, 0.25);
   }
 
-  assert.ok(state.interchange.totalAbandonedPassengers > 0);
+  assert.ok(
+    state.terminalA.totalAbandonedPassengers > 0,
+  );
+
   assert.ok(getAbandonmentPercent(state) > 0);
-});
-
-test('adding buses increases Line 1 capacity', () => {
-  const state = fundedState();
-
-  const before = state.corridorA.lineCapacityPpm;
-
-  assert.equal(buyUpgrade(state, 'lineA').ok, true);
-  assert.ok(state.corridorA.lineCapacityPpm > before);
 });

@@ -4,6 +4,7 @@ import {
   getAddStopACost,
   getAddStopBCost,
   getUpgradeCost,
+  getVehiclePurchaseCost,
 } from './model.js';
 
 export function buildFirstLine(state) {
@@ -141,15 +142,59 @@ export function addStopB(state) {
   return { ok: true, cost };
 }
 
+export function addVehicle(state, corridorKey) {
+  const corridor =
+    corridorKey === 'corridorA'
+      ? state.corridorA
+      : corridorKey === 'corridorB'
+        ? state.corridorB
+        : null;
+
+  if (!corridor) {
+    return { ok: false, reason: 'unknown-corridor' };
+  }
+
+  if (
+    corridorKey === 'corridorA'
+    && !state.corridorA.lineBuilt
+  ) {
+    return { ok: false, reason: 'line-required' };
+  }
+
+  if (
+    corridorKey === 'corridorB'
+    && !state.corridorB.built
+  ) {
+    return { ok: false, reason: 'corridor-required' };
+  }
+
+  if (
+    corridor.fleetCount
+    >= ECONOMY.maxVehiclesPerLine
+  ) {
+    return { ok: false, reason: 'fleet-limit' };
+  }
+
+  const cost = getVehiclePurchaseCost(
+    state,
+    corridorKey,
+  );
+
+  if (state.money < cost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= cost;
+  corridor.fleetCount += 1;
+
+  return { ok: true, cost };
+}
+
 export function buyUpgrade(state, type) {
   const config = UPGRADES[type];
 
   if (!config) {
     return { ok: false, reason: 'unknown-upgrade' };
-  }
-
-  if (type === 'lineA' && !state.corridorA.lineBuilt) {
-    return { ok: false, reason: 'line-required' };
   }
 
   if (
@@ -159,15 +204,17 @@ export function buyUpgrade(state, type) {
     return { ok: false, reason: 'terminal-required' };
   }
 
-  if (type === 'interchange' && !state.interchange.built) {
+  if (
+    type === 'interchange'
+    && !state.interchange.built
+  ) {
     return { ok: false, reason: 'interchange-required' };
   }
 
-  if (type === 'lineB' && !state.corridorB.built) {
-    return { ok: false, reason: 'corridor-required' };
-  }
-
-  if (type === 'stationB' && !state.stationB.built) {
+  if (
+    type === 'stationB'
+    && !state.stationB.built
+  ) {
     return { ok: false, reason: 'station-b-required' };
   }
 
@@ -182,9 +229,6 @@ export function buyUpgrade(state, type) {
   if (type === 'catchmentA') {
     state.corridorA.demandLevel += 1;
     state.corridorA.demandPerStopPpm += config.delta;
-  } else if (type === 'lineA') {
-    state.corridorA.lineLevel += 1;
-    state.corridorA.lineCapacityPpm += config.delta;
   } else if (type === 'terminalA') {
     state.terminalA.level += 1;
     state.terminalA.platformCapacityPpm += config.delta;
@@ -197,9 +241,6 @@ export function buyUpgrade(state, type) {
   } else if (type === 'interchange') {
     state.interchange.level += 1;
     state.interchange.transferCapacityPpm += config.delta;
-  } else if (type === 'lineB') {
-    state.corridorB.lineLevel += 1;
-    state.corridorB.lineCapacityPpm += config.delta;
   } else if (type === 'stationB') {
     state.stationB.level += 1;
     state.stationB.capacityPpm += config.delta;
