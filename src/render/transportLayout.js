@@ -310,12 +310,13 @@ export function getBuiltRoute(
     segmentIndex < segmentCount;
     segmentIndex += 1
   ) {
-    const raw =
-      RAW_SEGMENTS[lineKey][segmentIndex];
+    const rounded = roundedPolyline(
+      RAW_SEGMENTS[lineKey][segmentIndex],
+    );
 
     for (
       let pointIndex = 0;
-      pointIndex < raw.length;
+      pointIndex < rounded.length;
       pointIndex += 1
     ) {
       if (
@@ -325,11 +326,11 @@ export function getBuiltRoute(
         continue;
       }
 
-      merged.push(raw[pointIndex]);
+      merged.push(rounded[pointIndex]);
     }
   }
 
-  return metricsForPolyline(merged);
+  return routeMetrics(merged);
 }
 
 export function getFutureSegmentRoute(
