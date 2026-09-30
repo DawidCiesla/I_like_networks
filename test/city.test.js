@@ -684,6 +684,63 @@ test('master-plan parcels never overlap each other and all have street frontage'
   }
 });
 
+test('accepted parcels carry terrain metadata and remain buildable', () => {
+  const plan =
+    generateCityMasterPlan(
+      284731,
+    );
+
+  assert.ok(
+    plan.parcels.length >= 70,
+  );
+
+  assert.ok(
+    plan.parcels.every(
+      (parcel) =>
+        Number.isFinite(
+          parcel.terrainSlopeDegrees,
+        )
+        && parcel.terrainSlopeDegrees < 17
+        && Number.isFinite(
+          parcel.forestPotential,
+        ),
+    ),
+  );
+});
+
+test('constructed buildings persist real height and road-facing rotation', () => {
+  const state =
+    createInitialState();
+
+  advanceFor(
+    state,
+    90,
+  );
+
+  assert.ok(
+    state.city.buildings.length > 0,
+  );
+
+  for (
+    const building
+    of state.city.buildings
+  ) {
+    assert.ok(
+      Number.isFinite(
+        building.profile
+          ?.heightMeters,
+      )
+      && building.profile.heightMeters > 0,
+    );
+
+    assert.ok(
+      Number.isFinite(
+        building.rotationRadians,
+      ),
+    );
+  }
+});
+
 test('only a small number of city projects can be active at once', () => {
   const state =
     createInitialState();
