@@ -8,7 +8,7 @@ A passenger-transport incremental / management game prototype inspired by the cl
 
 A native Godot 4.6 port now lives in `godot/` alongside the existing browser build. The browser version remains the gameplay reference until feature parity is reached.
 
-The current Godot milestone already includes deterministic terrain, vegetation, all four Bus Era route geometries, shared physical stations, the Bus Depot, station upgrades, visible buses, map picking, a city-builder camera, HUD/Inspector and native saves.
+The current Godot milestone already includes deterministic terrain, vegetation, all four Bus Era route geometries, shared physical stations, the Bus Depot, local station upgrades, exact origin→destination passenger queues, real boarding/alighting vehicle phases, arrival-only fare revenue, the canonical 15-district city plan, incremental road/building growth, visible buses, map picking, a city-builder camera, HUD/Inspector and native saves.
 
 See [`docs/godot-port.md`](docs/godot-port.md) for the migration/parity contract.
 
@@ -161,6 +161,12 @@ Headless parity smoke test:
 
 ```bash
 godot --headless --path godot --script res://scripts/debug/self_test.gd
+```
+
+Regenerate the canonical default-seed city fixture from the browser generator:
+
+```bash
+npm run godot:fixture
 ```
 
 ### Browser reference build
