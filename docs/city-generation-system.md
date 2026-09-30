@@ -98,9 +98,38 @@ building complete
 
 Already completed objects are never repositioned or regenerated when later stations are purchased.
 
+## World scale
+
+The Bus Era now treats approximately:
+
+```text
+1 world unit ≈ 1 metre
+```
+
+Transport geometry is deliberately much larger than the earlier prototype.
+
+Current stop-to-stop road distances for the authored Bus Era are approximately:
+
+```text
+Line 1: 368 m → 675 m → 755 m → 835 m
+Line 2: 707 m → 691 m → 803 m
+```
+
+This is intentional. A bus stop must not sit three houses away from the next stop.
+
+The space between stops is expected to contain:
+
+- several local streets,
+- multiple blocks,
+- dozens of parcels,
+- parks or infrastructure reservations,
+- future tram / road upgrades.
+
+The camera therefore supports much wider zoom-out than before. The city is a navigable world, not a network diagram that must always fit at 1× zoom.
+
 ## Road graph
 
-The city master plan currently contains 23 road edges across the complete Bus Era.
+The default Bus Era master plan now contains roughly fifty road edges, including arterials and local streets.
 
 Each edge stores:
 
@@ -124,6 +153,34 @@ Primary bus corridors are represented as arterial roads.
 When the player purchases the station that requires a corridor, that arterial becomes built immediately so the bus service has a physical road.
 
 Secondary district streets are built gradually.
+
+### Connected-growth invariant
+
+A city road is never allowed to appear as an isolated road in an empty field.
+
+Every local road stores one or more `parentRoadIds`.
+
+Construction obeys:
+
+```text
+built arterial
+    ↓
+first district spine
+    ↓
+connected side street
+    ↓
+outer street
+    ↓
+optional connecting street
+```
+
+A road project cannot enter the active construction state until every required parent road is already built.
+
+The first point of each local road is a real graph node shared with at least one parent road. For loop-closing roads, both branches must exist before the connector may start.
+
+The renderer follows the same rule: a future street is not even shown as a planned dashed alignment until its parent road exists.
+
+Road construction progress always starts at the connected endpoint and advances away from the existing street network.
 
 The Bus Depot access road remains locked until the depot itself exists.
 
@@ -168,7 +225,9 @@ Parcels store:
 - lifecycle status,
 - optional building ID.
 
-The complete Bus Era currently resolves to roughly thirty valid parcels for the default seed.
+The rescaled Bus Era currently resolves to roughly one hundred valid parcels for the default seed.
+
+Parcels are generated along real local-street frontage rather than from a small fixed list around each stop. This gives each station several blocks of potential development instead of only a few building slots.
 
 ### Plan-time validation
 
@@ -184,13 +243,53 @@ This is intentionally done against future infrastructure too.
 
 A building cannot later discover that the future road was supposed to pass through it.
 
-Every accepted parcel also stores `frontageRoadId`, creating the basis for future:
+Every accepted parcel also stores `frontageRoadId`.
+
+A parcel cannot start development until that exact frontage road is built. It is not enough for some unrelated road in the same district to exist.
+
+This creates the basis for future:
 
 - addresses,
 - driveways,
 - entrances,
 - parking access,
 - building-generated car trips.
+
+## Protected infrastructure reservations
+
+The master plan contains persistent reserved sites.
+
+Reservations are generated before parcel validation and therefore take precedence over normal development.
+
+The current Bus Era includes at least:
+
+- Bus Depot reservation,
+- City Park open-space reservation.
+
+A reservation stores:
+
+- stable ID,
+- type,
+- world-space center,
+- width / height,
+- safety padding,
+- facility type,
+- lifecycle status.
+
+Any parcel intersecting the protected rectangle plus its padding is rejected from the master plan.
+
+This means a facility can remain unbuilt for a long time without losing its land to houses or shops.
+
+The same system is intended for future:
+
+- tram depots,
+- rail stations,
+- maintenance yards,
+- park-and-ride facilities,
+- major interchanges,
+- substations,
+- civic buildings,
+- airport / ferry infrastructure.
 
 ## Time-based construction
 
@@ -306,7 +405,9 @@ This means city growth can be watched in normal gameplay.
 
 ## Save migration
 
-Game state is now version 8.
+Game state is now version 9.
+
+City-state schema is version 2.
 
 Older Bus Era saves migrate into the new city model.
 
@@ -371,3 +472,21 @@ Still deferred:
 - city-generation debug/heat-map UI.
 
 Those should build on the persistent model rather than reintroduce renderer-driven procedural decoration.
+
+
+## Scale-and-connectivity revision
+
+This revision replaces the earlier compact city layout.
+
+Key invariants are now enforced by tests:
+
+1. authored bus-stop road distance must stay within a realistic urban range,
+2. every local road must reference an existing parent road,
+3. every local road must share a physical graph node with its parent network,
+4. construction may never begin before parent roads are complete,
+5. every developable parcel must have a real frontage road,
+6. a building may only develop after that exact frontage road is built,
+7. protected infrastructure reservations may never overlap normal parcels,
+8. built roads and buildings remain stable after later network expansion.
+
+These constraints should be preserved when procedural city expansion is introduced beyond the current authored Bus Era.
