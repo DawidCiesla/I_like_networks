@@ -75,7 +75,7 @@ Implemented now:
 
 The global BUILD panel is no longer the primary expansion interface. The map is.
 
-See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, and [`docs/city-generation-system.md`](docs/city-generation-system.md) for the persistent city simulation architecture.
+See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, [`docs/city-generation-system.md`](docs/city-generation-system.md) for persistent city simulation, and [`docs/road-topology.md`](docs/road-topology.md) for street-graph invariants.
 
 ## Planned transport families
 
