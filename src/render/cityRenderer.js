@@ -1,5 +1,6 @@
 import {
   WORLD,
+  getDepotSpurRoute,
   getSegmentRoute,
   pointOnRoute,
   routeMetrics,
@@ -755,6 +756,17 @@ export function drawCity(
 
   for (const road of roadRoutes) {
     drawRoad(ctx, road);
+  }
+
+  if (
+    state.line1.stopCount >= 3
+    || state.depot.built
+  ) {
+    drawRoad(
+      ctx,
+      getDepotSpurRoute(),
+      { local: true },
+    );
   }
 
   for (const district of activeDistricts) {
