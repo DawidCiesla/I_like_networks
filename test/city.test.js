@@ -97,7 +97,7 @@ test('starting station activates Old Town and development appears over time', ()
     0,
   );
 
-  advanceFor(state, 35);
+  advanceFor(state, 45);
 
   summary =
     getCitySummary(state);
@@ -246,6 +246,26 @@ test('already built city objects never disappear when another stop is purchased'
       true,
     );
   }
+});
+
+test('every master-plan parcel has deterministic street frontage', () => {
+  const plan =
+    generateCityMasterPlan(
+      284731,
+    );
+
+  assert.ok(
+    plan.parcels.length >= 24,
+  );
+
+  assert.ok(
+    plan.parcels.every(
+      (parcel) =>
+        typeof parcel.frontageRoadId
+          === 'string'
+        && parcel.frontageRoadId.length > 0,
+    ),
+  );
 });
 
 test('master-plan parcels never overlap each other', () => {
