@@ -875,7 +875,12 @@ export class Hud {
     }
 
     const lineNumber =
-      isLine1 ? 1 : 2;
+      Number(
+        lineKey.replace(
+          'line',
+          '',
+        ),
+      );
 
     const demand =
       getLineDemandPpm(
@@ -901,41 +906,7 @@ export class Hud {
         lineKey,
       );
 
-    const mode =
-      TRANSPORT_MODES[line.mode];
-
     const actions = [];
-
-    if (line.built) {
-      actions.push(
-        this.#upgradeAction(
-          state,
-          isLine1
-            ? 'shelter1'
-            : 'shelter2',
-          'Improve stops',
-          '+30 waiting spaces at each stop',
-        ),
-      );
-    }
-
-    const catchmentUnlocked =
-      isLine1
-        ? line.stopCount >= 4
-        : line.stopCount >= 3;
-
-    if (catchmentUnlocked) {
-      actions.push(
-        this.#upgradeAction(
-          state,
-          isLine1
-            ? 'catchment1'
-            : 'catchment2',
-          'Expand catchment',
-          '+0.5 pax/min generated at every stop',
-        ),
-      );
-    }
 
     return {
       kicker: 'SERVICE',
@@ -1014,54 +985,59 @@ export class Hud {
       getGarageUsed(state);
 
     const vehicleCost =
-      getVehiclePurchaseCost(state);
+      getVehiclePurchaseCost(
+        state,
+      );
 
     const garageFull =
-      used >= state.depot.garageSlots;
+      used
+      >= state.depot.garageSlots;
 
-    const line1Full =
-      state.line1.fleetCount
-      >= ECONOMY.maxVehiclesPerLine;
+    const actions = [];
 
-    const line2Full =
-      state.line2.fleetCount
-      >= ECONOMY.maxVehiclesPerLine;
+    for (
+      const lineKey
+      of LINE_KEYS
+    ) {
+      const line =
+        state[lineKey];
 
-    const actions = [
-      {
-        command: 'add-vehicle-1',
-        title: 'Buy bus for Line 1',
+      if (!line?.built) {
+        continue;
+      }
+
+      const lineNumber =
+        lineKey.replace(
+          'line',
+          '',
+        );
+
+      const lineFull =
+        line.fleetCount
+        >= ECONOMY
+          .maxVehiclesPerLine;
+
+      actions.push({
+        command:
+          'add-vehicle',
+        lineKey,
+        title:
+          `Buy bus for Line ${lineNumber}`,
         detail:
           'Adds a real bus to the route and increases departures',
         costLabel:
-          line1Full
+          lineFull
             ? 'MAX'
             : garageFull
               ? 'GARAGE FULL'
-              : money(vehicleCost),
+              : money(
+                vehicleCost,
+              ),
         disabled:
-          line1Full
+          lineFull
           || garageFull
-          || state.money < vehicleCost,
-      },
-    ];
-
-    if (state.line2.built) {
-      actions.push({
-        command: 'add-vehicle-2',
-        title: 'Buy bus for Line 2',
-        detail:
-          'Adds a real bus to Line 2',
-        costLabel:
-          line2Full
-            ? 'MAX'
-            : garageFull
-              ? 'GARAGE FULL'
-              : money(vehicleCost),
-        disabled:
-          line2Full
-          || garageFull
-          || state.money < vehicleCost,
+          || state.money
+            < vehicleCost,
       });
     }
 
@@ -1073,6 +1049,18 @@ export class Hud {
         '+2 bus storage slots',
       ),
     );
+
+    const lineStats =
+      LINE_KEYS.map(
+        (lineKey, index) => ({
+          label:
+            `LINE ${index + 1}`,
+          value:
+            state[lineKey]?.built
+              ? `${state[lineKey].fleetCount} buses`
+              : 'LOCKED',
+        }),
+      );
 
     return {
       kicker: 'FACILITY',
@@ -1089,18 +1077,7 @@ export class Hud {
               ? 'metric-warning'
               : '',
         },
-        {
-          label: 'LINE 1',
-          value:
-            `${state.line1.fleetCount} buses`,
-        },
-        {
-          label: 'LINE 2',
-          value:
-            state.line2.built
-              ? `${state.line2.fleetCount} buses`
-              : 'LOCKED',
-        },
+        ...lineStats,
         {
           label: 'NEXT BUS',
           value:
@@ -1137,26 +1114,57 @@ export class Hud {
     }
 
     if (!state.depot.built) {
-      return `${state.line1.stopCount} / 5 STOPS · DEPOT LOCKED`;
+      return (
+        `${state.line1.stopCount} / ${ECONOMY.maxLine1Stops} STOPS · DEPOT LOCKED`
+      );
     }
 
-    if (!state.line2.built) {
+    const builtLines =
+      LINE_KEYS.filter(
+        (lineKey) =>
+          state[lineKey]?.built,
+      ).length;
+
+    const nextUnlocks = [
+      {
+        lineKey: 'line2',
+        canUnlock:
+          canUnlockLine2(state),
+      },
+      {
+        lineKey: 'line3',
+        canUnlock:
+          canUnlockLine3(state),
+      },
+      {
+        lineKey: 'line4',
+        canUnlock:
+          canUnlockLine4(state),
+      },
+    ];
+
+    for (
+      const [index, entry]
+      of nextUnlocks.entries()
+    ) {
       if (
-        state.line1.stopCount
-          >= ECONOMY.maxLine1Stops
-        && getBottleneck(state) === 'none'
-        && getGarageUsed(state)
-          >= state.depot.garageSlots
+        !state[entry.lineKey].built
       ) {
-        return 'EXPAND DEPOT FOR LINE 2';
-      }
+        if (entry.canUnlock) {
+          return (
+            `LINE ${index + 2} UNLOCKED`
+          );
+        }
 
-      return canUnlockLine2(state)
-        ? 'LINE 2 UNLOCKED'
-        : `${state.line1.stopCount} / 5 STOPS · BUILD LINE 1`;
+        return (
+          `${builtLines} LINE${builtLines === 1 ? '' : 'S'} · ${getGarageUsed(state)} BUSES`
+        );
+      }
     }
 
-    return `2 LINES · ${getGarageUsed(state)} BUSES`;
+    return (
+      `4 LINES · ${getGarageUsed(state)} BUSES`
+    );
   }
 
   #renderObjective(state) {
@@ -1165,7 +1173,7 @@ export class Hud {
 
     if (!state.line1.built) {
       this.el.objective.textContent =
-        'Buy Market Square. Passengers will wait, board the bus and pay only after arriving.';
+        'Buy Market Square. Passengers pay after completing a real trip.';
       return;
     }
 
@@ -1173,7 +1181,7 @@ export class Hud {
       state.line1.stopCount < 3
     ) {
       this.el.objective.textContent =
-        'Watch passengers board, ride and pay when they exit. Use that fare money to extend Line 1.';
+        'Extend Line 1. Click any built station to inspect its individual upgrade.';
       return;
     }
 
@@ -1184,65 +1192,106 @@ export class Hud {
     }
 
     if (
-      bottleneck === 'line-1'
+      bottleneck.startsWith(
+        'line-',
+      )
       && state.depot.built
     ) {
+      const lineNumber =
+        bottleneck.slice(
+          'line-'.length,
+        );
+
       this.el.objective.textContent =
-        'Passengers are waiting. Open the depot and add another physical bus.';
+        `Line ${lineNumber} passengers are waiting. Add another physical bus or improve key stations.`;
       return;
     }
 
-    if (
-      state.line1.stopCount
-      < ECONOMY.maxLine1Stops
+    const expansionOrder = [
+      {
+        lineKey: 'line1',
+        maxStops:
+          ECONOMY.maxLine1Stops,
+        color: 'blue',
+      },
+      {
+        lineKey: 'line2',
+        maxStops:
+          ECONOMY.maxLine2Stops,
+        color: 'yellow',
+      },
+      {
+        lineKey: 'line3',
+        maxStops:
+          ECONOMY.maxLine3Stops,
+        color: 'green',
+      },
+      {
+        lineKey: 'line4',
+        maxStops:
+          ECONOMY.maxLine4Stops,
+        color: 'magenta',
+      },
+    ];
+
+    for (
+      const [
+        index,
+        definition,
+      ]
+      of expansionOrder.entries()
     ) {
-      this.el.objective.textContent =
-        'Extend Line 1 by buying the next visible stop.';
-      return;
-    }
+      const line =
+        state[
+          definition.lineKey
+        ];
 
-    if (
-      state.depot.built
-      && getGarageUsed(state)
-        >= state.depot.garageSlots
-      && !state.line2.built
-    ) {
-      this.el.objective.textContent =
-        'Line 1 is ready. Expand the depot to make room for the Line 2 starter bus.';
-      return;
-    }
+      if (!line.built) {
+        const unlockFns = {
+          line2: canUnlockLine2,
+          line3: canUnlockLine3,
+          line4: canUnlockLine4,
+        };
 
-    if (canUnlockLine2(state)) {
-      this.el.objective.textContent =
-        'Line 2 unlocked. Click the yellow branch at City Park.';
-      return;
-    }
+        const canUnlock =
+          unlockFns[
+            definition.lineKey
+          ]?.(state)
+          ?? false;
 
-    if (
-      !state.line2.built
-    ) {
-      this.el.objective.textContent =
-        'Stabilize Line 1 with enough buses to unlock a second service.';
-      return;
-    }
+        if (canUnlock) {
+          this.el.objective.textContent =
+            `Line ${index + 1} unlocked. Click the ${definition.color} ghost branch on the map.`;
+          return;
+        }
 
-    if (bottleneck === 'line-2') {
-      this.el.objective.textContent =
-        'Line 2 passengers are waiting. Add another bus from the depot.';
-      return;
-    }
+        if (
+          index > 0
+          && getGarageUsed(state)
+            >= state.depot.garageSlots
+        ) {
+          this.el.objective.textContent =
+            `Expand the Bus Depot to make room for the Line ${index + 1} starter bus.`;
+          return;
+        }
 
-    if (
-      state.line2.stopCount
-      < ECONOMY.maxLine2Stops
-    ) {
-      this.el.objective.textContent =
-        'Grow Line 2 by purchasing the next yellow stop.';
-      return;
+        this.el.objective.textContent =
+          `Complete and stabilize Line ${Math.max(1, index)} to unlock the next service.`;
+        return;
+      }
+
+      if (
+        line.stopCount
+        < definition.maxStops
+      ) {
+        this.el.objective.textContent =
+          `Grow Line ${index + 1} by purchasing its next visible stop.`;
+        return;
+      }
     }
 
     this.el.objective.textContent =
-      'Bus network established. Every dollar now comes from completed passenger trips.';
+      'Four-line bus network established. Upgrade busy stations into hubs while the city keeps growing.';
   }
 
   toast(message) {
