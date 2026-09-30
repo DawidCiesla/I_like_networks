@@ -51,7 +51,6 @@ func rebuild() -> void:
 		var line: Dictionary = GameStore.lines[line_key]
 		if bool(line.built):
 			var route := Layout.built_route(line_key, int(line.stop_count))
-			_add_ribbon(route, 16.0, Color("#3a3d3c"), 0.55, false)
 			_add_ribbon(route, 3.8, Data.LINE_COLORS[line_key], 1.05, true)
 
 		for stop_index in range(int(line.stop_count)):
