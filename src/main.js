@@ -1,13 +1,18 @@
 import {
+  STATION_IDS,
   advanceSimulation,
+  getStationTierName,
 } from './simulation/model.js';
 
 import {
   addVehicle,
   buildDepot,
   buildLine2,
+  buildLine3,
+  buildLine4,
   buildNextStop,
   buyUpgrade,
+  upgradeStation,
   setSimulationSpeed,
 } from './simulation/actions.js';
 
@@ -81,6 +86,9 @@ const toastFailure = (result) => {
     'fleet-limit': 'Fleet limit reached for this line.',
     'garage-full': 'The depot garage is full. Expand it first.',
     'already-built': 'That infrastructure is already built.',
+    'station-required': 'Build this station first.',
+    'upgrade-limit': 'This station is already a Hub.',
+    'unknown-line': 'Unknown bus line.',
   };
 
   hud.toast(
@@ -100,34 +108,42 @@ const renderer =
   );
 
 hud = new Hud({
-  onBuildStop1: () => {
+  onBuildStop: (lineKey) => {
     const result =
-      buildNextStop(state, 'line1');
+      buildNextStop(
+        state,
+        lineKey,
+      );
 
     if (result.ok) {
       scheduleSave();
-      renderer.setSelection('line1');
-      hud.setSelection('line1');
+
+      const stopIndex =
+        state[lineKey].stopCount - 1;
+
+      const stationId =
+        STATION_IDS[lineKey][
+          stopIndex
+        ];
+
+      const selection =
+        stationId
+          ? `station:${stationId}`
+          : lineKey;
+
+      renderer.setSelection(
+        selection,
+      );
+
+      hud.setSelection(
+        selection,
+      );
 
       hud.toast(
-        state.line1.stopCount === 2
-          ? 'Bus Line 1 opened with one starter bus.'
-          : 'Line 1 extended to the new stop.',
+        state[lineKey].stopCount === 2
+          ? `Bus Line ${lineKey.replace('line', '')} opened with one starter bus.`
+          : `Line ${lineKey.replace('line', '')} extended to the new stop.`,
       );
-    } else {
-      toastFailure(result);
-    }
-  },
-
-  onBuildStop2: () => {
-    const result =
-      buildNextStop(state, 'line2');
-
-    if (result.ok) {
-      scheduleSave();
-      renderer.setSelection('line2');
-      hud.setSelection('line2');
-      hud.toast('Line 2 extended to the new stop.');
     } else {
       toastFailure(result);
     }
@@ -149,44 +165,89 @@ hud = new Hud({
     }
   },
 
-  onBuildLine2: () => {
+  onBuildLine: (lineKey) => {
+    const builders = {
+      line2: buildLine2,
+      line3: buildLine3,
+      line4: buildLine4,
+    };
+
+    const build =
+      builders[lineKey];
+
     const result =
-      buildLine2(state);
+      build
+        ? build(state)
+        : {
+          ok: false,
+          reason: 'unknown-line',
+        };
 
     if (result.ok) {
       scheduleSave();
-      renderer.setSelection('line2');
-      hud.setSelection('line2');
+
+      const stationId =
+        STATION_IDS[lineKey][1];
+
+      const selection =
+        `station:${stationId}`;
+
+      renderer.setSelection(
+        selection,
+      );
+
+      hud.setSelection(
+        selection,
+      );
+
       hud.toast(
-        'Bus Line 2 opened with one starter bus.',
+        `Bus Line ${lineKey.replace('line', '')} opened with one starter bus.`,
       );
     } else {
       toastFailure(result);
     }
   },
 
-  onAddVehicle1: () => {
+  onAddVehicle: (lineKey) => {
     const result =
-      addVehicle(state, 'line1');
+      addVehicle(
+        state,
+        lineKey,
+      );
 
     if (result.ok) {
       scheduleSave();
+
       hud.toast(
-        'Bus assigned to Line 1. Headway reduced.',
+        `Bus assigned to Line ${lineKey.replace('line', '')}. Headway reduced.`,
       );
     } else {
       toastFailure(result);
     }
   },
 
-  onAddVehicle2: () => {
+  onUpgradeStation: (
+    stationId,
+  ) => {
     const result =
-      addVehicle(state, 'line2');
+      upgradeStation(
+        state,
+        stationId,
+      );
 
     if (result.ok) {
       scheduleSave();
+
+      renderer.setSelection(
+        `station:${stationId}`,
+      );
+
+      hud.setSelection(
+        `station:${stationId}`,
+      );
+
       hud.toast(
-        'Bus assigned to Line 2. Headway reduced.',
+        `Station upgraded to ${getStationTierName(state, stationId)}.`,
       );
     } else {
       toastFailure(result);
