@@ -4,7 +4,7 @@ import {
   ensureCityRuntime,
 } from '../city/cityModel.js';
 
-export const GAME_VERSION = 10;
+export const GAME_VERSION = 11;
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
