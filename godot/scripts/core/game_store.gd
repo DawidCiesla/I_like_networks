@@ -1,11 +1,13 @@
 extends Node
 
 signal state_changed
+signal city_changed
 signal selection_changed(selection: String)
 signal toast_requested(message: String)
 
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
+const CityRuntime = preload("res://scripts/city/city_runtime.gd")
 
 const SAVE_PATH := "user://save_godot_v2.json"
 
@@ -19,6 +21,7 @@ var lines: Dictionary = {}
 var stations: Dictionary = {}
 var depot: Dictionary = {}
 var stats: Dictionary = {}
+var city: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
@@ -30,9 +33,11 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if simulation_speed > 0:
 		_fare_changed_this_frame = false
-		_advance_simulation(delta)
+		var city_did_change := _advance_simulation(delta)
 		if _fare_changed_this_frame:
 			state_changed.emit()
+		if city_did_change:
+			city_changed.emit()
 
 	_autosave_timer += delta
 	if _autosave_timer >= 12.0:
@@ -87,6 +92,8 @@ func reset_state(emit_signal: bool = true) -> void:
 		"garage_slots": 4,
 		"level": 0,
 	}
+
+	city = CityRuntime.create_initial_city(city_seed)
 
 	stats = {
 		"lifetime_revenue": 0.0,
@@ -783,9 +790,9 @@ func _simulate_line(line_key: String, delta_minutes: float) -> void:
 	lines[line_key] = line
 	line["queue_passengers"] = line_waiting_passengers(line_key)
 
-func _advance_simulation(real_delta_seconds: float) -> void:
+func _advance_simulation(real_delta_seconds: float) -> bool:
 	if real_delta_seconds <= 0.0 or simulation_speed <= 0:
-		return
+		return false
 
 	var delta_seconds := min(real_delta_seconds, 0.25) * float(simulation_speed)
 	var delta_minutes := delta_seconds * float(Data.GAME_MINUTES_PER_REAL_SECOND)
@@ -793,6 +800,8 @@ func _advance_simulation(real_delta_seconds: float) -> void:
 
 	for line_key in Data.LINE_KEYS:
 		_simulate_line(line_key, delta_minutes)
+
+	return CityRuntime.advance(self, delta_seconds)
 
 func bus_visuals() -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
@@ -861,6 +870,7 @@ func save_game() -> void:
 		"stations": stations,
 		"depot": depot,
 		"stats": stats,
+		"city": city,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -890,6 +900,8 @@ func load_game() -> void:
 	stations = parsed.get("stations", stations)
 	depot = parsed.get("depot", depot)
 	stats = parsed.get("stats", stats)
+	city = parsed.get("city", CityRuntime.create_initial_city(city_seed))
+	CityRuntime.ensure_city(self)
 
 	for line_key in Data.LINE_KEYS:
 		if not lines.has(line_key):
@@ -900,10 +912,14 @@ func load_game() -> void:
 		if not stations.has(station_id):
 			stations[station_id] = {"level": 0}
 
+	CityRuntime.sync_with_transport(self)
 	state_changed.emit()
+	city_changed.emit()
 
 func clear_save_and_reset() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 	reset_state(true)
+	CityRuntime.sync_with_transport(self)
+	city_changed.emit()
 	save_game()
