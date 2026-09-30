@@ -6,7 +6,6 @@ import {
   getCorridorBDemandPpm,
   getDeliveredPassengersPpm,
   getIncomePerSecond,
-  getWaitingFillRatio,
 } from '../simulation/model.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
