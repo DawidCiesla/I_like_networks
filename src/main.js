@@ -228,10 +228,12 @@ hud = new Hud({
   },
 });
 
-let last = performance.now();
+let lastRafAt =
+  performance.now();
+
+let frameAccumulatorMs = 0;
 let saveAccumulator = 0;
 let lastHudRender = 0;
-let lastRenderedAt = 0;
 
 const TARGET_FRAME_INTERVAL_MS =
   1000 / 60;
@@ -239,21 +241,34 @@ const TARGET_FRAME_INTERVAL_MS =
 function frame(now) {
   requestAnimationFrame(frame);
 
+  const rafDeltaMs =
+    Math.min(
+      100,
+      Math.max(
+        0,
+        now - lastRafAt,
+      ),
+    );
+
+  lastRafAt = now;
+  frameAccumulatorMs +=
+    rafDeltaMs;
+
   if (
-    now - lastRenderedAt
+    frameAccumulatorMs
     < TARGET_FRAME_INTERVAL_MS
-      * 0.92
+      * 0.98
   ) {
     return;
   }
 
   const delta = Math.min(
-    (now - last) / 1000,
+    frameAccumulatorMs / 1000,
     0.1,
   );
 
-  last = now;
-  lastRenderedAt = now;
+  frameAccumulatorMs %=
+    TARGET_FRAME_INTERVAL_MS;
 
   advanceSimulation(
     state,
