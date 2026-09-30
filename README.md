@@ -24,6 +24,12 @@ first stop
 → extend Line 1 further
 → stabilize Line 1
 → Bus Line 2 unlocks
+→ extend and stabilize Line 2
+→ Bus Line 3 unlocks at University
+→ extend and stabilize Line 3
+→ Bus Line 4 unlocks at Harbor
+→ close the network back into Central
+→ upgrade busy physical stations into hubs
 ```
 
 Implemented now:
@@ -79,7 +85,14 @@ Implemented now:
 - additional buses can only be purchased from the Bus Depot,
 - garage capacity limits the total fleet,
 - the depot itself can be expanded,
-- line upgrades unlock progressively,
+- every physical stop has its own upgrade path: Stop → Shelter → Station → Hub,
+- station upgrades increase local waiting capacity, slightly reduce dwell time and grow local catchment demand,
+- shared interchanges are one physical station rather than duplicated per line,
+- City Park serves Lines 1 + 2,
+- University serves Lines 1 + 3,
+- Harbor serves Lines 2 + 4,
+- Central serves Lines 1 + 4,
+- station upgrades are selected directly from the map,
 - passengers are generated at specific stops with real destinations,
 - waiting passengers are visible at individual stops,
 - buses carry an explicit onboard passenger load,
@@ -89,6 +102,10 @@ Implemented now:
 - overloaded services accumulate waiting passengers,
 - Line 2 unlocks only after Line 1 reaches its full route, is operationally stable and the depot has a free vehicle slot,
 - Line 2 then grows with the same map-first pattern,
+- Line 3 branches from University toward North Quarter, Hillcrest, Northgate and Meadow End,
+- Line 4 branches from Harbor through Docklands, Eastgate and Stadium before reconnecting to the existing Central interchange,
+- the Bus Era city master plan now contains 15 districts with terrain-aware growth around all four routes,
+- the depot supports the larger fleet with +4 garage slots per upgrade,
 - reset returns to the true one-stop fresh start,
 - saves from T1 and earlier prototypes are migrated.
 
