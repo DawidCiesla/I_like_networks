@@ -420,8 +420,14 @@ function validateParcels(
   for (const parcel of parcels) {
     const footprintRadius =
       Math.max(
-        parcel.w,
-        parcel.h,
+        Math.max(
+          12,
+          parcel.w - 12,
+        ),
+        Math.max(
+          12,
+          parcel.h - 12,
+        ),
       ) / 2;
 
     const roadCollision =
@@ -434,8 +440,8 @@ function validateParcels(
           < footprintRadius
             + (
               road.class === 'arterial'
-                ? 22
-                : 12
+                ? 21
+                : 8
             ),
       );
 
@@ -449,7 +455,7 @@ function validateParcels(
           Math.hypot(
             parcel.x - stop.x,
             parcel.y - stop.y,
-          ) < 54,
+          ) < 48,
       );
 
     if (stopCollision) {
