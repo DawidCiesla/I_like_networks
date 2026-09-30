@@ -5,10 +5,15 @@ import {
 
 import {
   ECONOMY,
+  STATION_IDS,
   STOP_NAMES,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   getNextStopCost,
+  getStationLevel,
+  getStationTierName,
 } from '../simulation/model.js';
 
 import {
@@ -32,6 +37,15 @@ import {
 
 const LINE_1_COLOR = 0x0797ec;
 const LINE_2_COLOR = 0xf4ca00;
+const LINE_3_COLOR = 0x08b91c;
+const LINE_4_COLOR = 0xd02be3;
+
+const LINE_COLORS = Object.freeze({
+  line1: LINE_1_COLOR,
+  line2: LINE_2_COLOR,
+  line3: LINE_3_COLOR,
+  line4: LINE_4_COLOR,
+});
 
 const ROAD_COLORS = Object.freeze({
   arterial: 0x34383a,
@@ -161,6 +175,8 @@ function worldBounds(state) {
   points.push(
     ...WORLD.line1Stops,
     ...WORLD.line2Stops,
+    ...WORLD.line3Stops,
+    ...WORLD.line4Stops,
     WORLD.depot,
   );
 
@@ -1538,6 +1554,22 @@ export class ThreeTransportRenderer {
   }
 
   #transportStateSignature(state) {
+    const stationLevels =
+      Object.entries(
+        state.stations ?? {},
+      )
+        .sort(
+          ([first], [second]) =>
+            first.localeCompare(
+              second,
+            ),
+        )
+        .map(
+          ([id, station]) =>
+            `${id}:${station.level ?? 0}`,
+        )
+        .join('|');
+
     return [
       state.line1.built,
       state.line1.stopCount,
@@ -1545,7 +1577,14 @@ export class ThreeTransportRenderer {
       state.line2.built,
       state.line2.stopCount,
       state.line2.fleetCount,
+      state.line3.built,
+      state.line3.stopCount,
+      state.line3.fleetCount,
+      state.line4.built,
+      state.line4.stopCount,
+      state.line4.fleetCount,
       state.depot.built,
+      stationLevels,
       this.selected,
     ].join(':');
   }
