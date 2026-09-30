@@ -1,183 +1,42 @@
 import {
   ECONOMY,
   UPGRADES,
-  getAddStopACost,
-  getAddStopBCost,
+  canBuildDepot,
+  canUnlockLine2,
+  getGarageUsed,
+  getNextStopCost,
   getUpgradeCost,
   getVehiclePurchaseCost,
 } from './model.js';
 
-export function buildFirstLine(state) {
-  if (state.corridorA.lineBuilt) {
-    return { ok: false, reason: 'already-built' };
-  }
-
-  if (state.money < ECONOMY.firstLineBuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= ECONOMY.firstLineBuildCost;
-  state.corridorA.lineBuilt = true;
-
-  return { ok: true };
-}
-
-export function buildTerminalA(state) {
-  if (!state.corridorA.lineBuilt) {
-    return { ok: false, reason: 'line-required' };
-  }
-
-  if (state.terminalA.built) {
-    return { ok: false, reason: 'already-built' };
-  }
-
-  if (state.money < ECONOMY.terminalBuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= ECONOMY.terminalBuildCost;
-  state.terminalA.built = true;
-
-  return { ok: true };
-}
-
-export function buildInterchange(state) {
-  if (!state.terminalA.built) {
-    return { ok: false, reason: 'terminal-required' };
-  }
-
-  if (state.interchange.built) {
-    return { ok: false, reason: 'already-built' };
-  }
-
-  if (state.money < ECONOMY.interchangeBuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= ECONOMY.interchangeBuildCost;
-  state.interchange.built = true;
-  state.terminalA.queuePassengers = 0;
-  state.terminalA.currentAbandonmentPpm = 0;
-
-  return { ok: true };
-}
-
-export function buildCorridorB(state) {
-  if (!state.interchange.built) {
-    return { ok: false, reason: 'interchange-required' };
-  }
-
-  if (state.corridorB.built) {
-    return { ok: false, reason: 'already-built' };
-  }
-
-  if (state.money < ECONOMY.corridorBBuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= ECONOMY.corridorBBuildCost;
-  state.corridorB.built = true;
-
-  return { ok: true };
-}
-
-export function buildStationB(state) {
-  if (!state.interchange.built) {
-    return { ok: false, reason: 'interchange-required' };
-  }
-
-  if (state.stationB.built) {
-    return { ok: false, reason: 'already-built' };
-  }
-
-  if (state.money < ECONOMY.stationBBuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= ECONOMY.stationBBuildCost;
-  state.stationB.built = true;
-
-  return { ok: true };
-}
-
-export function addStopA(state) {
-  if (!state.terminalA.built) {
-    return { ok: false, reason: 'terminal-required' };
-  }
-
-  if (state.corridorA.stopCount >= ECONOMY.maxStopsA) {
-    return { ok: false, reason: 'stop-limit' };
-  }
-
-  const cost = getAddStopACost(state);
-
-  if (state.money < cost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= cost;
-  state.corridorA.stopCount += 1;
-
-  return { ok: true, cost };
-}
-
-export function addStopB(state) {
-  if (!state.corridorB.built) {
-    return { ok: false, reason: 'corridor-required' };
-  }
-
-  if (state.corridorB.stopCount >= ECONOMY.maxStopsB) {
-    return { ok: false, reason: 'stop-limit' };
-  }
-
-  const cost = getAddStopBCost(state);
-
-  if (state.money < cost) {
-    return { ok: false, reason: 'insufficient-funds' };
-  }
-
-  state.money -= cost;
-  state.corridorB.stopCount += 1;
-
-  return { ok: true, cost };
-}
-
-export function addVehicle(state, corridorKey) {
-  const corridor =
-    corridorKey === 'corridorA'
-      ? state.corridorA
-      : corridorKey === 'corridorB'
-        ? state.corridorB
+export function buildNextStop(state, lineKey) {
+  const line =
+    lineKey === 'line1'
+      ? state.line1
+      : lineKey === 'line2'
+        ? state.line2
         : null;
 
-  if (!corridor) {
-    return { ok: false, reason: 'unknown-corridor' };
+  if (!line) {
+    return { ok: false, reason: 'unknown-line' };
   }
 
-  if (
-    corridorKey === 'corridorA'
-    && !state.corridorA.lineBuilt
-  ) {
+  if (lineKey === 'line2' && !line.built) {
     return { ok: false, reason: 'line-required' };
   }
 
-  if (
-    corridorKey === 'corridorB'
-    && !state.corridorB.built
-  ) {
-    return { ok: false, reason: 'corridor-required' };
+  const maxStops =
+    lineKey === 'line1'
+      ? ECONOMY.maxLine1Stops
+      : ECONOMY.maxLine2Stops;
+
+  if (line.stopCount >= maxStops) {
+    return { ok: false, reason: 'stop-limit' };
   }
 
-  if (
-    corridor.fleetCount
-    >= ECONOMY.maxVehiclesPerLine
-  ) {
-    return { ok: false, reason: 'fleet-limit' };
-  }
-
-  const cost = getVehiclePurchaseCost(
+  const cost = getNextStopCost(
     state,
-    corridorKey,
+    lineKey,
   );
 
   if (state.money < cost) {
@@ -185,7 +44,101 @@ export function addVehicle(state, corridorKey) {
   }
 
   state.money -= cost;
-  corridor.fleetCount += 1;
+  line.stopCount += 1;
+
+  if (
+    lineKey === 'line1'
+    && !line.built
+    && line.stopCount >= 2
+  ) {
+    line.built = true;
+    line.fleetCount = 1;
+  }
+
+  return { ok: true, cost };
+}
+
+export function buildDepot(state) {
+  if (!canBuildDepot(state)) {
+    return {
+      ok: false,
+      reason: state.depot.built
+        ? 'already-built'
+        : 'progress-required',
+    };
+  }
+
+  if (state.money < ECONOMY.depotBuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.depotBuildCost;
+  state.depot.built = true;
+
+  return { ok: true };
+}
+
+export function buildLine2(state) {
+  if (!canUnlockLine2(state)) {
+    return { ok: false, reason: 'progress-required' };
+  }
+
+  if (state.money < ECONOMY.line2BuildCost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= ECONOMY.line2BuildCost;
+
+  state.line2.built = true;
+  state.line2.stopCount = 2;
+  state.line2.fleetCount = 1;
+
+  return { ok: true };
+}
+
+export function addVehicle(state, lineKey) {
+  const line =
+    lineKey === 'line1'
+      ? state.line1
+      : lineKey === 'line2'
+        ? state.line2
+        : null;
+
+  if (!line) {
+    return { ok: false, reason: 'unknown-line' };
+  }
+
+  if (!state.depot.built) {
+    return { ok: false, reason: 'depot-required' };
+  }
+
+  if (!line.built) {
+    return { ok: false, reason: 'line-required' };
+  }
+
+  if (
+    line.fleetCount
+    >= ECONOMY.maxVehiclesPerLine
+  ) {
+    return { ok: false, reason: 'fleet-limit' };
+  }
+
+  if (
+    getGarageUsed(state)
+    >= state.depot.garageSlots
+  ) {
+    return { ok: false, reason: 'garage-full' };
+  }
+
+  const cost =
+    getVehiclePurchaseCost(state);
+
+  if (state.money < cost) {
+    return { ok: false, reason: 'insufficient-funds' };
+  }
+
+  state.money -= cost;
+  line.fleetCount += 1;
 
   return { ok: true, cost };
 }
@@ -198,27 +151,21 @@ export function buyUpgrade(state, type) {
   }
 
   if (
-    (type === 'terminalA' || type === 'waitingArea')
-    && !state.terminalA.built
+    type === 'depot'
+    && !state.depot.built
   ) {
-    return { ok: false, reason: 'terminal-required' };
+    return { ok: false, reason: 'depot-required' };
   }
 
   if (
-    type === 'interchange'
-    && !state.interchange.built
+    (type === 'shelter2' || type === 'catchment2')
+    && !state.line2.built
   ) {
-    return { ok: false, reason: 'interchange-required' };
+    return { ok: false, reason: 'line-required' };
   }
 
-  if (
-    type === 'stationB'
-    && !state.stationB.built
-  ) {
-    return { ok: false, reason: 'station-b-required' };
-  }
-
-  const cost = getUpgradeCost(state, type);
+  const cost =
+    getUpgradeCost(state, type);
 
   if (state.money < cost) {
     return { ok: false, reason: 'insufficient-funds' };
@@ -226,24 +173,26 @@ export function buyUpgrade(state, type) {
 
   state.money -= cost;
 
-  if (type === 'catchmentA') {
-    state.corridorA.demandLevel += 1;
-    state.corridorA.demandPerStopPpm += config.delta;
-  } else if (type === 'terminalA') {
-    state.terminalA.level += 1;
-    state.terminalA.platformCapacityPpm += config.delta;
-  } else if (type === 'waitingArea') {
-    state.terminalA.waitingLevel += 1;
-    state.terminalA.waitingCapacityPassengers += config.delta;
-  } else if (type === 'stationA') {
-    state.stationA.level += 1;
-    state.stationA.capacityPpm += config.delta;
-  } else if (type === 'interchange') {
-    state.interchange.level += 1;
-    state.interchange.transferCapacityPpm += config.delta;
-  } else if (type === 'stationB') {
-    state.stationB.level += 1;
-    state.stationB.capacityPpm += config.delta;
+  if (type === 'shelter1') {
+    state.line1.shelterLevel += 1;
+    state.line1.waitingCapacityPassengers +=
+      config.delta;
+  } else if (type === 'catchment1') {
+    state.line1.catchmentLevel += 1;
+    state.line1.demandPerStopPpm +=
+      config.delta;
+  } else if (type === 'depot') {
+    state.depot.level += 1;
+    state.depot.garageSlots +=
+      config.delta;
+  } else if (type === 'shelter2') {
+    state.line2.shelterLevel += 1;
+    state.line2.waitingCapacityPassengers +=
+      config.delta;
+  } else if (type === 'catchment2') {
+    state.line2.catchmentLevel += 1;
+    state.line2.demandPerStopPpm +=
+      config.delta;
   }
 
   return { ok: true, cost };
