@@ -683,10 +683,13 @@ export function getCityLots(state) {
             profile,
           );
 
-        const halfSpan =
+        const footprint =
+          buildingSize(profile);
+
+        const footprintRadius =
           Math.max(
-            box.w,
-            box.h,
+            footprint.w,
+            footprint.h,
           ) / 2;
 
         const roadCollision =
@@ -696,8 +699,8 @@ export function getCityLots(state) {
                 { x, y },
                 metrics,
               )
-              < halfSpan
-                + (local ? 19 : 27),
+              < footprintRadius
+                + (local ? 14 : 25),
           );
 
         if (roadCollision) return;
