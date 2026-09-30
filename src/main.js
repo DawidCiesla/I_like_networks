@@ -33,6 +33,7 @@ const canvas = document.querySelector('#transport-canvas');
 
 let state = loadState();
 let hud;
+let resetInProgress = false;
 
 const toastFailure = (result) => {
   const messages = {
@@ -166,6 +167,13 @@ hud = new Hud({
   },
 
   onReset: () => {
+    const confirmed = window.confirm(
+      'Reset the entire game and start again from the beginning? This cannot be undone.',
+    );
+
+    if (!confirmed) return;
+
+    resetInProgress = true;
     clearSave();
     location.reload();
   },
@@ -206,7 +214,11 @@ function frame(now) {
 
 window.addEventListener(
   'beforeunload',
-  () => saveState(state),
+  () => {
+    if (!resetInProgress) {
+      saveState(state);
+    }
+  },
 );
 
 hud.render(state);
