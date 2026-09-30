@@ -265,16 +265,20 @@ function createLineState(lineKey) {
   return {
     built: false,
     mode: 'bus',
-    stopCount: lineKey === 'line1' ? 1 : 0,
+    stopCount:
+      lineKey === 'line1'
+        ? 1
+        : 0,
     fleetCount: 0,
-    demandPerStopPpm: config.demandPerStopPpm,
-    waitingCapacityPassengers: lineKey === 'line1' ? 50 : 45,
-    waitingByStop: createWaitingMatrix(config.maxStops),
+    demandPerStopPpm:
+      config.demandPerStopPpm,
+    waitingByStop:
+      createWaitingMatrix(
+        config.maxStops,
+      ),
     queuePassengers: 0,
     currentAbandonmentPpm: 0,
     totalAbandonedPassengers: 0,
-    shelterLevel: 0,
-    catchmentLevel: 0,
     lastDeliveredPpm: 0,
     vehicles: [],
     nextVehicleId: 1,
@@ -282,6 +286,26 @@ function createLineState(lineKey) {
     lastPassengerEvent: null,
     passengerEvents: [],
   };
+}
+
+function createStationState() {
+  const ids =
+    new Set(
+      Object.values(
+        STATION_IDS,
+      ).flat(),
+    );
+
+  return Object.fromEntries(
+    [...ids].map(
+      (stationId) => [
+        stationId,
+        {
+          level: 0,
+        },
+      ],
+    ),
+  );
 }
 
 export function createInitialState() {
@@ -293,15 +317,19 @@ export function createInitialState() {
 
     city: createInitialCityState(),
 
+    stations:
+      createStationState(),
+
     line1: createLineState('line1'),
+    line2: createLineState('line2'),
+    line3: createLineState('line3'),
+    line4: createLineState('line4'),
 
     depot: {
       built: false,
       garageSlots: 4,
       level: 0,
     },
-
-    line2: createLineState('line2'),
 
     stats: {
       lifetimeRevenue: 0,
@@ -315,9 +343,213 @@ export function createInitialState() {
 }
 
 function getLine(state, lineKey) {
-  if (lineKey === 'line1') return state.line1;
-  if (lineKey === 'line2') return state.line2;
-  throw new Error(`Unknown line: ${lineKey}`);
+  if (
+    !LINE_CONFIG[lineKey]
+    || !state[lineKey]
+  ) {
+    throw new Error(
+      `Unknown line: ${lineKey}`,
+    );
+  }
+
+  return state[lineKey];
+}
+
+export function getStationId(
+  lineKey,
+  stopIndex,
+) {
+  const stationId =
+    STATION_IDS[lineKey]?.[
+      stopIndex
+    ];
+
+  if (!stationId) {
+    throw new Error(
+      `Unknown station: ${lineKey}:${stopIndex}`,
+    );
+  }
+
+  return stationId;
+}
+
+export function getStationName(
+  stationId,
+) {
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const index =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (index >= 0) {
+      return STOP_NAMES[lineKey][
+        index
+      ];
+    }
+  }
+
+  return stationId;
+}
+
+export function getStationLevel(
+  state,
+  stationId,
+) {
+  return (
+    state.stations?.[
+      stationId
+    ]?.level
+    ?? 0
+  );
+}
+
+export function getStationTierName(
+  state,
+  stationId,
+) {
+  return (
+    STATION_UPGRADE
+      .tierNames[
+        getStationLevel(
+          state,
+          stationId,
+        )
+      ]
+    ?? 'Stop'
+  );
+}
+
+export function getStationUpgradeCost(
+  state,
+  stationId,
+) {
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  return Math.round(
+    STATION_UPGRADE.baseCost
+    * STATION_UPGRADE.costGrowth
+      ** level,
+  );
+}
+
+export function getStationWaitingCapacity(
+  state,
+  stationId,
+) {
+  return (
+    STATION_UPGRADE
+      .waitingCapacityByLevel[
+        getStationLevel(
+          state,
+          stationId,
+        )
+      ]
+    ?? STATION_UPGRADE
+      .waitingCapacityByLevel[0]
+  );
+}
+
+export function getStopDemandPpm(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  const stationId =
+    getStationId(
+      lineKey,
+      stopIndex,
+    );
+
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  return (
+    line.demandPerStopPpm
+    + (
+      STATION_UPGRADE
+        .demandBonusByLevel[
+          level
+        ]
+      ?? 0
+    )
+  );
+}
+
+export function getStationServedLines(
+  state,
+  stationId,
+) {
+  return LINE_KEYS.filter(
+    (lineKey) => {
+      const line = state[lineKey];
+
+      if (!line?.built) {
+        return false;
+      }
+
+      const index =
+        STATION_IDS[lineKey]
+          .indexOf(stationId);
+
+      return (
+        index >= 0
+        && index < line.stopCount
+      );
+    },
+  );
+}
+
+export function isStationBuilt(
+  state,
+  stationId,
+) {
+  if (stationId === 'old-town') {
+    return true;
+  }
+
+  return LINE_KEYS.some(
+    (lineKey) => {
+      const line =
+        state[lineKey];
+
+      if (!line) {
+        return false;
+      }
+
+      const index =
+        STATION_IDS[lineKey]
+          .indexOf(stationId);
+
+      if (index < 0) {
+        return false;
+      }
+
+      if (lineKey === 'line1') {
+        return index < line.stopCount;
+      }
+
+      return (
+        line.built
+        && index < line.stopCount
+      );
+    },
+  );
 }
 
 function getLineConfig(lineKey) {
@@ -374,16 +606,58 @@ function getSegmentTravelMinutes(
   );
 }
 
-function getStopDwellMinutes(state, lineKey, stopIndex) {
-  const line = getLine(state, lineKey);
-  const mode = getMode(state, lineKey);
+function getStopDwellMinutes(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
+
+  const stationId =
+    getStationId(
+      lineKey,
+      stopIndex,
+    );
+
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  const dwellReduction =
+    STATION_UPGRADE
+      .dwellReductionByLevel[
+        level
+      ]
+    ?? 0;
+
   const isEndpoint =
     stopIndex === 0
-    || stopIndex === line.stopCount - 1;
+    || stopIndex
+      === line.stopCount - 1;
 
   return (
-    mode.dwellMinutes
-    + (isEndpoint ? mode.turnaroundMinutes / 2 : 0)
+    Math.max(
+      0.12,
+      mode.dwellMinutes
+      - dwellReduction,
+    )
+    + (
+      isEndpoint
+        ? mode.turnaroundMinutes / 2
+        : 0
+    )
   );
 }
 
