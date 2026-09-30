@@ -11,6 +11,7 @@ func _init() -> void:
 	_test_terrain_determinism()
 	_test_arrival_fare_simulation()
 	_test_master_plan_fixture()
+	_test_city_growth_runtime()
 	print("GODOT PORT SELF-TEST: PASS")
 	quit(0)
 
@@ -58,6 +59,7 @@ func _test_terrain_determinism() -> void:
 
 func _test_arrival_fare_simulation() -> void:
 	var store = StoreScript.new()
+	store.suppress_persistence = true
 	store.reset_state(false)
 	store.money = 10_000.0
 
@@ -102,3 +104,42 @@ func _test_master_plan_fixture() -> void:
 	assert(parsed["graphEdges"].size() == 342)
 	assert(parsed["junctions"].size() == 92)
 	assert(parsed["parcels"].size() == 161)
+
+
+func _test_city_growth_runtime() -> void:
+	var store = StoreScript.new()
+	store.suppress_persistence = true
+	store.reset_state(false)
+	store.money = 100_000.0
+
+	assert(store.build_next_stop("line1"))
+
+	for _index in range(900):
+		store._advance_simulation(0.1)
+
+	var active_districts := 0
+	var built_roads := 0
+	var active_projects := 0
+
+	for district in store.city["districts"]:
+		if str(district.get("status", "")) == "active":
+			active_districts += 1
+
+	for road in store.city["roads"]:
+		if str(road.get("status", "")) == "built":
+			built_roads += 1
+
+	for project in store.city["projects"]:
+		if str(project.get("status", "")) == "active":
+			active_projects += 1
+
+	assert(active_districts >= 2)
+	assert(built_roads >= 2)
+	assert(store.city["buildings"].size() > 0)
+	assert(active_projects <= 2)
+
+	for building in store.city["buildings"]:
+		assert(float(building["profile"]["heightMeters"]) > 0.0)
+		assert(is_finite(float(building["rotationRadians"])))
+
+	store.free()
