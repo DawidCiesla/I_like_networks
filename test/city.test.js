@@ -82,6 +82,37 @@ test('same seed creates the same immutable master plan', () => {
   );
 });
 
+test('terrain variation never removes a complete district development network', () => {
+  for (
+    const seed
+    of [
+      1,
+      42,
+      284731,
+      654321,
+      999999,
+    ]
+  ) {
+    const plan =
+      generateCityMasterPlan(seed);
+
+    for (
+      const district
+      of plan.districts
+    ) {
+      assert.ok(
+        district.roadIds.length >= 4,
+        `${district.id} lost its street network for seed ${seed}`,
+      );
+
+      assert.ok(
+        district.parcelIds.length >= 6,
+        `${district.id} lost buildable frontage for seed ${seed}`,
+      );
+    }
+  }
+});
+
 test('bus stop spacing uses real city-scale distances', () => {
   assert.equal(
     WORLD_METERS_PER_UNIT,
