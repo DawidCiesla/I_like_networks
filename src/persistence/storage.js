@@ -333,7 +333,8 @@ function parseStored(raw) {
   }
 
   if (
-    parsed.version === 7
+    parsed.version === 8
+    || parsed.version === 7
     || parsed.version === 6
   ) {
     return migrateBusEraV6(parsed);
