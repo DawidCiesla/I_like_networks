@@ -407,7 +407,7 @@ This means city growth can be watched in normal gameplay.
 
 Game state is now version 9.
 
-City-state schema is version 3.
+City-state schema is version 4.
 
 Older Bus Era saves migrate into the new city model.
 
@@ -507,3 +507,16 @@ arterial → collector → cross streets → side / loop streets
 Every accepted road is checked for snapping, intersection angle, parallel corridor separation and reserved-site collision.
 
 After planning, crossings are compiled into persistent junction nodes and graph edges. See [`road-topology.md`](road-topology.md) for the topology contract.
+
+
+## Terrain-aware 3D revision
+
+The city master plan now evaluates the deterministic terrain model before accepting local development.
+
+Collector direction can respond to slope / forest pressure, steep generated streets are rejected, and steep parcels are excluded.
+
+Accepted parcels store terrain metadata and wooded parcels receive a development-order penalty.
+
+Buildings now persist `heightMeters` and `rotationRadians` so their 3D form is simulation state rather than renderer randomness.
+
+See [`3d-world.md`](3d-world.md) for the complete terrain and rendering contract.
