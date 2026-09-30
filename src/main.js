@@ -3,14 +3,10 @@ import {
 } from './simulation/model.js';
 
 import {
-  addStopA,
-  addStopB,
   addVehicle,
-  buildCorridorB,
-  buildFirstLine,
-  buildInterchange,
-  buildStationB,
-  buildTerminalA,
+  buildDepot,
+  buildLine2,
+  buildNextStop,
   buyUpgrade,
   setSimulationSpeed,
 } from './simulation/actions.js';
@@ -29,7 +25,8 @@ import {
   Hud,
 } from './ui/hud.js';
 
-const canvas = document.querySelector('#transport-canvas');
+const canvas =
+  document.querySelector('#transport-canvas');
 
 let state = loadState();
 let hud;
@@ -38,14 +35,13 @@ let resetInProgress = false;
 const toastFailure = (result) => {
   const messages = {
     'insufficient-funds': 'Not enough funds.',
-    'line-required': 'Start Line 1 first.',
-    'terminal-required': 'Build Northside Terminal first.',
-    'interchange-required': 'Build Central Interchange first.',
-    'corridor-required': 'Open Line 2 first.',
-    'station-b-required': 'Build Harbor Station first.',
-    'stop-limit': 'Stop limit reached for this prototype.',
+    'line-required': 'That line is not open yet.',
+    'depot-required': 'Build the Bus Depot first.',
+    'progress-required': 'This has not been unlocked yet.',
+    'stop-limit': 'No more stops are available in this bus-era prototype.',
     'fleet-limit': 'Fleet limit reached for this line.',
-    'already-built': 'That infrastructure is already open.',
+    'garage-full': 'The depot garage is full. Expand it first.',
+    'already-built': 'That infrastructure is already built.',
   };
 
   hud.toast(
@@ -54,105 +50,110 @@ const toastFailure = (result) => {
   );
 };
 
-const renderer = new TransportRenderer(
-  canvas,
-  {
-    onSelectionChanged: (selection) => {
-      hud?.setSelection(selection);
+const renderer =
+  new TransportRenderer(
+    canvas,
+    {
+      onSelectionChanged: (selection) => {
+        hud?.setSelection(selection);
+      },
     },
-  },
-);
+  );
 
 hud = new Hud({
-  onBuild: (type) => {
-    const buildActions = {
-      lineA: {
-        run: () => buildFirstLine(state),
-        selection: 'corridorA',
-        success: 'Bus Line 1 is now carrying passengers.',
-      },
-      terminalA: {
-        run: () => buildTerminalA(state),
-        selection: 'terminalA',
-        success: 'Northside Terminal is open.',
-      },
-      interchange: {
-        run: () => buildInterchange(state),
-        selection: 'interchange',
-        success: 'Central Interchange is open. Existing Line 1 stayed in place.',
-      },
-      corridorB: {
-        run: () => buildCorridorB(state),
-        selection: 'corridorB',
-        success: 'Bus Line 2 is now serving Riverside.',
-      },
-      stationB: {
-        run: () => buildStationB(state),
-        selection: 'stationB',
-        success: 'Harbor Station is open.',
-      },
-    };
-
-    const action = buildActions[type];
-
-    if (!action) return;
-
-    const result = action.run();
+  onBuildStop1: () => {
+    const result =
+      buildNextStop(state, 'line1');
 
     if (result.ok) {
-      renderer.setSelection(action.selection);
-      hud.setSelection(action.selection);
-      hud.toast(action.success);
+      renderer.setSelection('line1');
+      hud.setSelection('line1');
+
+      hud.toast(
+        state.line1.stopCount === 2
+          ? 'Bus Line 1 opened with one starter bus.'
+          : 'Line 1 extended to the new stop.',
+      );
     } else {
       toastFailure(result);
     }
   },
 
-  onAddStopA: () => {
-    const result = addStopA(state);
+  onBuildStop2: () => {
+    const result =
+      buildNextStop(state, 'line2');
 
     if (result.ok) {
-      hud.toast('New stop added to Bus Line 1. Route time increased.');
+      renderer.setSelection('line2');
+      hud.setSelection('line2');
+      hud.toast('Line 2 extended to the new stop.');
     } else {
       toastFailure(result);
     }
   },
 
-  onAddStopB: () => {
-    const result = addStopB(state);
+  onBuildDepot: () => {
+    const result =
+      buildDepot(state);
 
     if (result.ok) {
-      hud.toast('New stop added to Bus Line 2. Route time increased.');
+      renderer.setSelection('depot');
+      hud.setSelection('depot');
+      hud.toast(
+        'Bus Depot opened. Additional buses can now be purchased.',
+      );
     } else {
       toastFailure(result);
     }
   },
 
-  onAddVehicleA: () => {
-    const result = addVehicle(state, 'corridorA');
+  onBuildLine2: () => {
+    const result =
+      buildLine2(state);
 
     if (result.ok) {
-      hud.toast('Bus added to Line 1. Headway reduced.');
+      renderer.setSelection('line2');
+      hud.setSelection('line2');
+      hud.toast(
+        'Bus Line 2 opened with one starter bus.',
+      );
     } else {
       toastFailure(result);
     }
   },
 
-  onAddVehicleB: () => {
-    const result = addVehicle(state, 'corridorB');
+  onAddVehicle1: () => {
+    const result =
+      addVehicle(state, 'line1');
 
     if (result.ok) {
-      hud.toast('Bus added to Line 2. Headway reduced.');
+      hud.toast(
+        'Bus assigned to Line 1. Headway reduced.',
+      );
+    } else {
+      toastFailure(result);
+    }
+  },
+
+  onAddVehicle2: () => {
+    const result =
+      addVehicle(state, 'line2');
+
+    if (result.ok) {
+      hud.toast(
+        'Bus assigned to Line 2. Headway reduced.',
+      );
     } else {
       toastFailure(result);
     }
   },
 
   onUpgrade: (type) => {
-    const result = buyUpgrade(state, type);
+    const result =
+      buyUpgrade(state, type);
 
     if (result.ok) {
-      hud.toast('Transport capacity upgraded.');
+      hud.toast('Upgrade purchased.');
     } else {
       toastFailure(result);
     }
@@ -167,9 +168,10 @@ hud = new Hud({
   },
 
   onReset: () => {
-    const confirmed = window.confirm(
-      'Reset the entire game and start again from the beginning? This cannot be undone.',
-    );
+    const confirmed =
+      window.confirm(
+        'Reset the entire game and start again from the first stop? This cannot be undone.',
+      );
 
     if (!confirmed) return;
 
