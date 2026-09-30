@@ -1051,3 +1051,24 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
     font-size: 8px;
   }
 }
+
+
+/* Transport T1 — fleet and service frequency */
+#inspector-services .service-head,
+#inspector-services .service-row {
+  grid-template-columns: 1fr 62px 42px;
+}
+
+#inspector-services .service-row span:nth-child(2) {
+  color: #efeee8;
+  text-align: right;
+}
+
+#inspector-services .service-row span:nth-child(3) {
+  color: #69d8ff;
+  text-align: right;
+}
+
+.inspector-stat strong.metric-warning {
+  color: #f4ca00;
+}
