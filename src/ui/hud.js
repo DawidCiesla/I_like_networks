@@ -1,9 +1,14 @@
 import {
   ECONOMY,
+  LINE_KEYS,
+  STATION_IDS,
+  STATION_UPGRADE,
   STOP_NAMES,
   TRANSPORT_MODES,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   getAverageWaitMinutes,
   getBottleneck,
   getDeliveredPassengersPpm,
@@ -17,8 +22,18 @@ import {
   getLineOneWayMinutes,
   getLineWaitingPassengers,
   getNextStopCost,
+  getStationDemandPpm,
+  getStationLevel,
+  getStationName,
+  getStationServedLines,
+  getStationTierName,
+  getStationUpgradeCost,
+  getStationWaitingCapacity,
+  getStationWaitingPassengers,
+  getStopDemandPpm,
   getUpgradeCost,
   getVehiclePurchaseCost,
+  isStationBuilt,
 } from '../simulation/model.js';
 
 const compact = (value) => {
@@ -42,24 +57,22 @@ const formatMinutes = (value) =>
 
 export class Hud {
   constructor({
-    onBuildStop1,
-    onBuildStop2,
+    onBuildStop,
     onBuildDepot,
-    onBuildLine2,
-    onAddVehicle1,
-    onAddVehicle2,
+    onBuildLine,
+    onAddVehicle,
+    onUpgradeStation,
     onUpgrade,
     onSpeed,
     onReset,
     onInspectorClose,
   }) {
     this.handlers = {
-      onBuildStop1,
-      onBuildStop2,
+      onBuildStop,
       onBuildDepot,
-      onBuildLine2,
-      onAddVehicle1,
-      onAddVehicle2,
+      onBuildLine,
+      onAddVehicle,
+      onUpgradeStation,
       onUpgrade,
     };
 
@@ -106,18 +119,24 @@ export class Hud {
         const command =
           button.dataset.command;
 
-        if (command === 'build-stop-1') {
-          this.handlers.onBuildStop1();
-        } else if (command === 'build-stop-2') {
-          this.handlers.onBuildStop2();
+        if (command === 'build-stop') {
+          this.handlers.onBuildStop(
+            button.dataset.line,
+          );
         } else if (command === 'build-depot') {
           this.handlers.onBuildDepot();
-        } else if (command === 'build-line-2') {
-          this.handlers.onBuildLine2();
-        } else if (command === 'add-vehicle-1') {
-          this.handlers.onAddVehicle1();
-        } else if (command === 'add-vehicle-2') {
-          this.handlers.onAddVehicle2();
+        } else if (command === 'build-line') {
+          this.handlers.onBuildLine(
+            button.dataset.line,
+          );
+        } else if (command === 'add-vehicle') {
+          this.handlers.onAddVehicle(
+            button.dataset.line,
+          );
+        } else if (command === 'upgrade-station') {
+          this.handlers.onUpgradeStation(
+            button.dataset.station,
+          );
         } else if (command === 'upgrade') {
           this.handlers.onUpgrade(
             button.dataset.type,
@@ -252,6 +271,8 @@ export class Hud {
           (action) => [
             action.command,
             action.type ?? '',
+            action.lineKey ?? '',
+            action.stationId ?? '',
             action.title,
             action.detail,
           ],
@@ -358,6 +379,16 @@ export class Hud {
       if (action.type) {
         button.dataset.type =
           action.type;
+      }
+
+      if (action.lineKey) {
+        button.dataset.line =
+          action.lineKey;
+      }
+
+      if (action.stationId) {
+        button.dataset.station =
+          action.stationId;
       }
 
       const copy =
