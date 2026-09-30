@@ -1201,7 +1201,31 @@ function generateDistrictRoads(
 function parcelFootprint(
   zone,
   density,
+  districtId = null,
 ) {
+  if (
+    districtId === 'docklands'
+    && zone === 'industrial'
+  ) {
+    return {
+      w: 48,
+      h: 36,
+    };
+  }
+
+  if (
+    districtId === 'docklands'
+    && (
+      zone === 'mixed'
+      || zone === 'commercial'
+    )
+  ) {
+    return {
+      w: 40,
+      h: 34,
+    };
+  }
+
   if (zone === 'industrial') {
     return {
       w: 66,
@@ -1478,11 +1502,13 @@ function createParcelCandidates(
         );
 
       const spacing =
-        spec.theme === 'central'
-          ? 76
-          : spec.theme === 'industrial'
-            ? 98
-            : 86;
+        spec.id === 'docklands'
+          ? 66
+          : spec.theme === 'central'
+            ? 76
+            : spec.theme === 'industrial'
+              ? 98
+              : 86;
 
       const start =
         Math.min(
@@ -1545,6 +1571,7 @@ function createParcelCandidates(
             parcelFootprint(
               zone,
               localDensity,
+              spec.id,
             );
 
           const normal = {
