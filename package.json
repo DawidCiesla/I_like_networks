@@ -1,12 +1,12 @@
 {
   "name": "i-like-transit",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
     "test": "node --test",
-    "check": "node --check src/main.js && node --check src/simulation/model.js && node --check src/simulation/actions.js && node --check src/persistence/storage.js && node --check src/render/transportLayout.js && node --check src/render/transportRenderer.js && node --check src/ui/hud.js"
+    "check": "node --check src/main.js && node --check src/simulation/model.js && node --check src/simulation/actions.js && node --check src/persistence/storage.js && node --check src/render/transportLayout.js && node --check src/render/cityRenderer.js && node --check src/render/transportRenderer.js && node --check src/ui/hud.js"
   },
   "engines": {
     "node": ">=20"
