@@ -1072,3 +1072,17 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 .inspector-stat strong.metric-warning {
   color: #f4ca00;
 }
+
+
+/* Reliable full-game reset */
+.reset-button {
+  border-color: #b8b8b1;
+  color: #c9c9c2;
+}
+
+.reset-button:hover,
+.reset-button:focus-visible {
+  border-color: #ff3155;
+  color: #ff6079;
+  background: #241217;
+}
