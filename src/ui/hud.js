@@ -1046,7 +1046,7 @@ export class Hud {
         state,
         'depot',
         'Expand garage',
-        '+2 bus storage slots',
+        '+4 bus storage slots',
       ),
     );
 
