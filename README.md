@@ -32,7 +32,9 @@ Implemented now:
 - future stops shown directly on the map,
 - clicking a ghost stop opens its purchase Inspector,
 - buying a stop physically extends the existing line,
-- old stops never move when the line grows,
+- routes use authored transit-map geometry with long straights and rounded bends rather than direct diagonals,
+- buses follow the exact same geometry visible on the map,
+- old stops and previously built route segments never move when the line grows,
 - the second stop starts Line 1 with one starter bus,
 - line length, cycle time, headway and capacity grow naturally with expansion,
 - the third stop unlocks a separate Bus Depot building,
@@ -54,7 +56,7 @@ Implemented now:
 
 The global BUILD panel is no longer the primary expansion interface. The map is.
 
-See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract and [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy.
+See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, and [`docs/map-layout.md`](docs/map-layout.md) for the authored route-layout rules.
 
 ## Planned transport families
 
