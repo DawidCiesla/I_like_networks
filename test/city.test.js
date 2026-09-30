@@ -82,6 +82,37 @@ test('same seed creates the same immutable master plan', () => {
   );
 });
 
+test('terrain variation never removes a complete district development network', () => {
+  for (
+    const seed
+    of [
+      1,
+      42,
+      284731,
+      654321,
+      999999,
+    ]
+  ) {
+    const plan =
+      generateCityMasterPlan(seed);
+
+    for (
+      const district
+      of plan.districts
+    ) {
+      assert.ok(
+        district.roadIds.length >= 4,
+        `${district.id} lost its street network for seed ${seed}`,
+      );
+
+      assert.ok(
+        district.parcelIds.length >= 6,
+        `${district.id} lost buildable frontage for seed ${seed}`,
+      );
+    }
+  }
+});
+
 test('bus stop spacing uses real city-scale distances', () => {
   assert.equal(
     WORLD_METERS_PER_UNIT,
@@ -681,6 +712,63 @@ test('master-plan parcels never overlap each other and all have street frontage'
         `${a.id} overlaps ${b.id}`,
       );
     }
+  }
+});
+
+test('accepted parcels carry terrain metadata and remain buildable', () => {
+  const plan =
+    generateCityMasterPlan(
+      284731,
+    );
+
+  assert.ok(
+    plan.parcels.length >= 70,
+  );
+
+  assert.ok(
+    plan.parcels.every(
+      (parcel) =>
+        Number.isFinite(
+          parcel.terrainSlopeDegrees,
+        )
+        && parcel.terrainSlopeDegrees < 17
+        && Number.isFinite(
+          parcel.forestPotential,
+        ),
+    ),
+  );
+});
+
+test('constructed buildings persist real height and road-facing rotation', () => {
+  const state =
+    createInitialState();
+
+  advanceFor(
+    state,
+    90,
+  );
+
+  assert.ok(
+    state.city.buildings.length > 0,
+  );
+
+  for (
+    const building
+    of state.city.buildings
+  ) {
+    assert.ok(
+      Number.isFinite(
+        building.profile
+          ?.heightMeters,
+      )
+      && building.profile.heightMeters > 0,
+    );
+
+    assert.ok(
+      Number.isFinite(
+        building.rotationRadians,
+      ),
+    );
   }
 });
 

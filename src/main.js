@@ -18,8 +18,8 @@ import {
 } from './persistence/storage.js';
 
 import {
-  TransportRenderer,
-} from './render/transportRenderer.js';
+  ThreeTransportRenderer,
+} from './render/threeTransportRenderer.js';
 
 import {
   Hud,
@@ -51,7 +51,7 @@ const toastFailure = (result) => {
 };
 
 const renderer =
-  new TransportRenderer(
+  new ThreeTransportRenderer(
     canvas,
     {
       onSelectionChanged: (selection) => {

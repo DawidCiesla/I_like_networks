@@ -9,7 +9,7 @@
   </head>
   <body>
     <main id="app">
-      <canvas id="transport-canvas" aria-label="Passenger transport map"></canvas>
+      <canvas id="transport-canvas" aria-label="3D passenger transport city"></canvas>
 
       <button class="menu-chip" aria-label="Menu">≡</button>
 
@@ -83,12 +83,20 @@
       </button>
 
       <div class="hint">
-        CLICK GHOST STOPS / BUILDINGS TO EXPAND • CLICK BUILT OBJECTS TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM
+        CLICK TO SELECT • LEFT DRAG TO ROTATE • RIGHT DRAG TO PAN • WHEEL TO ZOOM
       </div>
 
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

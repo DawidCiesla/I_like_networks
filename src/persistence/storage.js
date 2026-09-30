@@ -348,7 +348,8 @@ function parseStored(raw) {
   }
 
   if (
-    parsed.version === 9
+    parsed.version === 10
+    || parsed.version === 9
     || parsed.version === 8
     || parsed.version === 7
     || parsed.version === 6
