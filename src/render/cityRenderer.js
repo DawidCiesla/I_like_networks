@@ -15,10 +15,13 @@ const clamp = (value, min, max) =>
 export function getCityStage(state) {
   if (!state.city) return 0;
 
-  return state.city.districts.filter(
-    (district) =>
-      district.status === 'active',
-  ).length - 1;
+  return Math.max(
+    0,
+    state.city.districts.filter(
+      (district) =>
+        district.status === 'active',
+    ).length - 1,
+  );
 }
 
 function traceRoute(ctx, metrics) {
