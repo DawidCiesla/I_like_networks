@@ -2,7 +2,7 @@ import {
   generateCityMasterPlan,
 } from './planGenerator.js';
 
-export const CITY_VERSION = 3;
+export const CITY_VERSION = 4;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
@@ -193,6 +193,49 @@ function projectDurationForRoad(
   return 6 + length / 26;
 }
 
+function profileHeightMeters(
+  kind,
+  floors,
+) {
+  if (kind === 'house') return 7.5;
+  if (kind === 'townhouse') return 9;
+  if (kind === 'shop') return 6.5;
+  if (kind === 'workshop') return 8;
+  if (kind === 'warehouse') return 11;
+
+  const floorHeight =
+    kind === 'tower'
+      ? 3.7
+      : (
+        kind === 'civic'
+        || kind === 'campus'
+      )
+        ? 3.6
+        : 3.25;
+
+  return (
+    floors * floorHeight
+    + 1.5
+  );
+}
+
+function makeBuildingProfile(
+  kind,
+  floors,
+  density,
+) {
+  return {
+    kind,
+    floors,
+    density,
+    heightMeters:
+      profileHeightMeters(
+        kind,
+        floors,
+      ),
+  };
+}
+
 function buildingProfileFor(
   district,
   parcel,
@@ -211,27 +254,26 @@ function buildingProfileFor(
   );
 
   if (parcel.zone === 'industrial') {
-    return {
-      kind:
-        density >= 3
-          ? 'warehouse'
-          : 'workshop',
-      floors:
-        density >= 3 ? 2 : 1,
+    const kind =
+      density >= 3
+        ? 'warehouse'
+        : 'workshop';
+
+    return makeBuildingProfile(
+      kind,
+      density >= 3 ? 2 : 1,
       density,
-    };
+    );
   }
 
   if (parcel.zone === 'civic') {
-    return {
-      kind:
-        district.theme === 'campus'
-          ? 'campus'
-          : 'civic',
-      floors:
-        density >= 3 ? 4 : 3,
+    return makeBuildingProfile(
+      district.theme === 'campus'
+        ? 'campus'
+        : 'civic',
+      density >= 3 ? 4 : 3,
       density,
-    };
+    );
   }
 
   if (parcel.zone === 'commercial') {
@@ -239,25 +281,22 @@ function buildingProfileFor(
       district.theme === 'central'
       && density >= 4
     ) {
-      return {
-        kind: 'tower',
-        floors:
-          8 + Math.min(4, density),
+      return makeBuildingProfile(
+        'tower',
+        8 + Math.min(4, density),
         density,
-      };
+      );
     }
 
-    return {
-      kind:
-        density >= 3
-          ? 'midrise'
-          : 'shop',
-      floors:
-        density >= 3
-          ? 4 + density
-          : 1,
+    return makeBuildingProfile(
+      density >= 3
+        ? 'midrise'
+        : 'shop',
+      density >= 3
+        ? 4 + density
+        : 1,
       density,
-    };
+    );
   }
 
   if (parcel.zone === 'mixed') {
@@ -265,49 +304,130 @@ function buildingProfileFor(
       district.theme === 'central'
       && density >= 4
     ) {
-      return {
-        kind: 'tower',
-        floors: 9,
+      return makeBuildingProfile(
+        'tower',
+        9,
         density,
-      };
+      );
     }
 
     if (density >= 3) {
-      return {
-        kind: 'midrise',
-        floors: 4 + density,
+      return makeBuildingProfile(
+        'midrise',
+        4 + density,
         density,
-      };
+      );
     }
 
-    return {
-      kind: 'shop',
-      floors: 2,
+    return makeBuildingProfile(
+      'shop',
+      2,
       density,
-    };
+    );
   }
 
   if (density >= 3) {
-    return {
-      kind: 'apartment',
-      floors: 3 + density,
+    return makeBuildingProfile(
+      'apartment',
+      3 + density,
       density,
-    };
+    );
   }
 
   if (density >= 2) {
-    return {
-      kind: 'townhouse',
-      floors: 2,
+    return makeBuildingProfile(
+      'townhouse',
+      2,
       density,
-    };
+    );
   }
 
-  return {
-    kind: 'house',
-    floors: 1,
+  return makeBuildingProfile(
+    'house',
+    1,
     density,
-  };
+  );
+}
+
+function parcelFrontageAngle(
+  city,
+  parcel,
+) {
+  const road =
+    city.roads.find(
+      (candidate) =>
+        candidate.id
+        === parcel.frontageRoadId,
+    );
+
+  if (
+    !road
+    || road.points.length < 2
+  ) {
+    return 0;
+  }
+
+  let bestDistance =
+    Number.POSITIVE_INFINITY;
+
+  let bestAngle = 0;
+
+  for (
+    let index = 0;
+    index < road.points.length - 1;
+    index += 1
+  ) {
+    const a =
+      road.points[index];
+
+    const b =
+      road.points[index + 1];
+
+    const dx =
+      b.x - a.x;
+
+    const dy =
+      b.y - a.y;
+
+    const lengthSquared =
+      dx * dx + dy * dy;
+
+    if (lengthSquared <= 1e-9) {
+      continue;
+    }
+
+    const t =
+      Math.max(
+        0,
+        Math.min(
+          1,
+          (
+            (parcel.x - a.x) * dx
+            + (parcel.y - a.y) * dy
+          ) / lengthSquared,
+        ),
+      );
+
+    const px =
+      a.x + dx * t;
+
+    const py =
+      a.y + dy * t;
+
+    const distance =
+      Math.hypot(
+        parcel.x - px,
+        parcel.y - py,
+      );
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestAngle =
+        Math.atan2(dy, dx);
+    }
+  }
+
+  return bestAngle;
 }
 
 function buildingDuration(profile) {
@@ -764,6 +884,11 @@ function startEligibleProjects(city) {
           profile: {
             ...project.profile,
           },
+          rotationRadians:
+            parcelFrontageAngle(
+              city,
+              parcel,
+            ),
           status:
             'constructing',
           constructionProgress: 0,
