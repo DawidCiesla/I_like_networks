@@ -4,7 +4,15 @@ A passenger-transport incremental / management game prototype inspired by the cl
 
 ## Current development status
 
-**Bus Era — 3D living-city foundation**
+**Bus Era — Godot migration in progress**
+
+A native Godot 4.6 port now lives in `godot/` alongside the existing browser build. The browser version remains the gameplay reference until feature parity is reached.
+
+The current Godot milestone already includes deterministic terrain, vegetation, all four Bus Era route geometries, shared physical stations, the Bus Depot, station upgrades, visible buses, map picking, a city-builder camera, HUD/Inspector and native saves.
+
+See [`docs/godot-port.md`](docs/godot-port.md) for the migration/parity contract.
+
+**Current browser build — 3D living-city foundation**
 
 The current build focuses on making the first minutes of the game feel like a real incremental transport game rather than a systems sandbox.
 
@@ -140,6 +148,22 @@ A purchase should normally mean clicking something spatially meaningful on the m
 Existing lines and stations do not teleport when new content is unlocked.
 
 ## Run locally
+
+### Godot port
+
+Requires Godot 4.6.
+
+```bash
+godot --path godot
+```
+
+Headless parity smoke test:
+
+```bash
+godot --headless --path godot --script res://scripts/debug/self_test.gd
+```
+
+### Browser reference build
 
 Requires Node.js 20+.
 
