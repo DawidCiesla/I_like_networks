@@ -7,8 +7,17 @@ func _ready() -> void:
 	_on_state_changed()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("pause_game"):
-		GameStore.set_speed(0 if GameStore.simulation_speed > 0 else 1)
+	if (
+		event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.physical_keycode == KEY_SPACE
+	):
+		GameStore.set_speed(
+			0
+			if GameStore.simulation_speed > 0
+			else 1
+		)
 
 func _on_state_changed() -> void:
 	pass
