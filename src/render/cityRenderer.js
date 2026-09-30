@@ -109,6 +109,14 @@ function roadWidths(road) {
     };
   }
 
+  if (road.class === 'collector') {
+    return {
+      sidewalk: 31,
+      edge: 26,
+      surface: 21,
+    };
+  }
+
   if (road.class === 'service') {
     return {
       sidewalk: 19,
@@ -189,6 +197,108 @@ function roadParentsBuilt(
           && candidate.status === 'built',
       ),
   );
+}
+
+function drawBuiltJunctions(
+  ctx,
+  state,
+) {
+  const roadsById =
+    new Map(
+      state.city.roads.map(
+        (road) => [
+          road.id,
+          road,
+        ],
+      ),
+    );
+
+  for (
+    const junction
+    of state.city.junctions ?? []
+  ) {
+    const builtRoads =
+      junction.roadIds
+        .map(
+          (roadId) =>
+            roadsById.get(roadId),
+        )
+        .filter(
+          (road) =>
+            road?.status === 'built',
+        );
+
+    if (builtRoads.length < 2) {
+      continue;
+    }
+
+    const widths =
+      builtRoads.map(
+        (road) =>
+          roadWidths(road),
+      );
+
+    const sidewalkRadius =
+      Math.max(
+        ...widths.map(
+          (value) =>
+            value.sidewalk,
+        ),
+      ) / 2;
+
+    const edgeRadius =
+      Math.max(
+        ...widths.map(
+          (value) =>
+            value.edge,
+        ),
+      ) / 2;
+
+    const surfaceRadius =
+      Math.max(
+        ...widths.map(
+          (value) =>
+            value.surface,
+        ),
+      ) / 2;
+
+    ctx.save();
+
+    ctx.fillStyle = SIDEWALK;
+    ctx.beginPath();
+    ctx.arc(
+      junction.x,
+      junction.y,
+      sidewalkRadius,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    ctx.fillStyle = ROAD_EDGE;
+    ctx.beginPath();
+    ctx.arc(
+      junction.x,
+      junction.y,
+      edgeRadius,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    ctx.fillStyle = ROAD_SURFACE;
+    ctx.beginPath();
+    ctx.arc(
+      junction.x,
+      junction.y,
+      surfaceRadius,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    ctx.restore();
+  }
 }
 
 function drawPlannedRoad(
@@ -1049,6 +1159,11 @@ export function drawCity(
       );
     }
   }
+
+  drawBuiltJunctions(
+    ctx,
+    state,
+  );
 
   drawReservedSites(
     ctx,
