@@ -2,6 +2,7 @@ import {
   ECONOMY,
   GAME_VERSION,
   createInitialState,
+  ensureLineRuntime,
   initializeLineService,
 } from '../simulation/model.js';
 
@@ -345,29 +346,51 @@ function parseStored(raw) {
   return null;
 }
 
+function prepareLoadedState(state) {
+  ensureLineRuntime(state, 'line1');
+  ensureLineRuntime(state, 'line2');
+
+  for (const lineKey of ['line1', 'line2']) {
+    state[lineKey].passengerEvents = [];
+    state[lineKey].lastPassengerEvent = null;
+  }
+
+  return state;
+}
+
 export function loadState() {
   try {
     const current = parseStored(
       localStorage.getItem(SAVE_KEY),
     );
 
-    if (current) return current;
+    if (current) {
+      return prepareLoadedState(current);
+    }
 
     const t0 = parseStored(
       localStorage.getItem(T0_SAVE_KEY),
     );
 
-    if (t0) return t0;
+    if (t0) {
+      return prepareLoadedState(t0);
+    }
 
     const legacy = parseStored(
       localStorage.getItem(NETWORK_SAVE_KEY),
     );
 
-    if (legacy) return legacy;
+    if (legacy) {
+      return prepareLoadedState(legacy);
+    }
 
-    return createInitialState();
+    return prepareLoadedState(
+      createInitialState(),
+    );
   } catch {
-    return createInitialState();
+    return prepareLoadedState(
+      createInitialState(),
+    );
   }
 }
 
