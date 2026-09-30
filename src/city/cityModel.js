@@ -151,17 +151,42 @@ function getDistrictPressure(
   );
 }
 
+function roadLength(
+  road,
+) {
+  let total = 0;
+
+  for (
+    let index = 0;
+    index < (road.points?.length ?? 0) - 1;
+    index += 1
+  ) {
+    total += Math.hypot(
+      road.points[index + 1].x
+        - road.points[index].x,
+      road.points[index + 1].y
+        - road.points[index].y,
+    );
+  }
+
+  return total;
+}
+
 function projectDurationForRoad(
   road,
 ) {
-  const pointCount =
-    road.points?.length ?? 2;
+  const length =
+    roadLength(road);
 
-  return (
-    road.class === 'service'
-      ? 8
-      : 7 + pointCount * 1.5
-  );
+  if (road.class === 'service') {
+    return 6 + length / 38;
+  }
+
+  if (road.class === 'arterial') {
+    return 8 + length / 32;
+  }
+
+  return 6 + length / 26;
 }
 
 function buildingProfileFor(
