@@ -1,36 +1,49 @@
 import {
   ECONOMY,
+  LINE_KEYS,
+  STATION_UPGRADE,
   UPGRADES,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   addVehicleToLineState,
   getGarageUsed,
   getNextStopCost,
+  getStationLevel,
+  getStationUpgradeCost,
   getUpgradeCost,
+  isStationBuilt,
   getVehiclePurchaseCost,
   initializeLineService,
 } from './model.js';
 
 export function buildNextStop(state, lineKey) {
   const line =
-    lineKey === 'line1'
-      ? state.line1
-      : lineKey === 'line2'
-        ? state.line2
-        : null;
+    LINE_KEYS.includes(lineKey)
+      ? state[lineKey]
+      : null;
 
   if (!line) {
     return { ok: false, reason: 'unknown-line' };
   }
 
-  if (lineKey === 'line2' && !line.built) {
-    return { ok: false, reason: 'line-required' };
+  if (
+    lineKey !== 'line1'
+    && !line.built
+  ) {
+    return {
+      ok: false,
+      reason: 'line-required',
+    };
   }
 
-  const maxStops =
-    lineKey === 'line1'
-      ? ECONOMY.maxLine1Stops
-      : ECONOMY.maxLine2Stops;
+  const maxStops = {
+    line1: ECONOMY.maxLine1Stops,
+    line2: ECONOMY.maxLine2Stops,
+    line3: ECONOMY.maxLine3Stops,
+    line4: ECONOMY.maxLine4Stops,
+  }[lineKey];
 
   if (line.stopCount >= maxStops) {
     return { ok: false, reason: 'stop-limit' };
@@ -83,35 +96,85 @@ export function buildDepot(state) {
   return { ok: true };
 }
 
-export function buildLine2(state) {
-  if (!canUnlockLine2(state)) {
-    return { ok: false, reason: 'progress-required' };
+function buildNewLine(
+  state,
+  lineKey,
+  {
+    canUnlock,
+    buildCost,
+  },
+) {
+  if (!canUnlock(state)) {
+    return {
+      ok: false,
+      reason: 'progress-required',
+    };
   }
 
-  if (state.money < ECONOMY.line2BuildCost) {
-    return { ok: false, reason: 'insufficient-funds' };
+  if (state.money < buildCost) {
+    return {
+      ok: false,
+      reason: 'insufficient-funds',
+    };
   }
 
-  state.money -= ECONOMY.line2BuildCost;
+  state.money -= buildCost;
 
-  state.line2.stopCount = 2;
+  state[lineKey].stopCount = 2;
 
   initializeLineService(
     state,
-    'line2',
+    lineKey,
     1,
   );
 
-  return { ok: true };
+  return {
+    ok: true,
+    cost: buildCost,
+  };
+}
+
+export function buildLine2(state) {
+  return buildNewLine(
+    state,
+    'line2',
+    {
+      canUnlock: canUnlockLine2,
+      buildCost:
+        ECONOMY.line2BuildCost,
+    },
+  );
+}
+
+export function buildLine3(state) {
+  return buildNewLine(
+    state,
+    'line3',
+    {
+      canUnlock: canUnlockLine3,
+      buildCost:
+        ECONOMY.line3BuildCost,
+    },
+  );
+}
+
+export function buildLine4(state) {
+  return buildNewLine(
+    state,
+    'line4',
+    {
+      canUnlock: canUnlockLine4,
+      buildCost:
+        ECONOMY.line4BuildCost,
+    },
+  );
 }
 
 export function addVehicle(state, lineKey) {
   const line =
-    lineKey === 'line1'
-      ? state.line1
-      : lineKey === 'line2'
-        ? state.line2
-        : null;
+    LINE_KEYS.includes(lineKey)
+      ? state[lineKey]
+      : null;
 
   if (!line) {
     return { ok: false, reason: 'unknown-line' };
@@ -154,6 +217,71 @@ export function addVehicle(state, lineKey) {
   );
 
   return { ok: true, cost };
+}
+
+export function upgradeStation(
+  state,
+  stationId,
+) {
+  if (!isStationBuilt(
+    state,
+    stationId,
+  )) {
+    return {
+      ok: false,
+      reason: 'station-required',
+    };
+  }
+
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  if (
+    level
+    >= STATION_UPGRADE.maxLevel
+  ) {
+    return {
+      ok: false,
+      reason: 'upgrade-limit',
+    };
+  }
+
+  const cost =
+    getStationUpgradeCost(
+      state,
+      stationId,
+    );
+
+  if (state.money < cost) {
+    return {
+      ok: false,
+      reason: 'insufficient-funds',
+    };
+  }
+
+  state.money -= cost;
+
+  if (!state.stations[stationId]) {
+    state.stations[stationId] = {
+      level: 0,
+    };
+  }
+
+  state.stations[
+    stationId
+  ].level += 1;
+
+  return {
+    ok: true,
+    cost,
+    level:
+      state.stations[
+        stationId
+      ].level,
+  };
 }
 
 export function buyUpgrade(state, type) {
