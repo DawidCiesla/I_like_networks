@@ -55,7 +55,7 @@ export const TRANSPORT_MODES = Object.freeze({
     label: 'Bus',
     unlocked: true,
     vehicleCapacity: 40,
-    speedKph: 30,
+    speedKph: 18,
     dwellMinutes: 0.25,
     turnaroundMinutes: 1,
   },
