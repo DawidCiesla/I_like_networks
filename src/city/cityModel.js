@@ -2,7 +2,7 @@ import {
   generateCityMasterPlan,
 } from './planGenerator.js';
 
-export const CITY_VERSION = 4;
+export const CITY_VERSION = 5;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
