@@ -1198,11 +1198,40 @@ export function canBuildDepot(state) {
   );
 }
 
-export function isLine1Stable(state) {
+export function isLineStable(
+  state,
+  lineKey,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
   return (
-    state.line1.built
-    && getLineCapacityPpm(state, 'line1')
-      >= getLineDemandPpm(state, 'line1')
+    line.built
+    && getLineCapacityPpm(
+      state,
+      lineKey,
+    )
+      >= getLineDemandPpm(
+        state,
+        lineKey,
+      )
+  );
+}
+
+export function isLine1Stable(state) {
+  return isLineStable(
+    state,
+    'line1',
+  );
+}
+
+function hasFreeGarageSlot(state) {
+  return (
+    getGarageUsed(state)
+    < state.depot.garageSlots
   );
 }
 
@@ -1212,34 +1241,61 @@ export function canUnlockLine2(state) {
     && state.depot.built
     && state.line1.stopCount
       >= ECONOMY.maxLine1Stops
-    && isLine1Stable(state)
-    && getGarageUsed(state)
-      < state.depot.garageSlots
+    && isLineStable(
+      state,
+      'line1',
+    )
+    && hasFreeGarageSlot(state)
+  );
+}
+
+export function canUnlockLine3(state) {
+  return (
+    !state.line3.built
+    && state.depot.built
+    && state.line2.built
+    && state.line2.stopCount
+      >= ECONOMY.maxLine2Stops
+    && isLineStable(
+      state,
+      'line2',
+    )
+    && hasFreeGarageSlot(state)
+  );
+}
+
+export function canUnlockLine4(state) {
+  return (
+    !state.line4.built
+    && state.depot.built
+    && state.line3.built
+    && state.line3.stopCount
+      >= ECONOMY.maxLine3Stops
+    && isLineStable(
+      state,
+      'line3',
+    )
+    && hasFreeGarageSlot(state)
   );
 }
 
 function getUpgradeLevel(state, type) {
-  if (type === 'shelter1') {
-    return state.line1.shelterLevel;
-  }
-
-  if (type === 'catchment1') {
-    return state.line1.catchmentLevel;
-  }
-
   if (type === 'depot') {
     return state.depot.level;
   }
 
-  if (type === 'shelter2') {
-    return state.line2.shelterLevel;
+  if (
+    type === 'shelter1'
+    || type === 'catchment1'
+    || type === 'shelter2'
+    || type === 'catchment2'
+  ) {
+    return 0;
   }
 
-  if (type === 'catchment2') {
-    return state.line2.catchmentLevel;
-  }
-
-  throw new Error(`Unknown upgrade type: ${type}`);
+  throw new Error(
+    `Unknown upgrade type: ${type}`,
+  );
 }
 
 export function getUpgradeCost(state, type) {
@@ -1269,6 +1325,84 @@ export function getStopWaitingPassengers(state, lineKey, stopIndex) {
       (sum, value) => sum + (Number.isFinite(value) ? value : 0),
       0,
     );
+}
+
+export function getStationWaitingPassengers(
+  state,
+  stationId,
+) {
+  let total = 0;
+
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const line = state[lineKey];
+
+    if (!line?.built) {
+      continue;
+    }
+
+    const stopIndex =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (
+      stopIndex < 0
+      || stopIndex
+        >= line.stopCount
+    ) {
+      continue;
+    }
+
+    total +=
+      getStopWaitingPassengers(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
+}
+
+export function getStationDemandPpm(
+  state,
+  stationId,
+) {
+  let total = 0;
+
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const line = state[lineKey];
+
+    if (!line?.built) {
+      continue;
+    }
+
+    const stopIndex =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (
+      stopIndex < 0
+      || stopIndex
+        >= line.stopCount
+    ) {
+      continue;
+    }
+
+    total +=
+      getStopDemandPpm(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
 }
 
 export function getLineWaitingPassengers(state, lineKey) {
@@ -1312,9 +1446,15 @@ export function getLineOnboardPassengers(state, lineKey) {
 }
 
 export function getDeliveredPassengersPpm(state) {
-  return (
-    state.line1.lastDeliveredPpm
-    + state.line2.lastDeliveredPpm
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + (
+        state[lineKey]
+          ?.lastDeliveredPpm
+        ?? 0
+      ),
+    0,
   );
 }
 
@@ -1323,41 +1463,70 @@ export function getLastFareEventValue(state) {
 }
 
 export function getAverageWaitMinutes(state) {
-  const demand1 =
-    getLineDemandPpm(state, 'line1');
+  const demands =
+    LINE_KEYS.map(
+      (lineKey) => ({
+        lineKey,
+        demand:
+          getLineDemandPpm(
+            state,
+            lineKey,
+          ),
+      }),
+    );
 
-  const demand2 =
-    getLineDemandPpm(state, 'line2');
+  const totalDemand =
+    demands.reduce(
+      (total, entry) =>
+        total + entry.demand,
+      0,
+    );
 
-  const totalDemand = demand1 + demand2;
+  if (totalDemand <= 0) {
+    return 0;
+  }
 
-  if (totalDemand <= 0) return 0;
+  let weighted = 0;
 
-  const waitForLine = (lineKey, demand) => {
-    if (demand <= 0) return 0;
+  for (
+    const {
+      lineKey,
+      demand,
+    }
+    of demands
+  ) {
+    if (demand <= 0) {
+      continue;
+    }
 
-    const line = getLine(state, lineKey);
+    const line =
+      getLine(
+        state,
+        lineKey,
+      );
 
     const scheduled =
-      getLineHeadwayMinutes(state, lineKey) / 2;
+      getLineHeadwayMinutes(
+        state,
+        lineKey,
+      ) / 2;
 
-    const delivered = Math.max(
-      0.1,
-      line.lastDeliveredPpm,
-    );
+    const delivered =
+      Math.max(
+        0.1,
+        line.lastDeliveredPpm,
+      );
 
-    return (
+    weighted += (
       scheduled
-      + line.queuePassengers / delivered
-    );
-  };
+      + line.queuePassengers
+        / delivered
+    ) * demand;
+  }
 
   return Math.min(
     120,
-    (
-      waitForLine('line1', demand1) * demand1
-      + waitForLine('line2', demand2) * demand2
-    ) / totalDemand,
+    weighted / totalDemand,
   );
 }
 
@@ -1367,8 +1536,16 @@ export function getAbandonmentPercent(state) {
   if (demand <= 0) return 0;
 
   const abandonment =
-    state.line1.currentAbandonmentPpm
-    + state.line2.currentAbandonmentPpm;
+    LINE_KEYS.reduce(
+      (total, lineKey) =>
+        total
+        + (
+          state[lineKey]
+            ?.currentAbandonmentPpm
+          ?? 0
+        ),
+      0,
+    );
 
   return Math.min(
     100,
@@ -1377,25 +1554,33 @@ export function getAbandonmentPercent(state) {
 }
 
 export function getBottleneck(state) {
-  const demand1 =
-    getLineDemandPpm(state, 'line1');
-
-  if (
-    demand1
-    > getLineCapacityPpm(state, 'line1')
+  for (
+    let index = 0;
+    index < LINE_KEYS.length;
+    index += 1
   ) {
-    return 'line-1';
-  }
+    const lineKey =
+      LINE_KEYS[index];
 
-  const demand2 =
-    getLineDemandPpm(state, 'line2');
+    const line =
+      state[lineKey];
 
-  if (
-    state.line2.built
-    && demand2
-      > getLineCapacityPpm(state, 'line2')
-  ) {
-    return 'line-2';
+    if (!line?.built) {
+      continue;
+    }
+
+    if (
+      getLineDemandPpm(
+        state,
+        lineKey,
+      )
+      > getLineCapacityPpm(
+        state,
+        lineKey,
+      )
+    ) {
+      return `line-${index + 1}`;
+    }
   }
 
   return state.line1.built
