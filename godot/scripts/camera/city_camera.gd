@@ -45,7 +45,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_update_camera()
 		get_viewport().set_input_as_handled()
 
-	if event.is_action_pressed("reset_camera"):
+	if (
+		event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.physical_keycode == KEY_F
+	):
 		reset_view()
 		get_viewport().set_input_as_handled()
 
