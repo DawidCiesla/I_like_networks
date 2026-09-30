@@ -98,3 +98,90 @@ test('vehicle rendering follows the authored curved segment in both directions',
   assert.ok(Math.abs(reversePoint.x - expected.x) < 1e-9);
   assert.ok(Math.abs(reversePoint.y - expected.y) < 1e-9);
 });
+
+
+test('Line 3 branches from University without duplicating the physical station', () => {
+  assert.deepEqual(
+    {
+      x: WORLD.line3Stops[0].x,
+      y: WORLD.line3Stops[0].y,
+    },
+    {
+      x: WORLD.line1Stops[3].x,
+      y: WORLD.line1Stops[3].y,
+    },
+  );
+
+  assert.notDeepEqual(
+    getSegmentRoute(
+      'line3',
+      0,
+      1,
+    ).points.slice(0, 3),
+    getSegmentRoute(
+      'line1',
+      3,
+      4,
+    ).points.slice(0, 3),
+  );
+});
+
+test('Line 4 connects Harbor back to the existing Central interchange', () => {
+  assert.deepEqual(
+    {
+      x: WORLD.line4Stops[0].x,
+      y: WORLD.line4Stops[0].y,
+    },
+    {
+      x: WORLD.line2Stops[3].x,
+      y: WORLD.line2Stops[3].y,
+    },
+  );
+
+  assert.deepEqual(
+    {
+      x: WORLD.line4Stops[4].x,
+      y: WORLD.line4Stops[4].y,
+    },
+    {
+      x: WORLD.line1Stops[4].x,
+      y: WORLD.line1Stops[4].y,
+    },
+  );
+});
+
+test('new bus lines preserve realistic city-scale stop spacing', () => {
+  for (
+    const [
+      lineKey,
+      segmentCount,
+    ]
+    of [
+      ['line3', 4],
+      ['line4', 4],
+    ]
+  ) {
+    for (
+      let index = 0;
+      index < segmentCount;
+      index += 1
+    ) {
+      const distance =
+        getSegmentRoute(
+          lineKey,
+          index,
+          index + 1,
+        ).total;
+
+      assert.ok(
+        distance >= 350,
+        `${lineKey} segment ${index} is too short: ${distance}`,
+      );
+
+      assert.ok(
+        distance <= 1250,
+        `${lineKey} segment ${index} is too long: ${distance}`,
+      );
+    }
+  }
+});

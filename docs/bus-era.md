@@ -1,236 +1,279 @@
-# Bus Era — Natural Early-Game Progression
+# Bus Era — Four-Line Network Progression
 
 ## Goal
 
-Create the first genuinely game-like phase of I Like Transit.
+The Bus Era is the first complete progression layer of I Like Transit.
 
-The player should not begin by opening a menu and buying an entire transport system. Progress should emerge spatially from the map.
-
-The intended rhythm is:
+The player grows one visible transport network directly on the 3D city map:
 
 ```text
-own one stop
-→ notice a nearby future stop
-→ buy it
-→ line appears
-→ earn money
-→ extend line
-→ capacity pressure appears
-→ unlock depot
-→ add buses
-→ continue expanding
-→ unlock a second line
+one owned stop
+→ Line 1
+→ Bus Depot
+→ larger Line 1 fleet
+→ Line 2
+→ Line 3
+→ Line 4
+→ interconnected bus network
+→ upgrade busy stations into hubs
 ```
+
+Expansion is additive. Existing roads, stations and lines never move just because later content unlocks.
 
 ## Fresh start
 
 A fresh save contains:
 
 - $100,
-- one owned stop: Old Town,
-- no active line,
+- Old Town as the only owned stop,
+- no active route,
 - no buses,
 - no depot,
-- no Line 2.
+- Lines 2–4 locked.
 
-A ghost version of Market Square is visible nearby.
+Market Square appears as the first ghost stop.
 
-The player must click that ghost stop and buy it.
+Buying it starts Line 1 and grants one starter bus.
 
-## First service
+## Line 1
 
-Buying Market Square:
+Stops:
 
-- spends the stop purchase cost,
-- increases Line 1 to two stops,
-- activates Bus Line 1,
-- grants one starter bus,
-- starts passenger demand and fare revenue.
+1. Old Town
+2. Market Square
+3. City Park
+4. University
+5. Central
 
-The line is drawn only between the stops that actually exist.
+The third stop creates the first intentional capacity pressure and unlocks the Bus Depot.
 
-## Stop-by-stop growth
-
-Line 1 contains five possible stops:
-
-1. Old Town,
-2. Market Square,
-3. City Park,
-4. University,
-5. Central.
-
-Only the next unbuilt stop is shown as a purchase opportunity.
-
-Each stop:
-
-- costs more than the previous stop,
-- adds one physical segment to the existing line,
-- increases passenger demand,
-- lengthens route distance,
-- increases one-way and cycle time,
-- can worsen service headway.
-
-This creates the first core economic tension.
-
-## Depot unlock
-
-After City Park becomes the third stop, the Bus Depot appears as a ghost building beside the route.
-
-The depot must be purchased separately.
-
-Before the depot exists:
-
-- the player cannot buy additional buses.
-
-After the depot exists:
-
-- buses can be purchased for active lines,
-- vehicles are assigned directly to a line,
-- garage capacity becomes a shared fleet limit.
-
-The depot initially has four garage slots.
-
-The garage can be expanded by upgrade.
-
-## Fleet progression
-
-The first segment of each newly created bus line includes one starter bus.
-
-Every later bus must be purchased through the Bus Depot.
-
-Buying a bus:
-
-- adds one visible vehicle to the line,
-- reduces headway,
-- increases frequency,
-- increases line passenger capacity.
-
-The player should be able to see the causal chain directly on the map.
-
-## Natural bottleneck
-
-The current balance intentionally makes the third stop slightly too much for a single Line 1 bus.
-
-The desired learning moment is:
+The player learns:
 
 ```text
-build City Park
-→ waiting passengers begin to accumulate
-→ Bus Depot becomes available
-→ build depot
-→ buy second bus
-→ queue clears
+longer route
+→ longer cycle
+→ worse headway
+→ waiting passengers
+→ more buses
 ```
 
-The player learns fleet management because the map creates a problem, not because a tutorial menu tells them to upgrade throughput.
+Line 1 must be completed and operationally stable before Line 2 becomes available.
 
-## Progressive upgrades
+## Bus Depot
 
-Line upgrades are contextual and unlock over time.
+The Bus Depot is a separate physical facility.
 
-### Early
+It:
 
-Once a service exists:
+- stores the shared bus fleet,
+- is the only place additional buses can be purchased,
+- limits the total number of buses,
+- starts with four slots,
+- gains four additional slots per garage expansion.
 
-- Improve stops
-  - increases waiting capacity.
+Each new bus line includes one starter bus, but it still requires a free garage slot.
 
-### Later
+## Line 2
 
-After a line has grown further:
+Line 2 branches from the existing City Park station.
 
-- Expand catchment
-  - increases passenger demand around the route.
+Stops:
 
-These upgrades stay inside the selected line Inspector.
+1. City Park
+2. Riverside
+3. Museum
+4. Harbor
 
-## Line 2 unlock
+City Park is not duplicated. It becomes a real interchange shared by Lines 1 and 2.
 
-Bus Line 2 is not available at the start.
+Line 3 unlocks only after Line 2 is complete, stable and the depot has room for its starter bus.
 
-It appears only when:
+## Line 3
 
-- Bus Depot exists,
-- Line 1 has reached all five stops,
-- Line 1 has enough fleet capacity to meet its current demand.
+Line 3 branches from University.
 
-When those conditions are met, a yellow ghost branch appears at City Park.
+Stops:
 
-Clicking it allows the player to purchase Line 2.
+1. University
+2. North Quarter
+3. Hillcrest
+4. Northgate
+5. Meadow End
 
-Line 2 begins with:
+University becomes an interchange shared by Lines 1 and 3.
 
-- two stops,
-- one starter bus,
-- its own passenger demand and queue.
+The route leaves the existing Line 1 corridor immediately instead of overlapping it.
 
-It then grows stop-by-stop using the same interaction model.
+Line 3 opens several new northern districts and pushes city growth into new terrain.
+
+## Line 4
+
+Line 4 begins at Harbor.
+
+Stops:
+
+1. Harbor
+2. Docklands
+3. Eastgate
+4. Stadium
+5. Central
+
+Harbor is shared by Lines 2 and 4.
+
+The final Line 4 extension does not create a second Central station. It reconnects the route into the existing Central interchange shared with Line 1.
+
+This creates the first larger network loop.
+
+## Physical station model
+
+A station is a persistent city object identified independently from the line that serves it.
+
+Examples:
+
+```text
+City Park
+  ├─ Line 1
+  └─ Line 2
+
+University
+  ├─ Line 1
+  └─ Line 3
+
+Harbor
+  ├─ Line 2
+  └─ Line 4
+
+Central
+  ├─ Line 1
+  └─ Line 4
+```
+
+A shared interchange has one upgrade level and one physical 3D object.
+
+## Station upgrades
+
+Each built station is upgraded individually.
+
+Progression:
+
+```text
+Stop
+→ Shelter
+→ Station
+→ Hub
+```
+
+Current levels:
+
+| Level | Name | Waiting capacity |
+| --- | --- | ---: |
+| 0 | Stop | 45 pax / line |
+| 1 | Shelter | 70 pax / line |
+| 2 | Station | 105 pax / line |
+| 3 | Hub | 150 pax / line |
+
+A local station upgrade:
+
+- increases waiting capacity,
+- slightly reduces dwell time,
+- slightly expands local passenger demand / catchment,
+- changes the physical station model in 3D.
+
+It does not upgrade every stop on the line.
+
+This means the player can spend money where pressure actually appears.
 
 ## Map-first interaction
 
 The map is the build interface.
 
-Future infrastructure is represented by ghost objects:
+Clickable objects include:
 
-- dashed future segment,
-- ghost stop,
-- ghost Bus Depot,
-- ghost Line 2 branch.
+- future stops,
+- future line branches,
+- the Bus Depot,
+- existing stations,
+- connection halos around existing interchanges.
 
-Clicking a ghost object opens a small contextual Inspector with:
+Clicking an existing station opens its own Inspector.
 
-- what will be built,
-- what it changes,
-- its cost,
-- the purchase action.
+Clicking a future stop opens the purchase Inspector for that line extension.
 
-The old global BUILD panel is intentionally removed from the primary loop.
+When a line is about to connect to an already existing station, the map shows a larger **CONNECT** halo rather than placing a duplicate ghost station on top of it.
 
-## Additive geometry
+## Passenger economy
 
-Unlocking new systems does not reorganize previous infrastructure.
+Passengers are generated at individual stops with specific destinations.
 
-Examples:
+Money is credited only when a passenger reaches the destination and leaves the bus.
 
-- buying City Park extends the existing Line 1;
-- building Bus Depot adds a small spur beside City Park;
-- opening Line 2 adds a branch;
-- Old Town and Market Square never move because something later was unlocked.
+Station upgrades therefore interact with actual passenger flow rather than passive income.
+
+## City relationship
+
+The full Bus Era master plan now contains 15 districts.
+
+New line construction opens new city growth corridors:
+
+- Line 1 establishes the initial core,
+- Line 2 expands toward Riverside / Museum / Harbor,
+- Line 3 opens the northern neighborhoods,
+- Line 4 opens Docklands / Eastgate / Stadium and reconnects to Central.
+
+Terrain constraints remain active for all districts.
+
+Docklands intentionally uses a more compact industrial parcel pattern than residential districts.
+
+## Unlock contract
+
+The sequential unlock rule is:
+
+```text
+complete current line
++ keep current line capacity >= demand
++ own Bus Depot
++ have one free garage slot
+= next line becomes available
+```
+
+This currently applies to Line 2, Line 3 and Line 4.
 
 ## Bus Era validation gate
 
-Before adding tram or another mode, verify:
+Before introducing trams, verify:
 
-1. Fresh reset visibly starts with exactly one owned stop.
-2. The next ghost stop is obvious and clickable.
-3. Buying the second stop starts Line 1.
-4. One visible starter bus appears.
-5. Fare revenue begins only after service starts.
-6. Buying another stop extends only the end of the existing line.
-7. Earlier stations remain in place.
-8. The third stop creates a mild service bottleneck.
-9. The Bus Depot visibly unlocks after the third stop.
-10. Additional buses cannot be purchased before the depot exists.
-11. Buying a bus in the depot visibly adds it to Line 1.
-12. The added bus reduces headway and clears the queue.
-13. Garage slots limit fleet growth.
-14. Line upgrades appear progressively rather than all at once.
-15. Line 2 does not appear until Line 1 is complete and stable.
-16. Line 2 appears as a new branch rather than replacing Line 1.
-17. Reset reliably returns to the one-stop state.
+1. Reset starts with exactly one owned stop.
+2. Buying Market Square activates Line 1.
+3. The starter bus appears physically.
+4. Passenger revenue is paid on arrival.
+5. City Park creates natural early capacity pressure.
+6. Bus Depot is required for additional buses.
+7. Garage capacity applies across all lines.
+8. Existing route geometry never moves during expansion.
+9. Line 2 branches from the existing City Park station.
+10. Line 3 branches from the existing University station.
+11. Line 4 branches from the existing Harbor station.
+12. Line 4 reconnects to the existing Central station.
+13. Shared stations render once rather than once per line.
+14. Clicking a station opens that physical station's Inspector.
+15. Station upgrades affect only the selected physical station.
+16. Station upgrade level is shared across every line serving the interchange.
+17. Stop → Shelter → Station → Hub visibly changes the 3D station.
+18. All four lines can be completed and stabilized without exceeding per-line fleet limits.
+19. New districts grow around Lines 3 and 4 without accidental road overlaps.
+20. Reset reliably returns to the one-stop state.
 
 ## Deferred
 
-This phase intentionally does not introduce:
+The Bus Era still intentionally does not include:
 
 - tram,
 - metro,
 - rail,
-- road congestion,
-- operating costs,
-- multiple bus models,
+- simulated car congestion,
+- traffic lights,
 - manual timetables,
-- route-choice AI,
-- detailed passenger destinations.
+- multiple bus vehicle models,
+- route-choice AI between alternative passenger paths.
 
-Those should come only after this progression loop feels good to play.
+Those systems should build on the four-line bus network rather than replace it.

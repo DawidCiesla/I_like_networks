@@ -407,7 +407,7 @@ This means city growth can be watched in normal gameplay.
 
 Game state is now version 9.
 
-City-state schema is version 4.
+City-state schema is version 5.
 
 Older Bus Era saves migrate into the new city model.
 
@@ -520,3 +520,14 @@ Accepted parcels store terrain metadata and wooded parcels receive a development
 Buildings now persist `heightMeters` and `rotationRadians` so their 3D form is simulation state rather than renderer randomness.
 
 See [`3d-world.md`](3d-world.md) for the complete terrain and rendering contract.
+
+
+## Four-line Bus Era expansion
+
+The Bus Era master plan now extends city growth around Lines 3 and 4.
+
+The plan contains 15 district definitions. New transport corridors remain persistent primary roads and activate district development only when the corresponding stop is actually reached.
+
+Shared stations such as University, Harbor and Central do not create duplicate districts or duplicate physical station objects.
+
+Docklands uses a deliberately compact industrial parcel morphology so its development remains viable on constrained terrain without weakening global road or terrain collision rules.

@@ -4,7 +4,14 @@ import {
   ensureCityRuntime,
 } from '../city/cityModel.js';
 
-export const GAME_VERSION = 11;
+export const GAME_VERSION = 12;
+
+export const LINE_KEYS = Object.freeze([
+  'line1',
+  'line2',
+  'line3',
+  'line4',
+]);
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
@@ -14,40 +21,58 @@ export const ECONOMY = Object.freeze({
   line2BuildCost: 220,
   line2StopBaseCost: 75,
   line2StopCostGrowth: 1.55,
+  line3BuildCost: 520,
+  line3StopBaseCost: 135,
+  line3StopCostGrowth: 1.58,
+  line4BuildCost: 950,
+  line4StopBaseCost: 210,
+  line4StopCostGrowth: 1.6,
   busBaseCost: 70,
-  busCostGrowth: 1.4,
+  busCostGrowth: 1.32,
   maxLine1Stops: 5,
   maxLine2Stops: 4,
+  maxLine3Stops: 5,
+  maxLine4Stops: 5,
   maxVehiclesPerLine: 8,
   farePerPassenger: 12,
 });
 
 export const UPGRADES = Object.freeze({
-  shelter1: {
-    baseCost: 45,
-    costGrowth: 1.6,
-    delta: 30,
-  },
-  catchment1: {
-    baseCost: 70,
-    costGrowth: 1.7,
-    delta: 0.5,
-  },
   depot: {
     baseCost: 160,
-    costGrowth: 1.8,
-    delta: 2,
-  },
-  shelter2: {
-    baseCost: 60,
     costGrowth: 1.65,
-    delta: 30,
+    delta: 4,
   },
-  catchment2: {
-    baseCost: 85,
-    costGrowth: 1.7,
-    delta: 0.5,
-  },
+});
+
+export const STATION_UPGRADE = Object.freeze({
+  maxLevel: 3,
+  baseCost: 55,
+  costGrowth: 1.85,
+  waitingCapacityByLevel: [
+    45,
+    70,
+    105,
+    150,
+  ],
+  demandBonusByLevel: [
+    0,
+    0.2,
+    0.45,
+    0.75,
+  ],
+  dwellReductionByLevel: [
+    0,
+    0.025,
+    0.055,
+    0.085,
+  ],
+  tierNames: [
+    'Stop',
+    'Shelter',
+    'Station',
+    'Hub',
+  ],
 });
 
 export const TRANSPORT_MODES = Object.freeze({
@@ -115,6 +140,50 @@ export const STOP_NAMES = Object.freeze({
     'Museum',
     'Harbor',
   ],
+  line3: [
+    'University',
+    'North Quarter',
+    'Hillcrest',
+    'Northgate',
+    'Meadow End',
+  ],
+  line4: [
+    'Harbor',
+    'Docklands',
+    'Eastgate',
+    'Stadium',
+    'Central',
+  ],
+});
+
+export const STATION_IDS = Object.freeze({
+  line1: [
+    'old-town',
+    'market-square',
+    'city-park',
+    'university',
+    'central',
+  ],
+  line2: [
+    'city-park',
+    'riverside',
+    'museum',
+    'harbor',
+  ],
+  line3: [
+    'university',
+    'north-quarter',
+    'hillcrest',
+    'northgate',
+    'meadow-end',
+  ],
+  line4: [
+    'harbor',
+    'docklands',
+    'eastgate',
+    'stadium',
+    'central',
+  ],
 });
 
 const GAME_MINUTES_PER_REAL_SECOND = 0.25;
@@ -141,6 +210,26 @@ const LINE_CONFIG = Object.freeze({
     demandPerStopPpm: 2.8,
     maxStops: ECONOMY.maxLine2Stops,
   },
+  line3: {
+    segmentLengthsKm: [
+      0.770856688271599,
+      0.7388566882715992,
+      0.6588566882715992,
+      0.5948566882715993,
+    ],
+    demandPerStopPpm: 3.1,
+    maxStops: ECONOMY.maxLine3Stops,
+  },
+  line4: {
+    segmentLengthsKm: [
+      0.738856688271599,
+      0.6748566882715991,
+      0.6588566882715992,
+      1.202856688271599,
+    ],
+    demandPerStopPpm: 3.4,
+    maxStops: ECONOMY.maxLine4Stops,
+  },
 });
 
 function createWaitingMatrix(maxStops) {
@@ -156,16 +245,20 @@ function createLineState(lineKey) {
   return {
     built: false,
     mode: 'bus',
-    stopCount: lineKey === 'line1' ? 1 : 0,
+    stopCount:
+      lineKey === 'line1'
+        ? 1
+        : 0,
     fleetCount: 0,
-    demandPerStopPpm: config.demandPerStopPpm,
-    waitingCapacityPassengers: lineKey === 'line1' ? 50 : 45,
-    waitingByStop: createWaitingMatrix(config.maxStops),
+    demandPerStopPpm:
+      config.demandPerStopPpm,
+    waitingByStop:
+      createWaitingMatrix(
+        config.maxStops,
+      ),
     queuePassengers: 0,
     currentAbandonmentPpm: 0,
     totalAbandonedPassengers: 0,
-    shelterLevel: 0,
-    catchmentLevel: 0,
     lastDeliveredPpm: 0,
     vehicles: [],
     nextVehicleId: 1,
@@ -173,6 +266,26 @@ function createLineState(lineKey) {
     lastPassengerEvent: null,
     passengerEvents: [],
   };
+}
+
+function createStationState() {
+  const ids =
+    new Set(
+      Object.values(
+        STATION_IDS,
+      ).flat(),
+    );
+
+  return Object.fromEntries(
+    [...ids].map(
+      (stationId) => [
+        stationId,
+        {
+          level: 0,
+        },
+      ],
+    ),
+  );
 }
 
 export function createInitialState() {
@@ -184,15 +297,19 @@ export function createInitialState() {
 
     city: createInitialCityState(),
 
+    stations:
+      createStationState(),
+
     line1: createLineState('line1'),
+    line2: createLineState('line2'),
+    line3: createLineState('line3'),
+    line4: createLineState('line4'),
 
     depot: {
       built: false,
       garageSlots: 4,
       level: 0,
     },
-
-    line2: createLineState('line2'),
 
     stats: {
       lifetimeRevenue: 0,
@@ -206,9 +323,213 @@ export function createInitialState() {
 }
 
 function getLine(state, lineKey) {
-  if (lineKey === 'line1') return state.line1;
-  if (lineKey === 'line2') return state.line2;
-  throw new Error(`Unknown line: ${lineKey}`);
+  if (
+    !LINE_CONFIG[lineKey]
+    || !state[lineKey]
+  ) {
+    throw new Error(
+      `Unknown line: ${lineKey}`,
+    );
+  }
+
+  return state[lineKey];
+}
+
+export function getStationId(
+  lineKey,
+  stopIndex,
+) {
+  const stationId =
+    STATION_IDS[lineKey]?.[
+      stopIndex
+    ];
+
+  if (!stationId) {
+    throw new Error(
+      `Unknown station: ${lineKey}:${stopIndex}`,
+    );
+  }
+
+  return stationId;
+}
+
+export function getStationName(
+  stationId,
+) {
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const index =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (index >= 0) {
+      return STOP_NAMES[lineKey][
+        index
+      ];
+    }
+  }
+
+  return stationId;
+}
+
+export function getStationLevel(
+  state,
+  stationId,
+) {
+  return (
+    state.stations?.[
+      stationId
+    ]?.level
+    ?? 0
+  );
+}
+
+export function getStationTierName(
+  state,
+  stationId,
+) {
+  return (
+    STATION_UPGRADE
+      .tierNames[
+        getStationLevel(
+          state,
+          stationId,
+        )
+      ]
+    ?? 'Stop'
+  );
+}
+
+export function getStationUpgradeCost(
+  state,
+  stationId,
+) {
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  return Math.round(
+    STATION_UPGRADE.baseCost
+    * STATION_UPGRADE.costGrowth
+      ** level,
+  );
+}
+
+export function getStationWaitingCapacity(
+  state,
+  stationId,
+) {
+  return (
+    STATION_UPGRADE
+      .waitingCapacityByLevel[
+        getStationLevel(
+          state,
+          stationId,
+        )
+      ]
+    ?? STATION_UPGRADE
+      .waitingCapacityByLevel[0]
+  );
+}
+
+export function getStopDemandPpm(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  const stationId =
+    getStationId(
+      lineKey,
+      stopIndex,
+    );
+
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  return (
+    line.demandPerStopPpm
+    + (
+      STATION_UPGRADE
+        .demandBonusByLevel[
+          level
+        ]
+      ?? 0
+    )
+  );
+}
+
+export function getStationServedLines(
+  state,
+  stationId,
+) {
+  return LINE_KEYS.filter(
+    (lineKey) => {
+      const line = state[lineKey];
+
+      if (!line?.built) {
+        return false;
+      }
+
+      const index =
+        STATION_IDS[lineKey]
+          .indexOf(stationId);
+
+      return (
+        index >= 0
+        && index < line.stopCount
+      );
+    },
+  );
+}
+
+export function isStationBuilt(
+  state,
+  stationId,
+) {
+  if (stationId === 'old-town') {
+    return true;
+  }
+
+  return LINE_KEYS.some(
+    (lineKey) => {
+      const line =
+        state[lineKey];
+
+      if (!line) {
+        return false;
+      }
+
+      const index =
+        STATION_IDS[lineKey]
+          .indexOf(stationId);
+
+      if (index < 0) {
+        return false;
+      }
+
+      if (lineKey === 'line1') {
+        return index < line.stopCount;
+      }
+
+      return (
+        line.built
+        && index < line.stopCount
+      );
+    },
+  );
 }
 
 function getLineConfig(lineKey) {
@@ -265,16 +586,58 @@ function getSegmentTravelMinutes(
   );
 }
 
-function getStopDwellMinutes(state, lineKey, stopIndex) {
-  const line = getLine(state, lineKey);
-  const mode = getMode(state, lineKey);
+function getStopDwellMinutes(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
+
+  const stationId =
+    getStationId(
+      lineKey,
+      stopIndex,
+    );
+
+  const level =
+    getStationLevel(
+      state,
+      stationId,
+    );
+
+  const dwellReduction =
+    STATION_UPGRADE
+      .dwellReductionByLevel[
+        level
+      ]
+    ?? 0;
+
   const isEndpoint =
     stopIndex === 0
-    || stopIndex === line.stopCount - 1;
+    || stopIndex
+      === line.stopCount - 1;
 
   return (
-    mode.dwellMinutes
-    + (isEndpoint ? mode.turnaroundMinutes / 2 : 0)
+    Math.max(
+      0.12,
+      mode.dwellMinutes
+      - dwellReduction,
+    )
+    + (
+      isEndpoint
+        ? mode.turnaroundMinutes / 2
+        : 0
+    )
   );
 }
 
@@ -334,7 +697,56 @@ export function addVehicleToLineState(state, lineKey) {
   return vehicle;
 }
 
+export function ensureStationRuntime(
+  state,
+) {
+  if (
+    !state.stations
+    || typeof state.stations
+      !== 'object'
+  ) {
+    state.stations =
+      createStationState();
+    return;
+  }
+
+  for (
+    const stationId
+    of new Set(
+      Object.values(
+        STATION_IDS,
+      ).flat(),
+    )
+  ) {
+    const previous =
+      state.stations[
+        stationId
+      ];
+
+    state.stations[
+      stationId
+    ] = {
+      level:
+        Number.isFinite(
+          previous?.level,
+        )
+          ? Math.max(
+            0,
+            Math.min(
+              STATION_UPGRADE.maxLevel,
+              Math.floor(
+                previous.level,
+              ),
+            ),
+          )
+          : 0,
+    };
+  }
+}
+
 export function ensureLineRuntime(state, lineKey) {
+  ensureStationRuntime(state);
+
   const line = getLine(state, lineKey);
   const maxStops = getMaxStops(lineKey);
 
@@ -402,20 +814,46 @@ export function ensureLineRuntime(state, lineKey) {
 }
 
 export function getLineDemandPpm(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) return 0;
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
+    return 0;
+  }
 
-  return (
-    line.stopCount
-    * line.demandPerStopPpm
-  );
+  let total = 0;
+
+  for (
+    let stopIndex = 0;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    total +=
+      getStopDemandPpm(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
 }
 
 export function getTotalDemandPpm(state) {
-  return (
-    getLineDemandPpm(state, 'line1')
-    + getLineDemandPpm(state, 'line2')
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + getLineDemandPpm(
+        state,
+        lineKey,
+      ),
+    0,
   );
 }
 
@@ -449,50 +887,139 @@ export function getRouteLengthKm(state, lineKey) {
     );
 }
 
-export function getLineOneWayMinutes(state, lineKey) {
-  const line = getLine(state, lineKey);
+function getBaseStopDwellMinutes(
+  state,
+  lineKey,
+  stopIndex,
+) {
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) {
+  const level =
+    getStationLevel(
+      state,
+      getStationId(
+        lineKey,
+        stopIndex,
+      ),
+    );
+
+  return Math.max(
+    0.12,
+    mode.dwellMinutes
+    - (
+      STATION_UPGRADE
+        .dwellReductionByLevel[
+          level
+        ]
+      ?? 0
+    ),
+  );
+}
+
+export function getLineOneWayMinutes(state, lineKey) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
     return 0;
   }
 
-  const mode = getMode(state, lineKey);
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
   const drivingMinutes =
-    getRouteLengthKm(state, lineKey)
+    getRouteLengthKm(
+      state,
+      lineKey,
+    )
     / mode.speedKph
     * 60;
 
-  const intermediateDwell =
-    Math.max(0, line.stopCount - 1)
-    * mode.dwellMinutes;
+  let dwellMinutes = 0;
+
+  for (
+    let stopIndex = 1;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    dwellMinutes +=
+      getBaseStopDwellMinutes(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
 
   return (
     drivingMinutes
-    + intermediateDwell
+    + dwellMinutes
     + mode.turnaroundMinutes / 2
   );
 }
 
 export function getLineCycleMinutes(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (!line.built || line.stopCount < 2) {
+  if (
+    !line.built
+    || line.stopCount < 2
+  ) {
     return 0;
   }
 
-  const mode = getMode(state, lineKey);
+  const mode =
+    getMode(
+      state,
+      lineKey,
+    );
 
   const drivingMinutes =
-    getRouteLengthKm(state, lineKey)
+    getRouteLengthKm(
+      state,
+      lineKey,
+    )
     / mode.speedKph
     * 60
     * 2;
 
-  const dwellMinutes =
-    Math.max(0, line.stopCount - 1)
-    * mode.dwellMinutes
-    * 2;
+  let dwellMinutes = 0;
+
+  for (
+    let stopIndex = 0;
+    stopIndex < line.stopCount;
+    stopIndex += 1
+  ) {
+    const visits =
+      stopIndex === 0
+      || stopIndex
+        === line.stopCount - 1
+        ? 1
+        : 2;
+
+    dwellMinutes +=
+      getBaseStopDwellMinutes(
+        state,
+        lineKey,
+        stopIndex,
+      ) * visits;
+  }
 
   return (
     drivingMinutes
@@ -556,38 +1083,82 @@ export function getLineCapacityPpm(state, lineKey) {
 }
 
 export function getNextStopCost(state, lineKey) {
-  const line = getLine(state, lineKey);
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
 
-  if (lineKey === 'line1') {
-    const purchasedStops =
-      Math.max(0, line.stopCount - 1);
+  const config = {
+    line1: {
+      base:
+        ECONOMY.line1StopBaseCost,
+      growth:
+        ECONOMY.line1StopCostGrowth,
+      includedStops: 1,
+    },
+    line2: {
+      base:
+        ECONOMY.line2StopBaseCost,
+      growth:
+        ECONOMY.line2StopCostGrowth,
+      includedStops: 2,
+    },
+    line3: {
+      base:
+        ECONOMY.line3StopBaseCost,
+      growth:
+        ECONOMY.line3StopCostGrowth,
+      includedStops: 2,
+    },
+    line4: {
+      base:
+        ECONOMY.line4StopBaseCost,
+      growth:
+        ECONOMY.line4StopCostGrowth,
+      includedStops: 2,
+    },
+  }[lineKey];
 
-    return Math.round(
-      ECONOMY.line1StopBaseCost
-      * ECONOMY.line1StopCostGrowth ** purchasedStops,
+  if (!config) {
+    throw new Error(
+      `Unknown line: ${lineKey}`,
     );
   }
 
-  const purchasedExtraStops =
-    Math.max(0, line.stopCount - 2);
+  const purchasedStops =
+    Math.max(
+      0,
+      line.stopCount
+      - config.includedStops,
+    );
 
   return Math.round(
-    ECONOMY.line2StopBaseCost
-    * ECONOMY.line2StopCostGrowth ** purchasedExtraStops,
+    config.base
+    * config.growth
+      ** purchasedStops,
   );
 }
 
 export function getGarageUsed(state) {
-  return (
-    state.line1.fleetCount
-    + state.line2.fleetCount
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + (
+        state[lineKey]
+          ?.fleetCount
+        ?? 0
+      ),
+    0,
   );
 }
 
 export function getVehiclePurchaseCost(state) {
   const starterVehicles =
-    (state.line1.built ? 1 : 0)
-    + (state.line2.built ? 1 : 0);
+    LINE_KEYS.filter(
+      (lineKey) =>
+        state[lineKey]?.built,
+    ).length;
 
   const purchasedVehicles = Math.max(
     0,
@@ -607,11 +1178,40 @@ export function canBuildDepot(state) {
   );
 }
 
-export function isLine1Stable(state) {
+export function isLineStable(
+  state,
+  lineKey,
+) {
+  const line =
+    getLine(
+      state,
+      lineKey,
+    );
+
   return (
-    state.line1.built
-    && getLineCapacityPpm(state, 'line1')
-      >= getLineDemandPpm(state, 'line1')
+    line.built
+    && getLineCapacityPpm(
+      state,
+      lineKey,
+    )
+      >= getLineDemandPpm(
+        state,
+        lineKey,
+      )
+  );
+}
+
+export function isLine1Stable(state) {
+  return isLineStable(
+    state,
+    'line1',
+  );
+}
+
+function hasFreeGarageSlot(state) {
+  return (
+    getGarageUsed(state)
+    < state.depot.garageSlots
   );
 }
 
@@ -621,34 +1221,52 @@ export function canUnlockLine2(state) {
     && state.depot.built
     && state.line1.stopCount
       >= ECONOMY.maxLine1Stops
-    && isLine1Stable(state)
-    && getGarageUsed(state)
-      < state.depot.garageSlots
+    && isLineStable(
+      state,
+      'line1',
+    )
+    && hasFreeGarageSlot(state)
+  );
+}
+
+export function canUnlockLine3(state) {
+  return (
+    !state.line3.built
+    && state.depot.built
+    && state.line2.built
+    && state.line2.stopCount
+      >= ECONOMY.maxLine2Stops
+    && isLineStable(
+      state,
+      'line2',
+    )
+    && hasFreeGarageSlot(state)
+  );
+}
+
+export function canUnlockLine4(state) {
+  return (
+    !state.line4.built
+    && state.depot.built
+    && state.line3.built
+    && state.line3.stopCount
+      >= ECONOMY.maxLine3Stops
+    && isLineStable(
+      state,
+      'line3',
+    )
+    && hasFreeGarageSlot(state)
   );
 }
 
 function getUpgradeLevel(state, type) {
-  if (type === 'shelter1') {
-    return state.line1.shelterLevel;
-  }
-
-  if (type === 'catchment1') {
-    return state.line1.catchmentLevel;
-  }
-
   if (type === 'depot') {
     return state.depot.level;
   }
 
-  if (type === 'shelter2') {
-    return state.line2.shelterLevel;
-  }
-
-  if (type === 'catchment2') {
-    return state.line2.catchmentLevel;
-  }
-
-  throw new Error(`Unknown upgrade type: ${type}`);
+  throw new Error(
+    `Unknown upgrade type: ${type}`,
+  );
 }
 
 export function getUpgradeCost(state, type) {
@@ -678,6 +1296,84 @@ export function getStopWaitingPassengers(state, lineKey, stopIndex) {
       (sum, value) => sum + (Number.isFinite(value) ? value : 0),
       0,
     );
+}
+
+export function getStationWaitingPassengers(
+  state,
+  stationId,
+) {
+  let total = 0;
+
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const line = state[lineKey];
+
+    if (!line?.built) {
+      continue;
+    }
+
+    const stopIndex =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (
+      stopIndex < 0
+      || stopIndex
+        >= line.stopCount
+    ) {
+      continue;
+    }
+
+    total +=
+      getStopWaitingPassengers(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
+}
+
+export function getStationDemandPpm(
+  state,
+  stationId,
+) {
+  let total = 0;
+
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    const line = state[lineKey];
+
+    if (!line?.built) {
+      continue;
+    }
+
+    const stopIndex =
+      STATION_IDS[lineKey]
+        .indexOf(stationId);
+
+    if (
+      stopIndex < 0
+      || stopIndex
+        >= line.stopCount
+    ) {
+      continue;
+    }
+
+    total +=
+      getStopDemandPpm(
+        state,
+        lineKey,
+        stopIndex,
+      );
+  }
+
+  return total;
 }
 
 export function getLineWaitingPassengers(state, lineKey) {
@@ -721,9 +1417,15 @@ export function getLineOnboardPassengers(state, lineKey) {
 }
 
 export function getDeliveredPassengersPpm(state) {
-  return (
-    state.line1.lastDeliveredPpm
-    + state.line2.lastDeliveredPpm
+  return LINE_KEYS.reduce(
+    (total, lineKey) =>
+      total
+      + (
+        state[lineKey]
+          ?.lastDeliveredPpm
+        ?? 0
+      ),
+    0,
   );
 }
 
@@ -732,41 +1434,70 @@ export function getLastFareEventValue(state) {
 }
 
 export function getAverageWaitMinutes(state) {
-  const demand1 =
-    getLineDemandPpm(state, 'line1');
+  const demands =
+    LINE_KEYS.map(
+      (lineKey) => ({
+        lineKey,
+        demand:
+          getLineDemandPpm(
+            state,
+            lineKey,
+          ),
+      }),
+    );
 
-  const demand2 =
-    getLineDemandPpm(state, 'line2');
+  const totalDemand =
+    demands.reduce(
+      (total, entry) =>
+        total + entry.demand,
+      0,
+    );
 
-  const totalDemand = demand1 + demand2;
+  if (totalDemand <= 0) {
+    return 0;
+  }
 
-  if (totalDemand <= 0) return 0;
+  let weighted = 0;
 
-  const waitForLine = (lineKey, demand) => {
-    if (demand <= 0) return 0;
+  for (
+    const {
+      lineKey,
+      demand,
+    }
+    of demands
+  ) {
+    if (demand <= 0) {
+      continue;
+    }
 
-    const line = getLine(state, lineKey);
+    const line =
+      getLine(
+        state,
+        lineKey,
+      );
 
     const scheduled =
-      getLineHeadwayMinutes(state, lineKey) / 2;
+      getLineHeadwayMinutes(
+        state,
+        lineKey,
+      ) / 2;
 
-    const delivered = Math.max(
-      0.1,
-      line.lastDeliveredPpm,
-    );
+    const delivered =
+      Math.max(
+        0.1,
+        line.lastDeliveredPpm,
+      );
 
-    return (
+    weighted += (
       scheduled
-      + line.queuePassengers / delivered
-    );
-  };
+      + line.queuePassengers
+        / delivered
+    ) * demand;
+  }
 
   return Math.min(
     120,
-    (
-      waitForLine('line1', demand1) * demand1
-      + waitForLine('line2', demand2) * demand2
-    ) / totalDemand,
+    weighted / totalDemand,
   );
 }
 
@@ -776,8 +1507,16 @@ export function getAbandonmentPercent(state) {
   if (demand <= 0) return 0;
 
   const abandonment =
-    state.line1.currentAbandonmentPpm
-    + state.line2.currentAbandonmentPpm;
+    LINE_KEYS.reduce(
+      (total, lineKey) =>
+        total
+        + (
+          state[lineKey]
+            ?.currentAbandonmentPpm
+          ?? 0
+        ),
+      0,
+    );
 
   return Math.min(
     100,
@@ -786,25 +1525,33 @@ export function getAbandonmentPercent(state) {
 }
 
 export function getBottleneck(state) {
-  const demand1 =
-    getLineDemandPpm(state, 'line1');
-
-  if (
-    demand1
-    > getLineCapacityPpm(state, 'line1')
+  for (
+    let index = 0;
+    index < LINE_KEYS.length;
+    index += 1
   ) {
-    return 'line-1';
-  }
+    const lineKey =
+      LINE_KEYS[index];
 
-  const demand2 =
-    getLineDemandPpm(state, 'line2');
+    const line =
+      state[lineKey];
 
-  if (
-    state.line2.built
-    && demand2
-      > getLineCapacityPpm(state, 'line2')
-  ) {
-    return 'line-2';
+    if (!line?.built) {
+      continue;
+    }
+
+    if (
+      getLineDemandPpm(
+        state,
+        lineKey,
+      )
+      > getLineCapacityPpm(
+        state,
+        lineKey,
+      )
+    ) {
+      return `line-${index + 1}`;
+    }
   }
 
   return state.line1.built
@@ -824,10 +1571,6 @@ function generatePassengers(
     return;
   }
 
-  const perDestinationRate =
-    line.demandPerStopPpm
-    / (line.stopCount - 1);
-
   let abandoned = 0;
 
   for (
@@ -835,6 +1578,17 @@ function generatePassengers(
     origin < line.stopCount;
     origin += 1
   ) {
+    const perDestinationRate =
+      getStopDemandPpm(
+        state,
+        lineKey,
+        origin,
+      )
+      / Math.max(
+        1,
+        line.stopCount - 1,
+      );
+
     for (
       let destination = 0;
       destination < line.stopCount;
@@ -853,16 +1607,28 @@ function generatePassengers(
         origin,
       );
 
+    const stationId =
+      getStationId(
+        lineKey,
+        origin,
+      );
+
+    const waitingCapacity =
+      getStationWaitingCapacity(
+        state,
+        stationId,
+      );
+
     if (
       waiting
-      > line.waitingCapacityPassengers
+      > waitingCapacity
     ) {
       const keepRatio =
-        line.waitingCapacityPassengers
+        waitingCapacity
         / waiting;
 
       const excess =
-        waiting - line.waitingCapacityPassengers;
+        waiting - waitingCapacity;
 
       abandoned += excess;
 
@@ -1270,17 +2036,16 @@ export function advanceSimulation(
 
   state.elapsedSeconds += deltaSeconds;
 
-  simulateLine(
-    state,
-    'line1',
-    deltaMinutes,
-  );
-
-  simulateLine(
-    state,
-    'line2',
-    deltaMinutes,
-  );
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    simulateLine(
+      state,
+      lineKey,
+      deltaMinutes,
+    );
+  }
 
   advanceCitySimulation(
     state,

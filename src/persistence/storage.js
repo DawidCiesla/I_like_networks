@@ -5,9 +5,13 @@ import {
 import {
   ECONOMY,
   GAME_VERSION,
+  LINE_KEYS,
+  STATION_IDS,
+  STATION_UPGRADE,
   createInitialState,
   ensureCityRuntime,
   ensureLineRuntime,
+  ensureStationRuntime,
   initializeLineService,
 } from '../simulation/model.js';
 
@@ -115,6 +119,115 @@ function restoreBusEraLine(
   }
 }
 
+function migrateLegacyStationLevels(
+  next,
+  previous,
+) {
+  ensureStationRuntime(next);
+
+  for (
+    const lineKey
+    of ['line1', 'line2']
+  ) {
+    const previousLine =
+      previous[lineKey];
+
+    const nextLine =
+      next[lineKey];
+
+    if (
+      !previousLine
+      || !nextLine
+    ) {
+      continue;
+    }
+
+    const legacyLevel =
+      Math.min(
+        STATION_UPGRADE.maxLevel,
+        Math.max(
+          0,
+          previousLine.shelterLevel
+            ?? 0,
+          previousLine.catchmentLevel
+            ?? 0,
+        ),
+      );
+
+    if (legacyLevel <= 0) {
+      continue;
+    }
+
+    for (
+      let stopIndex = 0;
+      stopIndex
+        < nextLine.stopCount;
+      stopIndex += 1
+    ) {
+      const stationId =
+        STATION_IDS[lineKey][
+          stopIndex
+        ];
+
+      if (!stationId) {
+        continue;
+      }
+
+      next.stations[
+        stationId
+      ].level =
+        Math.max(
+          next.stations[
+            stationId
+          ].level,
+          legacyLevel,
+        );
+    }
+  }
+
+  if (
+    previous.stations
+    && typeof previous.stations
+      === 'object'
+  ) {
+    for (
+      const [
+        stationId,
+        station,
+      ]
+      of Object.entries(
+        previous.stations,
+      )
+    ) {
+      if (
+        !next.stations[
+          stationId
+        ]
+      ) {
+        continue;
+      }
+
+      next.stations[
+        stationId
+      ].level =
+        Math.max(
+          next.stations[
+            stationId
+          ].level,
+          Math.min(
+            STATION_UPGRADE.maxLevel,
+            Math.max(
+              0,
+              Math.floor(
+                station?.level ?? 0,
+              ),
+            ),
+          ),
+        );
+    }
+  }
+}
+
 function migrateBusEraV6(previous) {
   const next = copyCommon(
     previous,
@@ -166,8 +279,17 @@ function migrateBusEraV6(previous) {
 
   next.depot.garageSlots = Math.max(
     next.depot.garageSlots,
-    next.line1.fleetCount
-      + next.line2.fleetCount,
+    LINE_KEYS.reduce(
+      (total, lineKey) =>
+        total
+        + next[lineKey].fleetCount,
+      0,
+    ),
+  );
+
+  migrateLegacyStationLevels(
+    next,
+    previous,
   );
 
   return next;
@@ -348,7 +470,8 @@ function parseStored(raw) {
   }
 
   if (
-    parsed.version === 10
+    parsed.version === 11
+    || parsed.version === 10
     || parsed.version === 9
     || parsed.version === 8
     || parsed.version === 7
@@ -369,11 +492,24 @@ function parseStored(raw) {
 }
 
 function prepareLoadedState(state) {
-  ensureLineRuntime(state, 'line1');
-  ensureLineRuntime(state, 'line2');
+  ensureStationRuntime(state);
+
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    ensureLineRuntime(
+      state,
+      lineKey,
+    );
+  }
+
   ensureCityRuntime(state);
 
-  for (const lineKey of ['line1', 'line2']) {
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
     state[lineKey].passengerEvents = [];
     state[lineKey].lastPassengerEvent = null;
   }

@@ -2,7 +2,7 @@ import {
   generateCityMasterPlan,
 } from './planGenerator.js';
 
-export const CITY_VERSION = 4;
+export const CITY_VERSION = 5;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
@@ -39,15 +39,15 @@ function transportUnlockSatisfied(
   }
 
   const line =
-    unlock.lineKey === 'line1'
-      ? state.line1
-      : state.line2;
+    state[
+      unlock.lineKey
+    ];
 
   if (!line) return false;
 
   if (
-    unlock.lineKey === 'line2'
-    && !state.line2.built
+    unlock.lineKey !== 'line1'
+    && !line.built
   ) {
     return false;
   }
@@ -62,17 +62,25 @@ function districtShouldBeActive(
   state,
   district,
 ) {
-  if (district.lineKey === 'line1') {
-    return (
-      state.line1.stopCount
-      > district.stopIndex
-    );
+  const line =
+    state[
+      district.lineKey
+    ];
+
+  if (!line) {
+    return false;
+  }
+
+  if (
+    district.lineKey !== 'line1'
+    && !line.built
+  ) {
+    return false;
   }
 
   return (
-    state.line2.built
-    && state.line2.stopCount
-      > district.stopIndex
+    line.stopCount
+    > district.stopIndex
   );
 }
 
@@ -81,9 +89,10 @@ function getDistrictLine(
   district,
 ) {
   return (
-    district.lineKey === 'line1'
-      ? state.line1
-      : state.line2
+    state[
+      district.lineKey
+    ]
+    ?? state.line1
   );
 }
 
@@ -1084,6 +1093,10 @@ function transportSyncKey(
     state.line1?.built ?? false,
     state.line2?.stopCount ?? 0,
     state.line2?.built ?? false,
+    state.line3?.stopCount ?? 0,
+    state.line3?.built ?? false,
+    state.line4?.stopCount ?? 0,
+    state.line4?.built ?? false,
     state.depot?.built ?? false,
   ].join(':');
 }

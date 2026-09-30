@@ -1,9 +1,14 @@
 import {
   ECONOMY,
+  LINE_KEYS,
+  STATION_IDS,
+  STATION_UPGRADE,
   STOP_NAMES,
   TRANSPORT_MODES,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   getAverageWaitMinutes,
   getBottleneck,
   getDeliveredPassengersPpm,
@@ -17,8 +22,18 @@ import {
   getLineOneWayMinutes,
   getLineWaitingPassengers,
   getNextStopCost,
+  getStationDemandPpm,
+  getStationLevel,
+  getStationName,
+  getStationServedLines,
+  getStationTierName,
+  getStationUpgradeCost,
+  getStationWaitingCapacity,
+  getStationWaitingPassengers,
+  getStopDemandPpm,
   getUpgradeCost,
   getVehiclePurchaseCost,
+  isStationBuilt,
 } from '../simulation/model.js';
 
 const compact = (value) => {
@@ -42,24 +57,22 @@ const formatMinutes = (value) =>
 
 export class Hud {
   constructor({
-    onBuildStop1,
-    onBuildStop2,
+    onBuildStop,
     onBuildDepot,
-    onBuildLine2,
-    onAddVehicle1,
-    onAddVehicle2,
+    onBuildLine,
+    onAddVehicle,
+    onUpgradeStation,
     onUpgrade,
     onSpeed,
     onReset,
     onInspectorClose,
   }) {
     this.handlers = {
-      onBuildStop1,
-      onBuildStop2,
+      onBuildStop,
       onBuildDepot,
-      onBuildLine2,
-      onAddVehicle1,
-      onAddVehicle2,
+      onBuildLine,
+      onAddVehicle,
+      onUpgradeStation,
       onUpgrade,
     };
 
@@ -106,18 +119,24 @@ export class Hud {
         const command =
           button.dataset.command;
 
-        if (command === 'build-stop-1') {
-          this.handlers.onBuildStop1();
-        } else if (command === 'build-stop-2') {
-          this.handlers.onBuildStop2();
+        if (command === 'build-stop') {
+          this.handlers.onBuildStop(
+            button.dataset.line,
+          );
         } else if (command === 'build-depot') {
           this.handlers.onBuildDepot();
-        } else if (command === 'build-line-2') {
-          this.handlers.onBuildLine2();
-        } else if (command === 'add-vehicle-1') {
-          this.handlers.onAddVehicle1();
-        } else if (command === 'add-vehicle-2') {
-          this.handlers.onAddVehicle2();
+        } else if (command === 'build-line') {
+          this.handlers.onBuildLine(
+            button.dataset.line,
+          );
+        } else if (command === 'add-vehicle') {
+          this.handlers.onAddVehicle(
+            button.dataset.line,
+          );
+        } else if (command === 'upgrade-station') {
+          this.handlers.onUpgradeStation(
+            button.dataset.station,
+          );
         } else if (command === 'upgrade') {
           this.handlers.onUpgrade(
             button.dataset.type,
@@ -252,6 +271,8 @@ export class Hud {
           (action) => [
             action.command,
             action.type ?? '',
+            action.lineKey ?? '',
+            action.stationId ?? '',
             action.title,
             action.detail,
           ],
@@ -360,6 +381,16 @@ export class Hud {
           action.type;
       }
 
+      if (action.lineKey) {
+        button.dataset.line =
+          action.lineKey;
+      }
+
+      if (action.stationId) {
+        button.dataset.station =
+          action.stationId;
+      }
+
       const copy =
         document.createElement('span');
 
@@ -393,123 +424,54 @@ export class Hud {
   }
 
   #getInspectorView(state, selection) {
-    if (selection === 'line1') {
-      return this.#getLineView(
+    if (
+      selection.startsWith(
+        'station:',
+      )
+    ) {
+      return this.#getStationView(
         state,
-        'line1',
+        selection.slice(
+          'station:'.length,
+        ),
       );
     }
 
-    if (selection === 'line2') {
-      return this.#getLineView(
+    if (
+      selection.startsWith(
+        'futureStop:',
+      )
+    ) {
+      return this.#getFutureStopView(
         state,
-        'line2',
+        selection.slice(
+          'futureStop:'.length,
+        ),
       );
     }
 
-    if (selection === 'futureStop1') {
-      const index =
-        state.line1.stopCount;
-
-      return {
-        kicker: 'EXPANSION',
-        title:
-          STOP_NAMES.line1[index],
-        subtitle:
-          'Extend Bus Line 1 to this stop',
-        stats: [
-          {
-            label: 'LINE',
-            value: '1 BUS',
-          },
-          {
-            label: 'NEW SEGMENT',
-            value: '+0.9 km',
-          },
-          {
-            label: 'NEW DEMAND',
-            value:
-              `+${state.line1.demandPerStopPpm.toFixed(1)} pax/min`,
-          },
-          {
-            label: 'AFTER BUILD',
-            value:
-              state.line1.stopCount === 1
-                ? 'SERVICE STARTS'
-                : 'LINE EXTENDS',
-          },
-        ],
-        actions: [
-          {
-            command: 'build-stop-1',
-            title: 'Build stop',
-            detail:
-              state.line1.stopCount === 1
-                ? 'Starts Line 1 with one real bus; fares are paid only when passengers arrive'
-                : 'Extends the route and creates another origin/destination',
-            costLabel: money(
-              getNextStopCost(
-                state,
-                'line1',
-              ),
-            ),
-            disabled:
-              state.money
-              < getNextStopCost(
-                state,
-                'line1',
-              ),
-          },
-        ],
-      };
+    if (
+      selection.startsWith(
+        'futureLine:',
+      )
+    ) {
+      return this.#getFutureLineView(
+        state,
+        selection.slice(
+          'futureLine:'.length,
+        ),
+      );
     }
 
-    if (selection === 'futureStop2') {
-      const index =
-        state.line2.stopCount;
-
-      return {
-        kicker: 'EXPANSION',
-        title:
-          STOP_NAMES.line2[index],
-        subtitle:
-          'Extend Bus Line 2 to this stop',
-        stats: [
-          {
-            label: 'LINE',
-            value: '2 BUS',
-          },
-          {
-            label: 'NEW SEGMENT',
-            value: '+0.8 km',
-          },
-          {
-            label: 'NEW DEMAND',
-            value:
-              `+${state.line2.demandPerStopPpm.toFixed(1)} pax/min`,
-          },
-        ],
-        actions: [
-          {
-            command: 'build-stop-2',
-            title: 'Build stop',
-            detail:
-              'Extends Line 2 and creates new passenger trips',
-            costLabel: money(
-              getNextStopCost(
-                state,
-                'line2',
-              ),
-            ),
-            disabled:
-              state.money
-              < getNextStopCost(
-                state,
-                'line2',
-              ),
-          },
-        ],
-      };
+    if (
+      LINE_KEYS.includes(
+        selection,
+      )
+    ) {
+      return this.#getLineView(
+        state,
+        selection,
+      );
     }
 
     if (selection === 'futureDepot') {
@@ -551,52 +513,352 @@ export class Hud {
     }
 
     if (selection === 'depot') {
-      return this.#getDepotView(state);
-    }
-
-    if (selection === 'futureLine2') {
-      return {
-        kicker: 'NEW SERVICE',
-        title: 'Bus Line 2',
-        subtitle:
-          'City Park → Riverside',
-        stats: [
-          {
-            label: 'MODE',
-            value: 'BUS',
-          },
-          {
-            label: 'STARTER FLEET',
-            value: '1 bus',
-          },
-          {
-            label: 'STARTER STOPS',
-            value: '2',
-          },
-          {
-            label: 'REQUIRES',
-            value: 'FREE DEPOT SLOT',
-          },
-        ],
-        actions: [
-          {
-            command: 'build-line-2',
-            title: 'Open Bus Line 2',
-            detail:
-              'Creates a second passenger service with one physical starter bus',
-            costLabel: money(
-              ECONOMY.line2BuildCost,
-            ),
-            disabled:
-              state.money
-                < ECONOMY.line2BuildCost
-              || !canUnlockLine2(state),
-          },
-        ],
-      };
+      return this.#getDepotView(
+        state,
+      );
     }
 
     return null;
+  }
+
+  #getStationView(
+    state,
+    stationId,
+  ) {
+    if (
+      !isStationBuilt(
+        state,
+        stationId,
+      )
+    ) {
+      return null;
+    }
+
+    const level =
+      getStationLevel(
+        state,
+        stationId,
+      );
+
+    const tier =
+      getStationTierName(
+        state,
+        stationId,
+      );
+
+    const servedLines =
+      getStationServedLines(
+        state,
+        stationId,
+      );
+
+    const waiting =
+      getStationWaitingPassengers(
+        state,
+        stationId,
+      );
+
+    const capacity =
+      getStationWaitingCapacity(
+        state,
+        stationId,
+      );
+
+    const demand =
+      getStationDemandPpm(
+        state,
+        stationId,
+      );
+
+    const lineLabel =
+      servedLines.length > 0
+        ? servedLines
+          .map(
+            (lineKey) =>
+              `L${lineKey.replace('line', '')}`,
+          )
+          .join(' · ')
+        : 'NOT IN SERVICE';
+
+    const actions = [];
+
+    if (
+      level
+      < STATION_UPGRADE.maxLevel
+    ) {
+      const nextTier =
+        STATION_UPGRADE
+          .tierNames[
+            level + 1
+          ];
+
+      actions.push({
+        command:
+          'upgrade-station',
+        stationId,
+        title:
+          `Upgrade to ${nextTier}`,
+        detail:
+          'More waiting space, slightly faster dwell and a larger local catchment',
+        costLabel:
+          money(
+            getStationUpgradeCost(
+              state,
+              stationId,
+            ),
+          ),
+        disabled:
+          state.money
+          < getStationUpgradeCost(
+            state,
+            stationId,
+          ),
+      });
+    }
+
+    return {
+      kicker: 'STATION',
+      title:
+        getStationName(
+          stationId,
+        ),
+      subtitle:
+        `${tier} · ${lineLabel}`,
+      stats: [
+        {
+          label: 'LEVEL',
+          value:
+            `${level} / ${STATION_UPGRADE.maxLevel}`,
+        },
+        {
+          label: 'SERVES',
+          value:
+            lineLabel,
+        },
+        {
+          label: 'WAITING',
+          value:
+            `${waiting.toFixed(
+              waiting < 10 ? 1 : 0,
+            )} pax`,
+          className:
+            waiting > capacity * 0.7
+              ? 'metric-warning'
+              : '',
+        },
+        {
+          label: 'QUEUE CAP.',
+          value:
+            `${capacity} pax / line`,
+        },
+        {
+          label: 'LOCAL DEMAND',
+          value:
+            servedLines.length > 0
+              ? `${demand.toFixed(1)} pax/min`
+              : '—',
+        },
+      ],
+      actions,
+    };
+  }
+
+  #getFutureStopView(
+    state,
+    lineKey,
+  ) {
+    if (
+      !LINE_KEYS.includes(
+        lineKey,
+      )
+    ) {
+      return null;
+    }
+
+    const line =
+      state[lineKey];
+
+    const index =
+      line.stopCount;
+
+    const name =
+      STOP_NAMES[lineKey]?.[
+        index
+      ];
+
+    const stationId =
+      STATION_IDS[lineKey]?.[
+        index
+      ];
+
+    if (
+      !name
+      || !stationId
+    ) {
+      return null;
+    }
+
+    const lineNumber =
+      lineKey.replace(
+        'line',
+        '',
+      );
+
+    const existingStation =
+      isStationBuilt(
+        state,
+        stationId,
+      );
+
+    const cost =
+      getNextStopCost(
+        state,
+        lineKey,
+      );
+
+    return {
+      kicker: 'EXPANSION',
+      title: name,
+      subtitle:
+        existingStation
+          ? `Connect Bus Line ${lineNumber} to this existing interchange`
+          : `Extend Bus Line ${lineNumber} to this stop`,
+      stats: [
+        {
+          label: 'LINE',
+          value:
+            `${lineNumber} BUS`,
+        },
+        {
+          label: 'STATION',
+          value:
+            existingStation
+              ? 'EXISTING HUB'
+              : 'NEW',
+        },
+        {
+          label: 'NEW DEMAND',
+          value:
+            `+${getStopDemandPpm(
+              state,
+              lineKey,
+              index,
+            ).toFixed(1)} pax/min`,
+        },
+        {
+          label: 'AFTER BUILD',
+          value:
+            line.stopCount <= 1
+              ? 'SERVICE STARTS'
+              : 'LINE EXTENDS',
+        },
+      ],
+      actions: [
+        {
+          command: 'build-stop',
+          lineKey,
+          title:
+            existingStation
+              ? 'Connect station'
+              : 'Build stop',
+          detail:
+            existingStation
+              ? 'Extends the route into an already developed interchange'
+              : 'Extends the route and activates another district',
+          costLabel:
+            money(cost),
+          disabled:
+            state.money < cost,
+        },
+      ],
+    };
+  }
+
+  #getFutureLineView(
+    state,
+    lineKey,
+  ) {
+    const definitions = {
+      line2: {
+        unlocked:
+          canUnlockLine2(state),
+        cost:
+          ECONOMY.line2BuildCost,
+        previous: 'Line 1',
+      },
+      line3: {
+        unlocked:
+          canUnlockLine3(state),
+        cost:
+          ECONOMY.line3BuildCost,
+        previous: 'Line 2',
+      },
+      line4: {
+        unlocked:
+          canUnlockLine4(state),
+        cost:
+          ECONOMY.line4BuildCost,
+        previous: 'Line 3',
+      },
+    };
+
+    const definition =
+      definitions[lineKey];
+
+    if (!definition) {
+      return null;
+    }
+
+    const lineNumber =
+      lineKey.replace(
+        'line',
+        '',
+      );
+
+    return {
+      kicker: 'NEW SERVICE',
+      title:
+        `Bus Line ${lineNumber}`,
+      subtitle:
+        `${STOP_NAMES[lineKey][0]} → ${STOP_NAMES[lineKey][1]}`,
+      stats: [
+        {
+          label: 'MODE',
+          value: 'BUS',
+        },
+        {
+          label: 'STARTER FLEET',
+          value: '1 bus',
+        },
+        {
+          label: 'STARTER STOPS',
+          value: '2',
+        },
+        {
+          label: 'REQUIRES',
+          value:
+            `${definition.previous} stable + garage slot`,
+        },
+      ],
+      actions: [
+        {
+          command: 'build-line',
+          lineKey,
+          title:
+            `Open Bus Line ${lineNumber}`,
+          detail:
+            'Creates a new physical service and opens fresh city growth corridors',
+          costLabel:
+            money(
+              definition.cost,
+            ),
+          disabled:
+            state.money
+              < definition.cost
+            || !definition.unlocked,
+        },
+      ],
+    };
   }
 
   #getLineView(state, lineKey) {
@@ -613,7 +875,12 @@ export class Hud {
     }
 
     const lineNumber =
-      isLine1 ? 1 : 2;
+      Number(
+        lineKey.replace(
+          'line',
+          '',
+        ),
+      );
 
     const demand =
       getLineDemandPpm(
@@ -639,41 +906,7 @@ export class Hud {
         lineKey,
       );
 
-    const mode =
-      TRANSPORT_MODES[line.mode];
-
     const actions = [];
-
-    if (line.built) {
-      actions.push(
-        this.#upgradeAction(
-          state,
-          isLine1
-            ? 'shelter1'
-            : 'shelter2',
-          'Improve stops',
-          '+30 waiting spaces at each stop',
-        ),
-      );
-    }
-
-    const catchmentUnlocked =
-      isLine1
-        ? line.stopCount >= 4
-        : line.stopCount >= 3;
-
-    if (catchmentUnlocked) {
-      actions.push(
-        this.#upgradeAction(
-          state,
-          isLine1
-            ? 'catchment1'
-            : 'catchment2',
-          'Expand catchment',
-          '+0.5 pax/min generated at every stop',
-        ),
-      );
-    }
 
     return {
       kicker: 'SERVICE',
@@ -752,54 +985,59 @@ export class Hud {
       getGarageUsed(state);
 
     const vehicleCost =
-      getVehiclePurchaseCost(state);
+      getVehiclePurchaseCost(
+        state,
+      );
 
     const garageFull =
-      used >= state.depot.garageSlots;
+      used
+      >= state.depot.garageSlots;
 
-    const line1Full =
-      state.line1.fleetCount
-      >= ECONOMY.maxVehiclesPerLine;
+    const actions = [];
 
-    const line2Full =
-      state.line2.fleetCount
-      >= ECONOMY.maxVehiclesPerLine;
+    for (
+      const lineKey
+      of LINE_KEYS
+    ) {
+      const line =
+        state[lineKey];
 
-    const actions = [
-      {
-        command: 'add-vehicle-1',
-        title: 'Buy bus for Line 1',
+      if (!line?.built) {
+        continue;
+      }
+
+      const lineNumber =
+        lineKey.replace(
+          'line',
+          '',
+        );
+
+      const lineFull =
+        line.fleetCount
+        >= ECONOMY
+          .maxVehiclesPerLine;
+
+      actions.push({
+        command:
+          'add-vehicle',
+        lineKey,
+        title:
+          `Buy bus for Line ${lineNumber}`,
         detail:
           'Adds a real bus to the route and increases departures',
         costLabel:
-          line1Full
+          lineFull
             ? 'MAX'
             : garageFull
               ? 'GARAGE FULL'
-              : money(vehicleCost),
+              : money(
+                vehicleCost,
+              ),
         disabled:
-          line1Full
+          lineFull
           || garageFull
-          || state.money < vehicleCost,
-      },
-    ];
-
-    if (state.line2.built) {
-      actions.push({
-        command: 'add-vehicle-2',
-        title: 'Buy bus for Line 2',
-        detail:
-          'Adds a real bus to Line 2',
-        costLabel:
-          line2Full
-            ? 'MAX'
-            : garageFull
-              ? 'GARAGE FULL'
-              : money(vehicleCost),
-        disabled:
-          line2Full
-          || garageFull
-          || state.money < vehicleCost,
+          || state.money
+            < vehicleCost,
       });
     }
 
@@ -808,9 +1046,21 @@ export class Hud {
         state,
         'depot',
         'Expand garage',
-        '+2 bus storage slots',
+        '+4 bus storage slots',
       ),
     );
+
+    const lineStats =
+      LINE_KEYS.map(
+        (lineKey, index) => ({
+          label:
+            `LINE ${index + 1}`,
+          value:
+            state[lineKey]?.built
+              ? `${state[lineKey].fleetCount} buses`
+              : 'LOCKED',
+        }),
+      );
 
     return {
       kicker: 'FACILITY',
@@ -827,18 +1077,7 @@ export class Hud {
               ? 'metric-warning'
               : '',
         },
-        {
-          label: 'LINE 1',
-          value:
-            `${state.line1.fleetCount} buses`,
-        },
-        {
-          label: 'LINE 2',
-          value:
-            state.line2.built
-              ? `${state.line2.fleetCount} buses`
-              : 'LOCKED',
-        },
+        ...lineStats,
         {
           label: 'NEXT BUS',
           value:
@@ -875,26 +1114,57 @@ export class Hud {
     }
 
     if (!state.depot.built) {
-      return `${state.line1.stopCount} / 5 STOPS · DEPOT LOCKED`;
+      return (
+        `${state.line1.stopCount} / ${ECONOMY.maxLine1Stops} STOPS · DEPOT LOCKED`
+      );
     }
 
-    if (!state.line2.built) {
+    const builtLines =
+      LINE_KEYS.filter(
+        (lineKey) =>
+          state[lineKey]?.built,
+      ).length;
+
+    const nextUnlocks = [
+      {
+        lineKey: 'line2',
+        canUnlock:
+          canUnlockLine2(state),
+      },
+      {
+        lineKey: 'line3',
+        canUnlock:
+          canUnlockLine3(state),
+      },
+      {
+        lineKey: 'line4',
+        canUnlock:
+          canUnlockLine4(state),
+      },
+    ];
+
+    for (
+      const [index, entry]
+      of nextUnlocks.entries()
+    ) {
       if (
-        state.line1.stopCount
-          >= ECONOMY.maxLine1Stops
-        && getBottleneck(state) === 'none'
-        && getGarageUsed(state)
-          >= state.depot.garageSlots
+        !state[entry.lineKey].built
       ) {
-        return 'EXPAND DEPOT FOR LINE 2';
-      }
+        if (entry.canUnlock) {
+          return (
+            `LINE ${index + 2} UNLOCKED`
+          );
+        }
 
-      return canUnlockLine2(state)
-        ? 'LINE 2 UNLOCKED'
-        : `${state.line1.stopCount} / 5 STOPS · BUILD LINE 1`;
+        return (
+          `${builtLines} LINE${builtLines === 1 ? '' : 'S'} · ${getGarageUsed(state)} BUSES`
+        );
+      }
     }
 
-    return `2 LINES · ${getGarageUsed(state)} BUSES`;
+    return (
+      `4 LINES · ${getGarageUsed(state)} BUSES`
+    );
   }
 
   #renderObjective(state) {
@@ -903,7 +1173,7 @@ export class Hud {
 
     if (!state.line1.built) {
       this.el.objective.textContent =
-        'Buy Market Square. Passengers will wait, board the bus and pay only after arriving.';
+        'Buy Market Square. Passengers pay after completing a real trip.';
       return;
     }
 
@@ -911,7 +1181,7 @@ export class Hud {
       state.line1.stopCount < 3
     ) {
       this.el.objective.textContent =
-        'Watch passengers board, ride and pay when they exit. Use that fare money to extend Line 1.';
+        'Extend Line 1. Click any built station to inspect its individual upgrade.';
       return;
     }
 
@@ -922,65 +1192,106 @@ export class Hud {
     }
 
     if (
-      bottleneck === 'line-1'
+      bottleneck.startsWith(
+        'line-',
+      )
       && state.depot.built
     ) {
+      const lineNumber =
+        bottleneck.slice(
+          'line-'.length,
+        );
+
       this.el.objective.textContent =
-        'Passengers are waiting. Open the depot and add another physical bus.';
+        `Line ${lineNumber} passengers are waiting. Add another physical bus or improve key stations.`;
       return;
     }
 
-    if (
-      state.line1.stopCount
-      < ECONOMY.maxLine1Stops
+    const expansionOrder = [
+      {
+        lineKey: 'line1',
+        maxStops:
+          ECONOMY.maxLine1Stops,
+        color: 'blue',
+      },
+      {
+        lineKey: 'line2',
+        maxStops:
+          ECONOMY.maxLine2Stops,
+        color: 'yellow',
+      },
+      {
+        lineKey: 'line3',
+        maxStops:
+          ECONOMY.maxLine3Stops,
+        color: 'green',
+      },
+      {
+        lineKey: 'line4',
+        maxStops:
+          ECONOMY.maxLine4Stops,
+        color: 'magenta',
+      },
+    ];
+
+    for (
+      const [
+        index,
+        definition,
+      ]
+      of expansionOrder.entries()
     ) {
-      this.el.objective.textContent =
-        'Extend Line 1 by buying the next visible stop.';
-      return;
-    }
+      const line =
+        state[
+          definition.lineKey
+        ];
 
-    if (
-      state.depot.built
-      && getGarageUsed(state)
-        >= state.depot.garageSlots
-      && !state.line2.built
-    ) {
-      this.el.objective.textContent =
-        'Line 1 is ready. Expand the depot to make room for the Line 2 starter bus.';
-      return;
-    }
+      if (!line.built) {
+        const unlockFns = {
+          line2: canUnlockLine2,
+          line3: canUnlockLine3,
+          line4: canUnlockLine4,
+        };
 
-    if (canUnlockLine2(state)) {
-      this.el.objective.textContent =
-        'Line 2 unlocked. Click the yellow branch at City Park.';
-      return;
-    }
+        const canUnlock =
+          unlockFns[
+            definition.lineKey
+          ]?.(state)
+          ?? false;
 
-    if (
-      !state.line2.built
-    ) {
-      this.el.objective.textContent =
-        'Stabilize Line 1 with enough buses to unlock a second service.';
-      return;
-    }
+        if (canUnlock) {
+          this.el.objective.textContent =
+            `Line ${index + 1} unlocked. Click the ${definition.color} ghost branch on the map.`;
+          return;
+        }
 
-    if (bottleneck === 'line-2') {
-      this.el.objective.textContent =
-        'Line 2 passengers are waiting. Add another bus from the depot.';
-      return;
-    }
+        if (
+          index > 0
+          && getGarageUsed(state)
+            >= state.depot.garageSlots
+        ) {
+          this.el.objective.textContent =
+            `Expand the Bus Depot to make room for the Line ${index + 1} starter bus.`;
+          return;
+        }
 
-    if (
-      state.line2.stopCount
-      < ECONOMY.maxLine2Stops
-    ) {
-      this.el.objective.textContent =
-        'Grow Line 2 by purchasing the next yellow stop.';
-      return;
+        this.el.objective.textContent =
+          `Complete and stabilize Line ${Math.max(1, index)} to unlock the next service.`;
+        return;
+      }
+
+      if (
+        line.stopCount
+        < definition.maxStops
+      ) {
+        this.el.objective.textContent =
+          `Grow Line ${index + 1} by purchasing its next visible stop.`;
+        return;
+      }
     }
 
     this.el.objective.textContent =
-      'Bus network established. Every dollar now comes from completed passenger trips.';
+      'Four-line bus network established. Upgrade busy stations into hubs while the city keeps growing.';
   }
 
   toast(message) {

@@ -119,15 +119,15 @@ test('same seed creates the same immutable master plan', () => {
 
   assert.equal(
     first.districts.length,
-    8,
+    15,
   );
 
   assert.ok(
-    first.roads.length >= 40,
+    first.roads.length >= 95,
   );
 
   assert.ok(
-    first.parcels.length >= 70,
+    first.parcels.length >= 150,
   );
 });
 
@@ -149,13 +149,25 @@ test('terrain variation never removes a complete district development network', 
       const district
       of plan.districts
     ) {
+      const minimumRoads =
+        district.id === 'docklands'
+          ? 5
+          : 4;
+
+      const minimumParcels =
+        district.id === 'docklands'
+          ? 4
+          : 6;
+
       assert.ok(
-        district.roadIds.length >= 4,
+        district.roadIds.length
+          >= minimumRoads,
         `${district.id} lost its street network for seed ${seed}`,
       );
 
       assert.ok(
-        district.parcelIds.length >= 6,
+        district.parcelIds.length
+          >= minimumParcels,
         `${district.id} lost buildable frontage for seed ${seed}`,
       );
     }
@@ -188,11 +200,33 @@ test('bus stop spacing uses real city-scale distances', () => {
         ).total,
     );
 
+  const line3Distances =
+    [0, 1, 2, 3].map(
+      (index) =>
+        getSegmentRoute(
+          'line3',
+          index,
+          index + 1,
+        ).total,
+    );
+
+  const line4Distances =
+    [0, 1, 2, 3].map(
+      (index) =>
+        getSegmentRoute(
+          'line4',
+          index,
+          index + 1,
+        ).total,
+    );
+
   for (
     const distance
     of [
       ...line1Distances,
       ...line2Distances,
+      ...line3Distances,
+      ...line4Distances,
     ]
   ) {
     assert.ok(
@@ -201,7 +235,7 @@ test('bus stop spacing uses real city-scale distances', () => {
     );
 
     assert.ok(
-      distance <= 900,
+      distance <= 1250,
       `stop spacing too long: ${distance.toFixed(1)} m`,
     );
   }

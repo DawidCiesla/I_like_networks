@@ -5,10 +5,17 @@ import {
 
 import {
   ECONOMY,
+  STATION_IDS,
   STOP_NAMES,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   getNextStopCost,
+  getStationLevel,
+  getStationServedLines,
+  getStationTierName,
+  isStationBuilt,
 } from '../simulation/model.js';
 
 import {
@@ -32,6 +39,15 @@ import {
 
 const LINE_1_COLOR = 0x0797ec;
 const LINE_2_COLOR = 0xf4ca00;
+const LINE_3_COLOR = 0x08b91c;
+const LINE_4_COLOR = 0xd02be3;
+
+const LINE_COLORS = Object.freeze({
+  line1: LINE_1_COLOR,
+  line2: LINE_2_COLOR,
+  line3: LINE_3_COLOR,
+  line4: LINE_4_COLOR,
+});
 
 const ROAD_COLORS = Object.freeze({
   arterial: 0x34383a,
@@ -161,6 +177,8 @@ function worldBounds(state) {
   points.push(
     ...WORLD.line1Stops,
     ...WORLD.line2Stops,
+    ...WORLD.line3Stops,
+    ...WORLD.line4Stops,
     WORLD.depot,
   );
 
@@ -1538,6 +1556,22 @@ export class ThreeTransportRenderer {
   }
 
   #transportStateSignature(state) {
+    const stationLevels =
+      Object.entries(
+        state.stations ?? {},
+      )
+        .sort(
+          ([first], [second]) =>
+            first.localeCompare(
+              second,
+            ),
+        )
+        .map(
+          ([id, station]) =>
+            `${id}:${station.level ?? 0}`,
+        )
+        .join('|');
+
     return [
       state.line1.built,
       state.line1.stopCount,
@@ -1545,7 +1579,14 @@ export class ThreeTransportRenderer {
       state.line2.built,
       state.line2.stopCount,
       state.line2.fleetCount,
+      state.line3.built,
+      state.line3.stopCount,
+      state.line3.fleetCount,
+      state.line4.built,
+      state.line4.stopCount,
+      state.line4.fleetCount,
       state.depot.built,
+      stationLevels,
       this.selected,
     ].join(':');
   }
@@ -2701,28 +2742,101 @@ export class ThreeTransportRenderer {
 
     this.selectables = [];
 
-    this.#buildLine(
-      state,
-      'line1',
-      WORLD.line1Stops,
-      STOP_NAMES.line1,
-      LINE_1_COLOR,
-    );
+    const renderedStations =
+      new Set();
 
-    if (state.line2.built) {
-      this.#buildLine(
-        state,
-        'line2',
-        WORLD.line2Stops,
-        STOP_NAMES.line2,
-        LINE_2_COLOR,
-      );
-    } else if (
-      canUnlockLine2(state)
+    const lineDefinitions = [
+      {
+        lineKey: 'line1',
+        stops: WORLD.line1Stops,
+        names: STOP_NAMES.line1,
+        color: LINE_1_COLOR,
+      },
+      {
+        lineKey: 'line2',
+        stops: WORLD.line2Stops,
+        names: STOP_NAMES.line2,
+        color: LINE_2_COLOR,
+      },
+      {
+        lineKey: 'line3',
+        stops: WORLD.line3Stops,
+        names: STOP_NAMES.line3,
+        color: LINE_3_COLOR,
+      },
+      {
+        lineKey: 'line4',
+        stops: WORLD.line4Stops,
+        names: STOP_NAMES.line4,
+        color: LINE_4_COLOR,
+      },
+    ];
+
+    for (
+      const definition
+      of lineDefinitions
     ) {
-      this.#buildFutureLine2(
-        state,
-      );
+      const line =
+        state[
+          definition.lineKey
+        ];
+
+      if (
+        definition.lineKey === 'line1'
+        || line.built
+      ) {
+        this.#buildLine(
+          state,
+          definition.lineKey,
+          definition.stops,
+          definition.names,
+          definition.color,
+          renderedStations,
+        );
+      }
+    }
+
+    const futureLines = [
+      {
+        lineKey: 'line2',
+        unlocked:
+          canUnlockLine2(state),
+        cost:
+          ECONOMY.line2BuildCost,
+      },
+      {
+        lineKey: 'line3',
+        unlocked:
+          canUnlockLine3(state),
+        cost:
+          ECONOMY.line3BuildCost,
+      },
+      {
+        lineKey: 'line4',
+        unlocked:
+          canUnlockLine4(state),
+        cost:
+          ECONOMY.line4BuildCost,
+      },
+    ];
+
+    for (
+      const future
+      of futureLines
+    ) {
+      if (
+        !state[future.lineKey].built
+        && future.unlocked
+      ) {
+        this.#buildFutureLine(
+          state,
+          future.lineKey,
+          LINE_COLORS[
+            future.lineKey
+          ],
+          future.cost,
+        );
+      }
     }
 
     this.#buildDepot(state);
@@ -2787,6 +2901,9 @@ export class ThreeTransportRenderer {
       ghost = false,
       selected = false,
       detail = null,
+      stationLevel = 0,
+      shared = false,
+      connectionGhost = false,
     } = {},
   ) {
     const group =
@@ -2799,55 +2916,105 @@ export class ThreeTransportRenderer {
         stop.y,
       );
 
-    const base =
-      new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          ghost ? 16 : 13,
-          ghost ? 16 : 13,
-          ghost ? 2.2 : 3.2,
+    const level =
+      ghost
+        ? 0
+        : stationLevel;
+
+    const radius =
+      ghost
+        ? 16
+        : [
+          13,
           16,
-        ),
-        new THREE.MeshStandardMaterial({
-          color:
-            ghost
-              ? 0x242824
-              : color,
-          emissive:
-            selected
-              ? color
-              : 0x000000,
-          emissiveIntensity:
-            selected
-              ? 0.8
-              : 0,
-          transparent: ghost,
-          opacity:
-            ghost
-              ? 0.58
-              : 1,
-          roughness: 0.72,
-        }),
-      );
+          20,
+          25,
+        ][level] ?? 13;
 
-    base.position.y =
-      ground + 2;
+    const baseColor =
+      shared
+      && !ghost
+        ? 0xe6e5dd
+        : color;
 
-    base.castShadow = false;
-    group.add(base);
+    if (!connectionGhost) {
+      const base =
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            radius,
+            radius,
+            ghost ? 2.2 : 3.2 + level,
+            16,
+          ),
+          new THREE.MeshStandardMaterial({
+            color:
+              ghost
+                ? 0x242824
+                : baseColor,
+            emissive:
+              selected
+                ? color
+                : 0x000000,
+            emissiveIntensity:
+              selected
+                ? 0.8
+                : 0,
+            transparent: ghost,
+            opacity:
+              ghost
+                ? 0.58
+                : 1,
+            roughness: 0.72,
+          }),
+        );
 
-    if (ghost) {
+      base.position.y =
+        ground
+        + 2
+        + level * 0.5;
+
+      base.castShadow = false;
+      group.add(base);
+    }
+
+    if (
+      !ghost
+      && level >= 1
+    ) {
+      const canopy =
+        new THREE.Mesh(
+          new THREE.BoxGeometry(
+            radius * 1.55,
+            2.6,
+            radius * 0.9,
+          ),
+          new THREE.MeshLambertMaterial({
+            color: 0xd8d7cf,
+          }),
+        );
+
+      canopy.position.y =
+        ground
+        + 10
+        + level * 1.3;
+
+      group.add(canopy);
+    }
+
+    if (
+      !ghost
+      && level >= 2
+    ) {
       const ring =
         new THREE.Mesh(
           new THREE.TorusGeometry(
-            18,
+            radius + 4,
             1.8,
-            8,
+            7,
             24,
           ),
           new THREE.MeshBasicMaterial({
             color,
-            transparent: true,
-            opacity: 0.72,
           }),
         );
 
@@ -2855,9 +3022,97 @@ export class ThreeTransportRenderer {
         Math.PI / 2;
 
       ring.position.y =
-        ground + 1.2;
+        ground + 1.4;
 
       group.add(ring);
+    }
+
+    if (
+      !ghost
+      && level >= 3
+    ) {
+      const hubMarker =
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            3.2,
+            3.2,
+            17,
+            8,
+          ),
+          new THREE.MeshLambertMaterial({
+            color: 0xf1f0e9,
+          }),
+        );
+
+      hubMarker.position.y =
+        ground + 11;
+
+      group.add(hubMarker);
+    }
+
+    if (ghost) {
+      const ringRadius =
+        connectionGhost
+          ? 32
+          : 18;
+
+      const ring =
+        new THREE.Mesh(
+          new THREE.TorusGeometry(
+            ringRadius,
+            connectionGhost
+              ? 2.8
+              : 1.8,
+            8,
+            28,
+          ),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity:
+              connectionGhost
+                ? 0.88
+                : 0.72,
+          }),
+        );
+
+      ring.rotation.x =
+        Math.PI / 2;
+
+      ring.position.y =
+        ground
+        + (
+          connectionGhost
+            ? 5
+            : 1.2
+        );
+
+      group.add(ring);
+
+      if (connectionGhost) {
+        const inner =
+          new THREE.Mesh(
+            new THREE.TorusGeometry(
+              26,
+              1.2,
+              7,
+              24,
+            ),
+            new THREE.MeshBasicMaterial({
+              color,
+              transparent: true,
+              opacity: 0.5,
+            }),
+          );
+
+        inner.rotation.x =
+          Math.PI / 2;
+
+        inner.position.y =
+          ground + 5.4;
+
+        group.add(inner);
+      }
     }
 
     const label =
@@ -2869,14 +3124,16 @@ export class ThreeTransportRenderer {
           accent:
             `#${new THREE.Color(color).getHexString()}`,
           width:
-            detail ? 160 : 120,
+            detail ? 190 : 120,
           height: 26,
         },
       );
 
     label.position.set(
       0,
-      ground + 32,
+      ground
+        + 32
+        + level * 4,
       0,
     );
 
@@ -2904,6 +3161,7 @@ export class ThreeTransportRenderer {
     stops,
     names,
     color,
+    renderedStations,
   ) {
     const line =
       state[lineKey];
@@ -2927,34 +3185,94 @@ export class ThreeTransportRenderer {
       index < line.stopCount;
       index += 1
     ) {
+      const stationId =
+        STATION_IDS[lineKey][
+          index
+        ];
+
       if (
-        lineKey === 'line2'
-        && index === 0
+        !stationId
+        || renderedStations.has(
+          stationId,
+        )
       ) {
         continue;
       }
+
+      const servedLines =
+        getStationServedLines(
+          state,
+          stationId,
+        );
+
+      const level =
+        getStationLevel(
+          state,
+          stationId,
+        );
+
+      const details = [];
+
+      if (level > 0) {
+        details.push(
+          getStationTierName(
+            state,
+            stationId,
+          ).toUpperCase(),
+        );
+      }
+
+      if (
+        servedLines.length > 1
+      ) {
+        details.push(
+          servedLines
+            .map(
+              (servedLine) =>
+                `L${Number(
+                  servedLine.replace(
+                    'line',
+                    '',
+                  ),
+                )}`,
+            )
+            .join('+'),
+        );
+      }
+
+      const selection =
+        `station:${stationId}`;
 
       this.#stopObject(
         state,
         stops[index],
         color,
         names[index],
-        lineKey,
+        selection,
         {
           selected:
             this.selected
-            === lineKey,
+            === selection,
+          detail:
+            details.join(' · ')
+            || null,
+          stationLevel: level,
+          shared:
+            servedLines.length > 1,
         },
+      );
+
+      renderedStations.add(
+        stationId,
       );
     }
 
     const maxStops =
-      lineKey === 'line1'
-        ? ECONOMY.maxLine1Stops
-        : ECONOMY.maxLine2Stops;
+      names.length;
 
     if (
-      line.stopCount < maxStops
+      line.stopCount > 0
+      && line.stopCount < maxStops
     ) {
       const future =
         getFutureSegmentRoute(
@@ -2993,9 +3311,21 @@ export class ThreeTransportRenderer {
       );
 
       const selection =
-        lineKey === 'line1'
-          ? 'futureStop1'
-          : 'futureStop2';
+        `futureStop:${lineKey}`;
+
+      const futureStationId =
+        STATION_IDS[lineKey][
+          line.stopCount
+        ];
+
+      const connectionGhost =
+        Boolean(
+          futureStationId
+          && isStationBuilt(
+            state,
+            futureStationId,
+          ),
+        );
 
       this.#stopObject(
         state,
@@ -3009,16 +3339,24 @@ export class ThreeTransportRenderer {
             this.selected
             === selection,
           detail:
-            `$${getNextStopCost(state, lineKey)}`,
+            connectionGhost
+              ? `CONNECT  ${getNextStopCost(state, lineKey)}`
+              : `${getNextStopCost(state, lineKey)}`,
+          connectionGhost,
         },
       );
     }
   }
 
-  #buildFutureLine2(state) {
+  #buildFutureLine(
+    state,
+    lineKey,
+    color,
+    buildCost,
+  ) {
     const future =
       getFutureSegmentRoute(
-        'line2',
+        lineKey,
         1,
       );
 
@@ -3035,7 +3373,7 @@ export class ThreeTransportRenderer {
       new THREE.Line(
         geometry,
         new THREE.LineDashedMaterial({
-          color: LINE_2_COLOR,
+          color,
           transparent: true,
           opacity: 0.62,
           dashSize: 16,
@@ -3049,19 +3387,24 @@ export class ThreeTransportRenderer {
       line,
     );
 
+    const selection =
+      `futureLine:${lineKey}`;
+
     this.#stopObject(
       state,
-      WORLD.line2Stops[1],
-      LINE_2_COLOR,
-      STOP_NAMES.line2[1],
-      'futureLine2',
+      WORLD[
+        `${lineKey}Stops`
+      ][1],
+      color,
+      STOP_NAMES[lineKey][1],
+      selection,
       {
         ghost: true,
         selected:
           this.selected
-          === 'futureLine2',
+          === selection,
         detail:
-          `$${ECONOMY.line2BuildCost}`,
+          `$${buildCost}`,
       },
     );
   }
@@ -3365,6 +3708,16 @@ export class ThreeTransportRenderer {
     drawLineVehicles(
       'line2',
       LINE_2_COLOR,
+    );
+
+    drawLineVehicles(
+      'line3',
+      LINE_3_COLOR,
+    );
+
+    drawLineVehicles(
+      'line4',
+      LINE_4_COLOR,
     );
 
     const builtRoads =

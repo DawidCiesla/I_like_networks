@@ -3,20 +3,28 @@ import assert from 'node:assert/strict';
 
 import {
   ECONOMY,
+  STATION_UPGRADE,
   advanceSimulation,
   canBuildDepot,
   canUnlockLine2,
+  canUnlockLine3,
+  canUnlockLine4,
   createInitialState,
   getBottleneck,
   getGarageUsed,
   getLastFareEventValue,
   getLineCapacityPpm,
+  getLineCycleMinutes,
   getLineDemandPpm,
   getLineHeadwayMinutes,
   getLineOnboardPassengers,
   getLineWaitingPassengers,
   getNextStopCost,
   getRouteLengthKm,
+  getStationLevel,
+  getStationServedLines,
+  getStationUpgradeCost,
+  getStationWaitingCapacity,
   getStopWaitingPassengers,
 } from '../src/simulation/model.js';
 
@@ -24,8 +32,11 @@ import {
   addVehicle,
   buildDepot,
   buildLine2,
+  buildLine3,
+  buildLine4,
   buildNextStop,
   buyUpgrade,
+  upgradeStation,
 } from '../src/simulation/actions.js';
 
 function advanceFor(state, realSeconds, step = 0.1) {
@@ -334,4 +345,372 @@ test('Line 2 requires a complete stable Line 1 and a free garage slot', () => {
   assert.equal(canUnlockLine2(state), true);
   assert.equal(buildLine2(state).ok, true);
   assert.equal(state.line2.vehicles.length, 1);
+});
+
+
+function stabilizeLine(
+  state,
+  lineKey,
+) {
+  let guard = 0;
+
+  while (
+    getLineCapacityPpm(
+      state,
+      lineKey,
+    )
+    < getLineDemandPpm(
+      state,
+      lineKey,
+    )
+    && guard < 20
+  ) {
+    if (
+      getGarageUsed(state)
+      >= state.depot.garageSlots
+    ) {
+      assert.equal(
+        buyUpgrade(
+          state,
+          'depot',
+        ).ok,
+        true,
+      );
+    }
+
+    assert.equal(
+      addVehicle(
+        state,
+        lineKey,
+      ).ok,
+      true,
+    );
+
+    guard += 1;
+  }
+
+  assert.ok(
+    guard < 20,
+    `${lineKey} failed to stabilize`,
+  );
+}
+
+test('individual station upgrade affects only that physical station', () => {
+  const state =
+    createInitialState();
+
+  state.money = 10_000;
+
+  buildNextStop(
+    state,
+    'line1',
+  );
+
+  const demandBefore =
+    getLineDemandPpm(
+      state,
+      'line1',
+    );
+
+  const cycleBefore =
+    getLineCycleMinutes(
+      state,
+      'line1',
+    );
+
+  const capacityBefore =
+    getStationWaitingCapacity(
+      state,
+      'market-square',
+    );
+
+  const cost =
+    getStationUpgradeCost(
+      state,
+      'market-square',
+    );
+
+  assert.equal(
+    upgradeStation(
+      state,
+      'market-square',
+    ).ok,
+    true,
+  );
+
+  assert.equal(
+    state.money,
+    10_000
+      - ECONOMY.line1StopBaseCost
+      - cost,
+  );
+
+  assert.equal(
+    getStationLevel(
+      state,
+      'market-square',
+    ),
+    1,
+  );
+
+  assert.equal(
+    getStationLevel(
+      state,
+      'old-town',
+    ),
+    0,
+  );
+
+  assert.ok(
+    getStationWaitingCapacity(
+      state,
+      'market-square',
+    )
+    > capacityBefore,
+  );
+
+  assert.ok(
+    getLineDemandPpm(
+      state,
+      'line1',
+    )
+    > demandBefore,
+  );
+
+  assert.ok(
+    getLineCycleMinutes(
+      state,
+      'line1',
+    )
+    < cycleBefore,
+  );
+});
+
+test('station upgrades stop at Hub level', () => {
+  const state =
+    createInitialState();
+
+  state.money = 100_000;
+
+  buildNextStop(
+    state,
+    'line1',
+  );
+
+  for (
+    let level = 0;
+    level
+      < STATION_UPGRADE.maxLevel;
+    level += 1
+  ) {
+    assert.equal(
+      upgradeStation(
+        state,
+        'market-square',
+      ).ok,
+      true,
+    );
+  }
+
+  assert.equal(
+    getStationLevel(
+      state,
+      'market-square',
+    ),
+    STATION_UPGRADE.maxLevel,
+  );
+
+  assert.equal(
+    upgradeStation(
+      state,
+      'market-square',
+    ).reason,
+    'upgrade-limit',
+  );
+});
+
+test('Lines 3 and 4 unlock sequentially and share real interchanges', () => {
+  const state =
+    createInitialState();
+
+  state.money = 1_000_000;
+
+  while (
+    state.line1.stopCount
+    < ECONOMY.maxLine1Stops
+  ) {
+    buildNextStop(
+      state,
+      'line1',
+    );
+  }
+
+  buildDepot(state);
+  stabilizeLine(
+    state,
+    'line1',
+  );
+
+  if (
+    getGarageUsed(state)
+    >= state.depot.garageSlots
+  ) {
+    buyUpgrade(
+      state,
+      'depot',
+    );
+  }
+
+  assert.equal(
+    canUnlockLine2(state),
+    true,
+  );
+
+  assert.equal(
+    buildLine2(state).ok,
+    true,
+  );
+
+  assert.equal(
+    canUnlockLine3(state),
+    false,
+  );
+
+  while (
+    state.line2.stopCount
+    < ECONOMY.maxLine2Stops
+  ) {
+    buildNextStop(
+      state,
+      'line2',
+    );
+  }
+
+  stabilizeLine(
+    state,
+    'line2',
+  );
+
+  if (
+    getGarageUsed(state)
+    >= state.depot.garageSlots
+  ) {
+    buyUpgrade(
+      state,
+      'depot',
+    );
+  }
+
+  assert.equal(
+    canUnlockLine3(state),
+    true,
+  );
+
+  assert.equal(
+    buildLine3(state).ok,
+    true,
+  );
+
+  assert.deepEqual(
+    getStationServedLines(
+      state,
+      'university',
+    ),
+    [
+      'line1',
+      'line3',
+    ],
+  );
+
+  while (
+    state.line3.stopCount
+    < ECONOMY.maxLine3Stops
+  ) {
+    buildNextStop(
+      state,
+      'line3',
+    );
+  }
+
+  stabilizeLine(
+    state,
+    'line3',
+  );
+
+  if (
+    getGarageUsed(state)
+    >= state.depot.garageSlots
+  ) {
+    buyUpgrade(
+      state,
+      'depot',
+    );
+  }
+
+  assert.equal(
+    canUnlockLine4(state),
+    true,
+  );
+
+  assert.equal(
+    buildLine4(state).ok,
+    true,
+  );
+
+  assert.deepEqual(
+    getStationServedLines(
+      state,
+      'harbor',
+    ),
+    [
+      'line2',
+      'line4',
+    ],
+  );
+
+  while (
+    state.line4.stopCount
+    < ECONOMY.maxLine4Stops
+  ) {
+    assert.equal(
+      buildNextStop(
+        state,
+        'line4',
+      ).ok,
+      true,
+    );
+  }
+
+  assert.deepEqual(
+    getStationServedLines(
+      state,
+      'central',
+    ),
+    [
+      'line1',
+      'line4',
+    ],
+  );
+
+  const universityLevel =
+    getStationLevel(
+      state,
+      'university',
+    );
+
+  assert.equal(
+    upgradeStation(
+      state,
+      'university',
+    ).ok,
+    true,
+  );
+
+  assert.equal(
+    getStationLevel(
+      state,
+      'university',
+    ),
+    universityLevel + 1,
+  );
 });
