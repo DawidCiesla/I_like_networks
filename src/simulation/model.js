@@ -1,4 +1,4 @@
-export const GAME_VERSION = 4;
+export const GAME_VERSION = 5;
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
@@ -11,20 +11,21 @@ export const ECONOMY = Object.freeze({
   addStopACostGrowth: 1.5,
   addStopBBaseCost: 85,
   addStopBCostGrowth: 1.55,
+  vehicleBaseCost: 55,
+  vehicleCostGrowth: 1.45,
   maxStopsA: 4,
   maxStopsB: 4,
-  farePerPassenger: 8,
+  maxVehiclesPerLine: 8,
+  farePerPassenger: 12,
 });
 
 export const UPGRADES = Object.freeze({
-  catchmentA: { baseCost: 25, costGrowth: 1.65, delta: 5 },
-  lineA: { baseCost: 35, costGrowth: 1.7, delta: 20 },
-  terminalA: { baseCost: 70, costGrowth: 1.75, delta: 25 },
+  catchmentA: { baseCost: 25, costGrowth: 1.65, delta: 1 },
+  terminalA: { baseCost: 70, costGrowth: 1.75, delta: 5 },
   waitingArea: { baseCost: 55, costGrowth: 1.7, delta: 40 },
-  stationA: { baseCost: 45, costGrowth: 1.7, delta: 15 },
-  interchange: { baseCost: 120, costGrowth: 1.8, delta: 40 },
-  lineB: { baseCost: 95, costGrowth: 1.75, delta: 20 },
-  stationB: { baseCost: 110, costGrowth: 1.75, delta: 20 },
+  stationA: { baseCost: 45, costGrowth: 1.7, delta: 5 },
+  interchange: { baseCost: 120, costGrowth: 1.8, delta: 10 },
+  stationB: { baseCost: 110, costGrowth: 1.75, delta: 5 },
 });
 
 export const TRANSPORT_MODES = Object.freeze({
@@ -32,31 +33,55 @@ export const TRANSPORT_MODES = Object.freeze({
     label: 'Bus',
     unlocked: true,
     role: 'Flexible local transport',
+    vehicleCapacity: 40,
+    speedKph: 30,
+    dwellMinutes: 0.25,
+    turnaroundMinutes: 1,
   },
   tram: {
     label: 'Tram',
     unlocked: false,
     role: 'High-capacity urban corridor',
+    vehicleCapacity: 120,
+    speedKph: 35,
+    dwellMinutes: 0.35,
+    turnaroundMinutes: 1.5,
   },
   metro: {
     label: 'Metro',
     unlocked: false,
     role: 'Very high-capacity rapid transit',
+    vehicleCapacity: 600,
+    speedKph: 55,
+    dwellMinutes: 0.45,
+    turnaroundMinutes: 2,
   },
   rail: {
     label: 'Rail',
     unlocked: false,
     role: 'Regional and intercity transport',
+    vehicleCapacity: 400,
+    speedKph: 100,
+    dwellMinutes: 0.8,
+    turnaroundMinutes: 4,
   },
   ferry: {
     label: 'Ferry',
     unlocked: false,
     role: 'Water crossings',
+    vehicleCapacity: 250,
+    speedKph: 25,
+    dwellMinutes: 2,
+    turnaroundMinutes: 5,
   },
   air: {
     label: 'Air',
     unlocked: false,
     role: 'Long-distance transport',
+    vehicleCapacity: 180,
+    speedKph: 650,
+    dwellMinutes: 25,
+    turnaroundMinutes: 40,
   },
 });
 
@@ -65,6 +90,21 @@ export const PLACES = Object.freeze({
   corridorB: { label: 'Riverside', code: 'LINE 2' },
   stationA: { label: 'Central Station', code: 'CENTRAL' },
   stationB: { label: 'Harbor Station', code: 'HARBOR' },
+});
+
+const LINE_GEOMETRY = Object.freeze({
+  corridorA: {
+    baseStopCount: 1,
+    baseLengthKm: 2.2,
+    extraStopLengthKm: 0.75,
+    starterFleet: 2,
+  },
+  corridorB: {
+    baseStopCount: 2,
+    baseLengthKm: 2.4,
+    extraStopLengthKm: 0.75,
+    starterFleet: 2,
+  },
 });
 
 export function createInitialState() {
@@ -78,17 +118,16 @@ export function createInitialState() {
       lineBuilt: false,
       mode: 'bus',
       stopCount: 1,
-      demandPerStopPpm: 10,
+      demandPerStopPpm: 4,
       demandLevel: 0,
-      lineCapacityPpm: 20,
-      lineLevel: 0,
+      fleetCount: 2,
     },
 
     terminalA: {
       built: false,
-      platformCapacityPpm: 35,
+      platformCapacityPpm: 14,
       level: 0,
-      waitingCapacityPassengers: 80,
+      waitingCapacityPassengers: 60,
       waitingLevel: 0,
       queuePassengers: 0,
       currentAbandonmentPpm: 0,
@@ -96,15 +135,15 @@ export function createInitialState() {
     },
 
     stationA: {
-      capacityPpm: 25,
+      capacityPpm: 12,
       level: 0,
     },
 
     interchange: {
       built: false,
-      transferCapacityPpm: 60,
+      transferCapacityPpm: 24,
       level: 0,
-      waitingCapacityPassengers: 120,
+      waitingCapacityPassengers: 100,
       queuePassengers: 0,
       currentAbandonmentPpm: 0,
       totalAbandonedPassengers: 0,
@@ -126,14 +165,13 @@ export function createInitialState() {
       built: false,
       mode: 'bus',
       stopCount: 2,
-      demandPerStopPpm: 8,
-      lineCapacityPpm: 30,
-      lineLevel: 0,
+      demandPerStopPpm: 3,
+      fleetCount: 2,
     },
 
     stationB: {
       built: false,
-      capacityPpm: 30,
+      capacityPpm: 12,
       level: 0,
     },
 
@@ -144,17 +182,114 @@ export function createInitialState() {
   };
 }
 
+function getCorridorState(state, corridorKey) {
+  if (corridorKey === 'corridorA') return state.corridorA;
+  if (corridorKey === 'corridorB') return state.corridorB;
+  throw new Error(`Unknown corridor: ${corridorKey}`);
+}
+
+export function getRouteLengthKm(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+  const geometry = LINE_GEOMETRY[corridorKey];
+  const extraStops = Math.max(
+    0,
+    corridor.stopCount - geometry.baseStopCount,
+  );
+
+  return (
+    geometry.baseLengthKm
+    + extraStops * geometry.extraStopLengthKm
+  );
+}
+
+export function getLineOneWayMinutes(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+  const mode = TRANSPORT_MODES[corridor.mode];
+  const drivingMinutes =
+    getRouteLengthKm(state, corridorKey)
+    / mode.speedKph
+    * 60;
+
+  const servicedPoints = corridor.stopCount + 1;
+  const dwellMinutes = servicedPoints * mode.dwellMinutes;
+
+  return drivingMinutes + dwellMinutes;
+}
+
+export function getLineCycleMinutes(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+  const mode = TRANSPORT_MODES[corridor.mode];
+
+  return (
+    getLineOneWayMinutes(state, corridorKey) * 2
+    + mode.turnaroundMinutes
+  );
+}
+
+export function getLineHeadwayMinutes(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+
+  if (corridor.fleetCount <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return getLineCycleMinutes(state, corridorKey)
+    / corridor.fleetCount;
+}
+
+export function getLineFrequencyPerHour(state, corridorKey) {
+  const headway = getLineHeadwayMinutes(state, corridorKey);
+
+  if (!Number.isFinite(headway) || headway <= 0) {
+    return 0;
+  }
+
+  return 60 / headway;
+}
+
+export function getLineCapacityPpm(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+  const mode = TRANSPORT_MODES[corridor.mode];
+  const cycle = getLineCycleMinutes(state, corridorKey);
+
+  if (cycle <= 0) return 0;
+
+  return (
+    mode.vehicleCapacity
+    * corridor.fleetCount
+    / cycle
+  );
+}
+
+export function getVehiclePurchaseCost(state, corridorKey) {
+  const corridor = getCorridorState(state, corridorKey);
+  const geometry = LINE_GEOMETRY[corridorKey];
+  const purchasedVehicles = Math.max(
+    0,
+    corridor.fleetCount - geometry.starterFleet,
+  );
+
+  return Math.round(
+    ECONOMY.vehicleBaseCost
+    * ECONOMY.vehicleCostGrowth ** purchasedVehicles,
+  );
+}
+
 export function getCorridorADemandPpm(state) {
-  return state.corridorA.demandPerStopPpm * state.corridorA.stopCount;
+  return state.corridorA.demandPerStopPpm
+    * state.corridorA.stopCount;
 }
 
 export function getCorridorBDemandPpm(state) {
   if (!state.corridorB.built) return 0;
-  return state.corridorB.demandPerStopPpm * state.corridorB.stopCount;
+
+  return state.corridorB.demandPerStopPpm
+    * state.corridorB.stopCount;
 }
 
 export function getTotalDemandPpm(state) {
-  return getCorridorADemandPpm(state) + getCorridorBDemandPpm(state);
+  return getCorridorADemandPpm(state)
+    + getCorridorBDemandPpm(state);
 }
 
 export function getTerminalAIngressCapacityPpm(state) {
@@ -167,13 +302,15 @@ export function getLocalServiceCapacityPpm(state) {
   if (!state.corridorA.lineBuilt) return 0;
 
   return Math.min(
-    state.corridorA.lineCapacityPpm,
+    getLineCapacityPpm(state, 'corridorA'),
     state.stationA.capacityPpm,
   );
 }
 
 export function getLocalArrivalPpm(state) {
-  if (state.interchange.built) return getInterchangeIngressPpm(state);
+  if (state.interchange.built) {
+    return getInterchangeIngressPpm(state);
+  }
 
   return Math.min(
     getCorridorADemandPpm(state),
@@ -187,13 +324,13 @@ export function getInterchangeIngressPpm(state) {
   const corridorA = Math.min(
     getCorridorADemandPpm(state),
     getTerminalAIngressCapacityPpm(state),
-    state.corridorA.lineCapacityPpm,
+    getLineCapacityPpm(state, 'corridorA'),
   );
 
   const corridorB = state.corridorB.built
     ? Math.min(
       getCorridorBDemandPpm(state),
-      state.corridorB.lineCapacityPpm,
+      getLineCapacityPpm(state, 'corridorB'),
     )
     : 0;
 
@@ -230,7 +367,10 @@ export function getDeliveredPassengersPpm(state) {
   const arrival = getLocalArrivalPpm(state);
   const capacity = getLocalServiceCapacityPpm(state);
 
-  if (state.terminalA.built && state.terminalA.queuePassengers > 0) {
+  if (
+    state.terminalA.built
+    && state.terminalA.queuePassengers > 0
+  ) {
     return capacity;
   }
 
@@ -245,88 +385,59 @@ export function getIncomePerSecond(state) {
   );
 }
 
-export function getUtilization(state) {
-  if (state.interchange.built) {
-    if (state.interchange.transferCapacityPpm <= 0) return 0;
+export function getScheduledWaitMinutes(state) {
+  const demandA = getCorridorADemandPpm(state);
+  const demandB = getCorridorBDemandPpm(state);
+  const totalDemand = demandA + demandB;
 
-    return Math.min(
-      1,
-      getInterchangeIngressPpm(state)
-        / state.interchange.transferCapacityPpm,
-    );
-  }
+  if (totalDemand <= 0) return 0;
 
-  const capacity = getLocalServiceCapacityPpm(state);
+  const waitA =
+    getLineHeadwayMinutes(state, 'corridorA') / 2;
 
-  if (capacity <= 0) return 0;
+  const waitB =
+    state.corridorB.built
+      ? getLineHeadwayMinutes(state, 'corridorB') / 2
+      : 0;
 
-  return Math.min(1, getDeliveredPassengersPpm(state) / capacity);
-}
-
-export function getWaitingFillRatio(state) {
-  if (state.interchange.built) {
-    if (state.interchange.waitingCapacityPassengers <= 0) return 0;
-
-    return Math.min(
-      1,
-      state.interchange.queuePassengers
-        / state.interchange.waitingCapacityPassengers,
-    );
-  }
-
-  if (
-    !state.terminalA.built
-    || state.terminalA.waitingCapacityPassengers <= 0
-  ) {
-    return 0;
-  }
-
-  return Math.min(
-    1,
-    state.terminalA.queuePassengers
-      / state.terminalA.waitingCapacityPassengers,
-  );
-}
-
-export function getDestinationWaitingFillRatio(state, destination) {
-  if (
-    !state.interchange.built
-    || state.interchange.waitingCapacityPassengers <= 0
-  ) {
-    return 0;
-  }
-
-  const perDestinationCapacity =
-    state.interchange.waitingCapacityPassengers / 2;
-
-  return Math.min(
-    1,
-    state.interchange.destinationQueuesPassengers[destination]
-      / perDestinationCapacity,
-  );
+  return (
+    waitA * demandA
+    + waitB * demandB
+  ) / totalDemand;
 }
 
 export function getAverageWaitMinutes(state) {
   if (!state.corridorA.lineBuilt) return 0;
 
+  const scheduledWait = getScheduledWaitMinutes(state);
+
   if (state.interchange.built) {
-    const delivered = Math.max(1, getDeliveredPassengersPpm(state));
+    const delivered = Math.max(
+      1,
+      getDeliveredPassengersPpm(state),
+    );
 
     const waiting =
       state.interchange.queuePassengers
       + state.interchange.destinationQueuesPassengers.primary
       + state.interchange.destinationQueuesPassengers.secondary;
 
-    return Math.min(120, waiting / delivered);
+    return Math.min(
+      120,
+      scheduledWait + waiting / delivered,
+    );
   }
 
   const service = getLocalServiceCapacityPpm(state);
 
-  if (!state.terminalA.built || service <= 0) return 0;
+  if (!state.terminalA.built || service <= 0) {
+    return scheduledWait;
+  }
 
   return Math.min(
     120,
-    state.terminalA.queuePassengers / service,
+    scheduledWait
+      + state.terminalA.queuePassengers / service,
   );
 }
 
@@ -343,38 +454,54 @@ export function getAbandonmentPercent(state) {
     )
     : state.terminalA.currentAbandonmentPpm;
 
-  return Math.min(100, (abandonmentPpm / demand) * 100);
+  return Math.min(
+    100,
+    abandonmentPpm / demand * 100,
+  );
 }
 
 export function getBottleneck(state) {
-  if (!state.corridorA.lineBuilt) return 'offline';
+  if (!state.corridorA.lineBuilt) {
+    return 'offline';
+  }
 
   if (state.interchange.built) {
     const demandA = getCorridorADemandPpm(state);
     const demandB = getCorridorBDemandPpm(state);
 
-    if (demandA > getTerminalAIngressCapacityPpm(state)) {
+    if (
+      demandA
+      > getTerminalAIngressCapacityPpm(state)
+    ) {
       return 'terminal-a';
     }
 
-    if (demandA > state.corridorA.lineCapacityPpm) {
+    if (
+      demandA
+      > getLineCapacityPpm(state, 'corridorA')
+    ) {
       return 'line-a';
     }
 
     if (
       state.corridorB.built
-      && demandB > state.corridorB.lineCapacityPpm
+      && demandB
+        > getLineCapacityPpm(state, 'corridorB')
     ) {
       return 'line-b';
     }
 
     const ingress = getInterchangeIngressPpm(state);
 
-    if (ingress > state.interchange.transferCapacityPpm) {
+    if (
+      ingress
+      > state.interchange.transferCapacityPpm
+    ) {
       return 'interchange';
     }
 
     const ratios = getDestinationRatios(state);
+
     const transferred = Math.min(
       ingress,
       state.interchange.transferCapacityPpm,
@@ -399,9 +526,12 @@ export function getBottleneck(state) {
   }
 
   const demand = getCorridorADemandPpm(state);
-  const terminalCapacity = getTerminalAIngressCapacityPpm(state);
-  const lineCapacity = state.corridorA.lineCapacityPpm;
-  const stationCapacity = state.stationA.capacityPpm;
+  const terminalCapacity =
+    getTerminalAIngressCapacityPpm(state);
+  const lineCapacity =
+    getLineCapacityPpm(state, 'corridorA');
+  const stationCapacity =
+    state.stationA.capacityPpm;
 
   const minimum = Math.min(
     demand,
@@ -422,10 +552,6 @@ function getUpgradeLevel(state, type) {
     return state.corridorA.demandLevel;
   }
 
-  if (type === 'lineA') {
-    return state.corridorA.lineLevel;
-  }
-
   if (type === 'terminalA') {
     return state.terminalA.level;
   }
@@ -440,10 +566,6 @@ function getUpgradeLevel(state, type) {
 
   if (type === 'interchange') {
     return state.interchange.level;
-  }
-
-  if (type === 'lineB') {
-    return state.corridorB.lineLevel;
   }
 
   if (type === 'stationB') {
@@ -462,52 +584,61 @@ export function getUpgradeCost(state, type) {
 
   return Math.round(
     config.baseCost
-      * config.costGrowth ** getUpgradeLevel(state, type),
+    * config.costGrowth ** getUpgradeLevel(state, type),
   );
 }
 
 export function getAddStopACost(state) {
-  const addedStops = Math.max(0, state.corridorA.stopCount - 1);
+  const addedStops = Math.max(
+    0,
+    state.corridorA.stopCount - 1,
+  );
 
   return Math.round(
     ECONOMY.addStopABaseCost
-      * ECONOMY.addStopACostGrowth ** addedStops,
+    * ECONOMY.addStopACostGrowth ** addedStops,
   );
 }
 
 export function getAddStopBCost(state) {
-  const addedStops = Math.max(0, state.corridorB.stopCount - 2);
+  const addedStops = Math.max(
+    0,
+    state.corridorB.stopCount - 2,
+  );
 
   return Math.round(
     ECONOMY.addStopBBaseCost
-      * ECONOMY.addStopBCostGrowth ** addedStops,
+    * ECONOMY.addStopBCostGrowth ** addedStops,
   );
 }
 
 export function getServiceBoard(state) {
-  const services = [
-    {
-      destination: PLACES.stationA.label,
-      service: '1',
-      mode: TRANSPORT_MODES[state.corridorA.mode].label,
-      active: state.interchange.built,
-    },
-  ];
+  const lineA = {
+    destination: PLACES.stationA.label,
+    service: '1',
+    mode: TRANSPORT_MODES[state.corridorA.mode].label,
+    headwayMinutes: getLineHeadwayMinutes(
+      state,
+      'corridorA',
+    ),
+    fleetCount: state.corridorA.fleetCount,
+    active: state.corridorA.lineBuilt,
+  };
+
+  const services = [lineA];
 
   if (state.corridorB.built) {
     services.push({
-      destination: PLACES.corridorB.label,
+      destination: state.stationB.built
+        ? PLACES.stationB.label
+        : PLACES.corridorB.label,
       service: '2',
       mode: TRANSPORT_MODES[state.corridorB.mode].label,
-      active: true,
-    });
-  }
-
-  if (state.stationB.built) {
-    services.push({
-      destination: PLACES.stationB.label,
-      service: '2',
-      mode: TRANSPORT_MODES[state.corridorB.mode].label,
+      headwayMinutes: getLineHeadwayMinutes(
+        state,
+        'corridorB',
+      ),
+      fleetCount: state.corridorB.fleetCount,
       active: true,
     });
   }
@@ -517,7 +648,8 @@ export function getServiceBoard(state) {
 
 function simulateLocalCorridor(state, deltaMinutes) {
   const arrivalPpm = getLocalArrivalPpm(state);
-  const serviceCapacityPpm = getLocalServiceCapacityPpm(state);
+  const serviceCapacityPpm =
+    getLocalServiceCapacityPpm(state);
 
   let deliveredPpm = Math.min(
     arrivalPpm,
@@ -545,7 +677,7 @@ function simulateLocalCorridor(state, deltaMinutes) {
     const abandonedPassengers = Math.max(
       0,
       waitingBeforeAbandonment
-        - state.terminalA.waitingCapacityPassengers,
+      - state.terminalA.waitingCapacityPassengers,
     );
 
     state.terminalA.queuePassengers = Math.min(
@@ -582,7 +714,8 @@ function simulateInterchange(state, deltaMinutes) {
 
   const transferredPassengers = Math.min(
     availablePassengers,
-    state.interchange.transferCapacityPpm * deltaMinutes,
+    state.interchange.transferCapacityPpm
+      * deltaMinutes,
   );
 
   const waitingBeforeAbandonment = Math.max(
@@ -593,7 +726,7 @@ function simulateInterchange(state, deltaMinutes) {
   const abandonedPassengers = Math.max(
     0,
     waitingBeforeAbandonment
-      - state.interchange.waitingCapacityPassengers,
+    - state.interchange.waitingCapacityPassengers,
   );
 
   state.interchange.queuePassengers = Math.min(
@@ -643,7 +776,7 @@ function simulateInterchange(state, deltaMinutes) {
       Math.max(
         0,
         destinationWaitingBeforeAbandonment
-          - perDestinationWaitingCapacity,
+        - perDestinationWaitingCapacity,
       );
 
     state.interchange.destinationQueuesPassengers[key] =
@@ -684,7 +817,10 @@ function simulateInterchange(state, deltaMinutes) {
   );
 }
 
-export function advanceSimulation(state, realDeltaSeconds) {
+export function advanceSimulation(
+  state,
+  realDeltaSeconds,
+) {
   if (
     !Number.isFinite(realDeltaSeconds)
     || realDeltaSeconds <= 0
@@ -695,23 +831,26 @@ export function advanceSimulation(state, realDeltaSeconds) {
 
   const deltaSeconds =
     Math.min(realDeltaSeconds, 0.25)
-      * state.simulationSpeed;
+    * state.simulationSpeed;
 
-  const deltaMinutes = deltaSeconds / 60;
+  const deltaMinutes =
+    deltaSeconds / 60;
 
-  const deliveredPpm = state.interchange.built
-    ? simulateInterchange(state, deltaMinutes)
-    : simulateLocalCorridor(state, deltaMinutes);
+  const deliveredPpm =
+    state.interchange.built
+      ? simulateInterchange(state, deltaMinutes)
+      : simulateLocalCorridor(state, deltaMinutes);
 
   const deliveredPassengers =
     deliveredPpm * deltaMinutes;
 
   const revenue =
     deliveredPassengers
-      * ECONOMY.farePerPassenger;
+    * ECONOMY.farePerPassenger;
 
   state.elapsedSeconds += deltaSeconds;
   state.money += revenue;
   state.stats.lifetimeRevenue += revenue;
-  state.stats.lifetimePassengers += deliveredPassengers;
+  state.stats.lifetimePassengers +=
+    deliveredPassengers;
 }
