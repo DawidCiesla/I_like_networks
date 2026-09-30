@@ -37,13 +37,12 @@ const DISTRICTS = Object.freeze([
       [[118, 122], [118, 34]],
     ],
     parcels: [
-      [-102, -112, 'mixed'],
-      [-34, -116, 'commercial'],
-      [48, -112, 'mixed'],
-      [-104, 168, 'residential'],
-      [-28, 168, 'mixed'],
-      [54, 168, 'mixed'],
-      [96, -96, 'commercial'],
+      [-72, -148, 'mixed'],
+      [2, -154, 'commercial'],
+      [92, 166, 'mixed'],
+      [148, 72, 'commercial'],
+      [152, 154, 'mixed'],
+      [74, 198, 'residential'],
     ],
   },
   {
@@ -304,6 +303,7 @@ function getPrimaryRoadSpecs() {
     unlock: {
       lineKey: 'line1',
       stopCount: 3,
+      requiresDepot: true,
     },
     buildOrder: 50,
     source: 'depot-access',
