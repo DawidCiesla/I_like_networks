@@ -853,8 +853,11 @@ func bus_visuals() -> Array[Dictionary]:
 	return result
 
 func _commit_change() -> void:
+	var city_did_change := CityRuntime.sync_with_transport(self)
 	save_game()
 	state_changed.emit()
+	if city_did_change:
+		city_changed.emit()
 
 func _request_toast(message: String) -> void:
 	toast_requested.emit(message)
