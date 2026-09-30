@@ -167,6 +167,10 @@ export function createInitialState() {
       stopCount: 2,
       demandPerStopPpm: 3,
       fleetCount: 2,
+      waitingCapacityPassengers: 60,
+      queuePassengers: 0,
+      currentAbandonmentPpm: 0,
+      totalAbandonedPassengers: 0,
     },
 
     stationB: {
@@ -321,18 +325,33 @@ export function getLocalArrivalPpm(state) {
 export function getInterchangeIngressPpm(state) {
   if (!state.interchange.built) return 0;
 
-  const corridorA = Math.min(
-    getCorridorADemandPpm(state),
+  const capacityA = Math.min(
     getTerminalAIngressCapacityPpm(state),
     getLineCapacityPpm(state, 'corridorA'),
   );
 
-  const corridorB = state.corridorB.built
-    ? Math.min(
-      getCorridorBDemandPpm(state),
-      getLineCapacityPpm(state, 'corridorB'),
-    )
-    : 0;
+  const corridorA =
+    state.terminalA.queuePassengers > 0
+      ? capacityA
+      : Math.min(
+        getCorridorADemandPpm(state),
+        capacityA,
+      );
+
+  const capacityB =
+    getLineCapacityPpm(state, 'corridorB');
+
+  const corridorB =
+    state.corridorB.built
+      ? (
+        state.corridorB.queuePassengers > 0
+          ? capacityB
+          : Math.min(
+            getCorridorBDemandPpm(state),
+            capacityB,
+          )
+      )
+      : 0;
 
   return corridorA + corridorB;
 }
@@ -418,7 +437,9 @@ export function getAverageWaitMinutes(state) {
     );
 
     const waiting =
-      state.interchange.queuePassengers
+      state.terminalA.queuePassengers
+      + state.corridorB.queuePassengers
+      + state.interchange.queuePassengers
       + state.interchange.destinationQueuesPassengers.primary
       + state.interchange.destinationQueuesPassengers.secondary;
 
@@ -448,7 +469,9 @@ export function getAbandonmentPercent(state) {
 
   const abandonmentPpm = state.interchange.built
     ? (
-      state.interchange.currentAbandonmentPpm
+      state.terminalA.currentAbandonmentPpm
+      + state.corridorB.currentAbandonmentPpm
+      + state.interchange.currentAbandonmentPpm
       + state.interchange.destinationAbandonmentPpm.primary
       + state.interchange.destinationAbandonmentPpm.secondary
     )
@@ -469,18 +492,21 @@ export function getBottleneck(state) {
     const demandA = getCorridorADemandPpm(state);
     const demandB = getCorridorBDemandPpm(state);
 
-    if (
-      demandA
-      > getTerminalAIngressCapacityPpm(state)
-    ) {
-      return 'terminal-a';
-    }
+    const terminalCapacity =
+      getTerminalAIngressCapacityPpm(state);
 
-    if (
-      demandA
-      > getLineCapacityPpm(state, 'corridorA')
-    ) {
-      return 'line-a';
+    const lineACapacity =
+      getLineCapacityPpm(state, 'corridorA');
+
+    const sourceACapacity = Math.min(
+      terminalCapacity,
+      lineACapacity,
+    );
+
+    if (demandA > sourceACapacity) {
+      return terminalCapacity <= lineACapacity
+        ? 'terminal-a'
+        : 'line-a';
     }
 
     if (
@@ -705,8 +731,97 @@ function simulateLocalCorridor(state, deltaMinutes) {
   return deliveredPpm;
 }
 
+function processSourceQueue(
+  queuePassengers,
+  demandPpm,
+  capacityPpm,
+  waitingCapacityPassengers,
+  deltaMinutes,
+) {
+  const availablePassengers =
+    queuePassengers
+    + demandPpm * deltaMinutes;
+
+  const boardedPassengers = Math.min(
+    availablePassengers,
+    capacityPpm * deltaMinutes,
+  );
+
+  const waitingBeforeAbandonment = Math.max(
+    0,
+    availablePassengers - boardedPassengers,
+  );
+
+  const abandonedPassengers = Math.max(
+    0,
+    waitingBeforeAbandonment
+    - waitingCapacityPassengers,
+  );
+
+  return {
+    servedPpm:
+      deltaMinutes > 0
+        ? boardedPassengers / deltaMinutes
+        : 0,
+    queuePassengers: Math.min(
+      waitingCapacityPassengers,
+      waitingBeforeAbandonment,
+    ),
+    abandonmentPpm:
+      deltaMinutes > 0
+        ? abandonedPassengers / deltaMinutes
+        : 0,
+    abandonedPassengers,
+  };
+}
+
 function simulateInterchange(state, deltaMinutes) {
-  const ingressPpm = getInterchangeIngressPpm(state);
+  const sourceA = processSourceQueue(
+    state.terminalA.queuePassengers,
+    getCorridorADemandPpm(state),
+    Math.min(
+      state.terminalA.platformCapacityPpm,
+      getLineCapacityPpm(state, 'corridorA'),
+    ),
+    state.terminalA.waitingCapacityPassengers,
+    deltaMinutes,
+  );
+
+  state.terminalA.queuePassengers =
+    sourceA.queuePassengers;
+
+  state.terminalA.currentAbandonmentPpm =
+    sourceA.abandonmentPpm;
+
+  state.terminalA.totalAbandonedPassengers +=
+    sourceA.abandonedPassengers;
+
+  const sourceB = state.corridorB.built
+    ? processSourceQueue(
+      state.corridorB.queuePassengers,
+      getCorridorBDemandPpm(state),
+      getLineCapacityPpm(state, 'corridorB'),
+      state.corridorB.waitingCapacityPassengers,
+      deltaMinutes,
+    )
+    : {
+      servedPpm: 0,
+      queuePassengers: 0,
+      abandonmentPpm: 0,
+      abandonedPassengers: 0,
+    };
+
+  state.corridorB.queuePassengers =
+    sourceB.queuePassengers;
+
+  state.corridorB.currentAbandonmentPpm =
+    sourceB.abandonmentPpm;
+
+  state.corridorB.totalAbandonedPassengers +=
+    sourceB.abandonedPassengers;
+
+  const ingressPpm =
+    sourceA.servedPpm + sourceB.servedPpm;
 
   const availablePassengers =
     state.interchange.queuePassengers
