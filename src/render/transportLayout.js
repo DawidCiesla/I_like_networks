@@ -49,6 +49,20 @@ const BASE_WORLD = Object.freeze({
     { x: 45, y: 185, w: 58, h: 64 },
     { x: 245, y: 125, w: 66, h: 70 },
   ],
+  line3Stops: [
+    { x: -25, y: -85, w: 58, h: 64 },
+    { x: 60, y: -250, w: 58, h: 64 },
+    { x: -40, y: -390, w: 58, h: 64 },
+    { x: -190, y: -455, w: 58, h: 64 },
+    { x: -340, y: -410, w: 66, h: 70 },
+  ],
+  line4Stops: [
+    { x: 245, y: 125, w: 66, h: 70 },
+    { x: 390, y: 220, w: 58, h: 64 },
+    { x: 520, y: 130, w: 58, h: 64 },
+    { x: 455, y: -20, w: 58, h: 64 },
+    { x: 190, y: -140, w: 66, h: 70 },
+  ],
   depot: {
     x: -355,
     y: 180,
@@ -60,6 +74,8 @@ const BASE_WORLD = Object.freeze({
 export const WORLD = Object.freeze({
   line1Stops: BASE_WORLD.line1Stops.map(spreadRect),
   line2Stops: BASE_WORLD.line2Stops.map(spreadRect),
+  line3Stops: BASE_WORLD.line3Stops.map(spreadRect),
+  line4Stops: BASE_WORLD.line4Stops.map(spreadRect),
   depot: spreadRect(BASE_WORLD.depot),
 });
 
@@ -108,11 +124,65 @@ const BASE_SEGMENTS = Object.freeze({
       { x: 245, y: 125 },
     ],
   ],
+  line3: [
+    [
+      { x: -25, y: -85 },
+      { x: 55, y: -85 },
+      { x: 55, y: -250 },
+      { x: 60, y: -250 },
+    ],
+    [
+      { x: 60, y: -250 },
+      { x: 20, y: -250 },
+      { x: 20, y: -390 },
+      { x: -40, y: -390 },
+    ],
+    [
+      { x: -40, y: -390 },
+      { x: -110, y: -390 },
+      { x: -110, y: -455 },
+      { x: -190, y: -455 },
+    ],
+    [
+      { x: -190, y: -455 },
+      { x: -270, y: -455 },
+      { x: -270, y: -410 },
+      { x: -340, y: -410 },
+    ],
+  ],
+  line4: [
+    [
+      { x: 245, y: 125 },
+      { x: 330, y: 125 },
+      { x: 330, y: 220 },
+      { x: 390, y: 220 },
+    ],
+    [
+      { x: 390, y: 220 },
+      { x: 455, y: 220 },
+      { x: 455, y: 130 },
+      { x: 520, y: 130 },
+    ],
+    [
+      { x: 520, y: 130 },
+      { x: 520, y: 50 },
+      { x: 455, y: 50 },
+      { x: 455, y: -20 },
+    ],
+    [
+      { x: 455, y: -20 },
+      { x: 350, y: -20 },
+      { x: 350, y: -140 },
+      { x: 190, y: -140 },
+    ],
+  ],
 });
 
 const RAW_SEGMENTS = Object.freeze({
   line1: BASE_SEGMENTS.line1.map(spreadPolyline),
   line2: BASE_SEGMENTS.line2.map(spreadPolyline),
+  line3: BASE_SEGMENTS.line3.map(spreadPolyline),
+  line4: BASE_SEGMENTS.line4.map(spreadPolyline),
 });
 
 const DEPOT_SPUR_POINTS = Object.freeze(
@@ -341,9 +411,13 @@ export function getBuiltRoute(
 
   if (segmentCount === 0) {
     const stop =
-      lineKey === 'line1'
-        ? WORLD.line1Stops[0]
-        : WORLD.line2Stops[0];
+      WORLD[`${lineKey}Stops`]?.[0];
+
+    if (!stop) {
+      throw new Error(
+        `Unknown line: ${lineKey}`,
+      );
+    }
 
     return routeMetrics([
       { x: stop.x, y: stop.y },
@@ -396,9 +470,13 @@ export function getVehiclePoint(
   vehicle,
 ) {
   const stopRects =
-    lineKey === 'line1'
-      ? WORLD.line1Stops
-      : WORLD.line2Stops;
+    WORLD[`${lineKey}Stops`];
+
+  if (!stopRects) {
+    throw new Error(
+      `Unknown line: ${lineKey}`,
+    );
+  }
 
   const current =
     stopRects[vehicle.currentStopIndex]
