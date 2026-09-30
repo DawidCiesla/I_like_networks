@@ -424,123 +424,54 @@ export class Hud {
   }
 
   #getInspectorView(state, selection) {
-    if (selection === 'line1') {
-      return this.#getLineView(
+    if (
+      selection.startsWith(
+        'station:',
+      )
+    ) {
+      return this.#getStationView(
         state,
-        'line1',
+        selection.slice(
+          'station:'.length,
+        ),
       );
     }
 
-    if (selection === 'line2') {
-      return this.#getLineView(
+    if (
+      selection.startsWith(
+        'futureStop:',
+      )
+    ) {
+      return this.#getFutureStopView(
         state,
-        'line2',
+        selection.slice(
+          'futureStop:'.length,
+        ),
       );
     }
 
-    if (selection === 'futureStop1') {
-      const index =
-        state.line1.stopCount;
-
-      return {
-        kicker: 'EXPANSION',
-        title:
-          STOP_NAMES.line1[index],
-        subtitle:
-          'Extend Bus Line 1 to this stop',
-        stats: [
-          {
-            label: 'LINE',
-            value: '1 BUS',
-          },
-          {
-            label: 'NEW SEGMENT',
-            value: '+0.9 km',
-          },
-          {
-            label: 'NEW DEMAND',
-            value:
-              `+${state.line1.demandPerStopPpm.toFixed(1)} pax/min`,
-          },
-          {
-            label: 'AFTER BUILD',
-            value:
-              state.line1.stopCount === 1
-                ? 'SERVICE STARTS'
-                : 'LINE EXTENDS',
-          },
-        ],
-        actions: [
-          {
-            command: 'build-stop-1',
-            title: 'Build stop',
-            detail:
-              state.line1.stopCount === 1
-                ? 'Starts Line 1 with one real bus; fares are paid only when passengers arrive'
-                : 'Extends the route and creates another origin/destination',
-            costLabel: money(
-              getNextStopCost(
-                state,
-                'line1',
-              ),
-            ),
-            disabled:
-              state.money
-              < getNextStopCost(
-                state,
-                'line1',
-              ),
-          },
-        ],
-      };
+    if (
+      selection.startsWith(
+        'futureLine:',
+      )
+    ) {
+      return this.#getFutureLineView(
+        state,
+        selection.slice(
+          'futureLine:'.length,
+        ),
+      );
     }
 
-    if (selection === 'futureStop2') {
-      const index =
-        state.line2.stopCount;
-
-      return {
-        kicker: 'EXPANSION',
-        title:
-          STOP_NAMES.line2[index],
-        subtitle:
-          'Extend Bus Line 2 to this stop',
-        stats: [
-          {
-            label: 'LINE',
-            value: '2 BUS',
-          },
-          {
-            label: 'NEW SEGMENT',
-            value: '+0.8 km',
-          },
-          {
-            label: 'NEW DEMAND',
-            value:
-              `+${state.line2.demandPerStopPpm.toFixed(1)} pax/min`,
-          },
-        ],
-        actions: [
-          {
-            command: 'build-stop-2',
-            title: 'Build stop',
-            detail:
-              'Extends Line 2 and creates new passenger trips',
-            costLabel: money(
-              getNextStopCost(
-                state,
-                'line2',
-              ),
-            ),
-            disabled:
-              state.money
-              < getNextStopCost(
-                state,
-                'line2',
-              ),
-          },
-        ],
-      };
+    if (
+      LINE_KEYS.includes(
+        selection,
+      )
+    ) {
+      return this.#getLineView(
+        state,
+        selection,
+      );
     }
 
     if (selection === 'futureDepot') {
@@ -582,52 +513,352 @@ export class Hud {
     }
 
     if (selection === 'depot') {
-      return this.#getDepotView(state);
-    }
-
-    if (selection === 'futureLine2') {
-      return {
-        kicker: 'NEW SERVICE',
-        title: 'Bus Line 2',
-        subtitle:
-          'City Park → Riverside',
-        stats: [
-          {
-            label: 'MODE',
-            value: 'BUS',
-          },
-          {
-            label: 'STARTER FLEET',
-            value: '1 bus',
-          },
-          {
-            label: 'STARTER STOPS',
-            value: '2',
-          },
-          {
-            label: 'REQUIRES',
-            value: 'FREE DEPOT SLOT',
-          },
-        ],
-        actions: [
-          {
-            command: 'build-line-2',
-            title: 'Open Bus Line 2',
-            detail:
-              'Creates a second passenger service with one physical starter bus',
-            costLabel: money(
-              ECONOMY.line2BuildCost,
-            ),
-            disabled:
-              state.money
-                < ECONOMY.line2BuildCost
-              || !canUnlockLine2(state),
-          },
-        ],
-      };
+      return this.#getDepotView(
+        state,
+      );
     }
 
     return null;
+  }
+
+  #getStationView(
+    state,
+    stationId,
+  ) {
+    if (
+      !isStationBuilt(
+        state,
+        stationId,
+      )
+    ) {
+      return null;
+    }
+
+    const level =
+      getStationLevel(
+        state,
+        stationId,
+      );
+
+    const tier =
+      getStationTierName(
+        state,
+        stationId,
+      );
+
+    const servedLines =
+      getStationServedLines(
+        state,
+        stationId,
+      );
+
+    const waiting =
+      getStationWaitingPassengers(
+        state,
+        stationId,
+      );
+
+    const capacity =
+      getStationWaitingCapacity(
+        state,
+        stationId,
+      );
+
+    const demand =
+      getStationDemandPpm(
+        state,
+        stationId,
+      );
+
+    const lineLabel =
+      servedLines.length > 0
+        ? servedLines
+          .map(
+            (lineKey) =>
+              `L${lineKey.replace('line', '')}`,
+          )
+          .join(' · ')
+        : 'NOT IN SERVICE';
+
+    const actions = [];
+
+    if (
+      level
+      < STATION_UPGRADE.maxLevel
+    ) {
+      const nextTier =
+        STATION_UPGRADE
+          .tierNames[
+            level + 1
+          ];
+
+      actions.push({
+        command:
+          'upgrade-station',
+        stationId,
+        title:
+          `Upgrade to ${nextTier}`,
+        detail:
+          'More waiting space, slightly faster dwell and a larger local catchment',
+        costLabel:
+          money(
+            getStationUpgradeCost(
+              state,
+              stationId,
+            ),
+          ),
+        disabled:
+          state.money
+          < getStationUpgradeCost(
+            state,
+            stationId,
+          ),
+      });
+    }
+
+    return {
+      kicker: 'STATION',
+      title:
+        getStationName(
+          stationId,
+        ),
+      subtitle:
+        `${tier} · ${lineLabel}`,
+      stats: [
+        {
+          label: 'LEVEL',
+          value:
+            `${level} / ${STATION_UPGRADE.maxLevel}`,
+        },
+        {
+          label: 'SERVES',
+          value:
+            lineLabel,
+        },
+        {
+          label: 'WAITING',
+          value:
+            `${waiting.toFixed(
+              waiting < 10 ? 1 : 0,
+            )} pax`,
+          className:
+            waiting > capacity * 0.7
+              ? 'metric-warning'
+              : '',
+        },
+        {
+          label: 'QUEUE CAP.',
+          value:
+            `${capacity} pax / line`,
+        },
+        {
+          label: 'LOCAL DEMAND',
+          value:
+            servedLines.length > 0
+              ? `${demand.toFixed(1)} pax/min`
+              : '—',
+        },
+      ],
+      actions,
+    };
+  }
+
+  #getFutureStopView(
+    state,
+    lineKey,
+  ) {
+    if (
+      !LINE_KEYS.includes(
+        lineKey,
+      )
+    ) {
+      return null;
+    }
+
+    const line =
+      state[lineKey];
+
+    const index =
+      line.stopCount;
+
+    const name =
+      STOP_NAMES[lineKey]?.[
+        index
+      ];
+
+    const stationId =
+      STATION_IDS[lineKey]?.[
+        index
+      ];
+
+    if (
+      !name
+      || !stationId
+    ) {
+      return null;
+    }
+
+    const lineNumber =
+      lineKey.replace(
+        'line',
+        '',
+      );
+
+    const existingStation =
+      isStationBuilt(
+        state,
+        stationId,
+      );
+
+    const cost =
+      getNextStopCost(
+        state,
+        lineKey,
+      );
+
+    return {
+      kicker: 'EXPANSION',
+      title: name,
+      subtitle:
+        existingStation
+          ? `Connect Bus Line ${lineNumber} to this existing interchange`
+          : `Extend Bus Line ${lineNumber} to this stop`,
+      stats: [
+        {
+          label: 'LINE',
+          value:
+            `${lineNumber} BUS`,
+        },
+        {
+          label: 'STATION',
+          value:
+            existingStation
+              ? 'EXISTING HUB'
+              : 'NEW',
+        },
+        {
+          label: 'NEW DEMAND',
+          value:
+            `+${getStopDemandPpm(
+              state,
+              lineKey,
+              index,
+            ).toFixed(1)} pax/min`,
+        },
+        {
+          label: 'AFTER BUILD',
+          value:
+            line.stopCount <= 1
+              ? 'SERVICE STARTS'
+              : 'LINE EXTENDS',
+        },
+      ],
+      actions: [
+        {
+          command: 'build-stop',
+          lineKey,
+          title:
+            existingStation
+              ? 'Connect station'
+              : 'Build stop',
+          detail:
+            existingStation
+              ? 'Extends the route into an already developed interchange'
+              : 'Extends the route and activates another district',
+          costLabel:
+            money(cost),
+          disabled:
+            state.money < cost,
+        },
+      ],
+    };
+  }
+
+  #getFutureLineView(
+    state,
+    lineKey,
+  ) {
+    const definitions = {
+      line2: {
+        unlocked:
+          canUnlockLine2(state),
+        cost:
+          ECONOMY.line2BuildCost,
+        previous: 'Line 1',
+      },
+      line3: {
+        unlocked:
+          canUnlockLine3(state),
+        cost:
+          ECONOMY.line3BuildCost,
+        previous: 'Line 2',
+      },
+      line4: {
+        unlocked:
+          canUnlockLine4(state),
+        cost:
+          ECONOMY.line4BuildCost,
+        previous: 'Line 3',
+      },
+    };
+
+    const definition =
+      definitions[lineKey];
+
+    if (!definition) {
+      return null;
+    }
+
+    const lineNumber =
+      lineKey.replace(
+        'line',
+        '',
+      );
+
+    return {
+      kicker: 'NEW SERVICE',
+      title:
+        `Bus Line ${lineNumber}`,
+      subtitle:
+        `${STOP_NAMES[lineKey][0]} → ${STOP_NAMES[lineKey][1]}`,
+      stats: [
+        {
+          label: 'MODE',
+          value: 'BUS',
+        },
+        {
+          label: 'STARTER FLEET',
+          value: '1 bus',
+        },
+        {
+          label: 'STARTER STOPS',
+          value: '2',
+        },
+        {
+          label: 'REQUIRES',
+          value:
+            `${definition.previous} stable + garage slot`,
+        },
+      ],
+      actions: [
+        {
+          command: 'build-line',
+          lineKey,
+          title:
+            `Open Bus Line ${lineNumber}`,
+          detail:
+            'Creates a new physical service and opens fresh city growth corridors',
+          costLabel:
+            money(
+              definition.cost,
+            ),
+          disabled:
+            state.money
+              < definition.cost
+            || !definition.unlocked,
+        },
+      ],
+    };
   }
 
   #getLineView(state, lineKey) {
