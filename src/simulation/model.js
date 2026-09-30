@@ -155,6 +155,7 @@ function createLineState(lineKey) {
     nextVehicleId: 1,
     eventSerial: 0,
     lastPassengerEvent: null,
+    passengerEvents: [],
   };
 }
 
@@ -337,6 +338,10 @@ export function ensureLineRuntime(state, lineKey) {
 
   if (line.lastPassengerEvent === undefined) {
     line.lastPassengerEvent = null;
+  }
+
+  if (!Array.isArray(line.passengerEvents)) {
+    line.passengerEvents = [];
   }
 
   if (line.built && line.vehicles.length === 0) {
@@ -839,6 +844,17 @@ function emitPassengerEvent(
     count,
     fare,
   };
+
+  line.passengerEvents.push(
+    line.lastPassengerEvent,
+  );
+
+  if (line.passengerEvents.length > 24) {
+    line.passengerEvents.splice(
+      0,
+      line.passengerEvents.length - 24,
+    );
+  }
 }
 
 function unloadAtStop(
