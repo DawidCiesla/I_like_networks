@@ -1089,6 +1089,11 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 
 
 /* Bus Era — map-first progression */
+#transport-canvas {
+  cursor: grab;
+  touch-action: none;
+}
+
 #transport-canvas:active {
   cursor: grabbing;
 }
