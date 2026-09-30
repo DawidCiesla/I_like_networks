@@ -120,6 +120,90 @@ const DISTRICT_SPECS = Object.freeze([
     halfWidth: 300,
     crossRoadCount: 2,
   },
+  {
+    id: 'northQuarter',
+    name: 'North Quarter',
+    lineKey: 'line3',
+    stopIndex: 1,
+    theme: 'mixed',
+    parentRoadId: 'arterial-line3-0',
+    branchSide: -1,
+    depth: 310,
+    halfWidth: 250,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'hillcrest',
+    name: 'Hillcrest',
+    lineKey: 'line3',
+    stopIndex: 2,
+    theme: 'residential',
+    parentRoadId: 'arterial-line3-1',
+    branchSide: 1,
+    depth: 330,
+    halfWidth: 265,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'northgate',
+    name: 'Northgate',
+    lineKey: 'line3',
+    stopIndex: 3,
+    theme: 'mixed',
+    parentRoadId: 'arterial-line3-2',
+    branchSide: -1,
+    depth: 320,
+    halfWidth: 250,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'meadowEnd',
+    name: 'Meadow End',
+    lineKey: 'line3',
+    stopIndex: 4,
+    theme: 'residential',
+    parentRoadId: 'arterial-line3-3',
+    branchSide: 1,
+    depth: 360,
+    halfWidth: 285,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'docklands',
+    name: 'Docklands',
+    lineKey: 'line4',
+    stopIndex: 1,
+    theme: 'industrial',
+    parentRoadId: 'arterial-line4-0',
+    branchSide: 1,
+    depth: 350,
+    halfWidth: 300,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'eastgate',
+    name: 'Eastgate',
+    lineKey: 'line4',
+    stopIndex: 2,
+    theme: 'mixed',
+    parentRoadId: 'arterial-line4-1',
+    branchSide: -1,
+    depth: 330,
+    halfWidth: 275,
+    crossRoadCount: 2,
+  },
+  {
+    id: 'stadium',
+    name: 'Stadium',
+    lineKey: 'line4',
+    stopIndex: 3,
+    theme: 'central',
+    parentRoadId: 'arterial-line4-2',
+    branchSide: 1,
+    depth: 350,
+    halfWidth: 290,
+    crossRoadCount: 3,
+  },
 ]);
 
 function hashString(value) {
@@ -274,6 +358,102 @@ function getPrimaryRoadSpecs() {
         segment === 0
           ? 'arterial-line1-1'
           : `arterial-line2-${segment - 1}`,
+      ],
+      status: 'planned',
+      constructionProgress: 0,
+    });
+  }
+
+  const line3DistrictIds = [
+    'northQuarter',
+    'hillcrest',
+    'northgate',
+    'meadowEnd',
+  ];
+
+  for (
+    let segment = 0;
+    segment < 4;
+    segment += 1
+  ) {
+    specs.push({
+      id:
+        `arterial-line3-${segment}`,
+      districtId:
+        line3DistrictIds[
+          segment
+        ],
+      class: 'arterial',
+      points:
+        getSegmentRoute(
+          'line3',
+          segment,
+          segment + 1,
+        ).points.map(
+          (point) => ({
+            ...point,
+          }),
+        ),
+      unlock: {
+        lineKey: 'line3',
+        stopCount:
+          segment + 2,
+      },
+      buildOrder: -10,
+      source:
+        'transport-corridor',
+      parentRoadIds: [
+        segment === 0
+          ? 'arterial-line1-2'
+          : `arterial-line3-${segment - 1}`,
+      ],
+      status: 'planned',
+      constructionProgress: 0,
+    });
+  }
+
+  const line4DistrictIds = [
+    'docklands',
+    'eastgate',
+    'stadium',
+    'central',
+  ];
+
+  for (
+    let segment = 0;
+    segment < 4;
+    segment += 1
+  ) {
+    specs.push({
+      id:
+        `arterial-line4-${segment}`,
+      districtId:
+        line4DistrictIds[
+          segment
+        ],
+      class: 'arterial',
+      points:
+        getSegmentRoute(
+          'line4',
+          segment,
+          segment + 1,
+        ).points.map(
+          (point) => ({
+            ...point,
+          }),
+        ),
+      unlock: {
+        lineKey: 'line4',
+        stopCount:
+          segment + 2,
+      },
+      buildOrder: -10,
+      source:
+        'transport-corridor',
+      parentRoadIds: [
+        segment === 0
+          ? 'arterial-line2-2'
+          : `arterial-line4-${segment - 1}`,
       ],
       status: 'planned',
       constructionProgress: 0,
@@ -1474,6 +1654,8 @@ function validateParcels(
   const stops = [
     ...WORLD.line1Stops,
     ...WORLD.line2Stops.slice(1),
+    ...WORLD.line3Stops.slice(1),
+    ...WORLD.line4Stops.slice(1, -1),
   ];
 
   const accepted = [];
