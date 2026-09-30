@@ -361,6 +361,27 @@ export function getVehiclePoint(
     vehicle.phase !== 'travel'
     || vehicle.nextStopIndex == null
   ) {
+    const candidateNext =
+      vehicle.currentStopIndex
+      + (vehicle.direction >= 0 ? 1 : -1);
+
+    if (
+      candidateNext >= 0
+      && candidateNext < stopRects.length
+    ) {
+      const stationaryRoute =
+        getSegmentRoute(
+          lineKey,
+          vehicle.currentStopIndex,
+          candidateNext,
+        );
+
+      return pointOnRoute(
+        stationaryRoute,
+        0,
+      );
+    }
+
     return {
       x: current.x,
       y: current.y,
