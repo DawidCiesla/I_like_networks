@@ -621,66 +621,167 @@ function drawTree(
   );
 }
 
-function drawCityPark(
+function drawReservedSites(
   ctx,
   state,
 ) {
-  const district =
-    state.city.districts.find(
-      (candidate) =>
-        candidate.id === 'park',
-    );
-
-  if (
-    !district
-    || district.status
-      !== 'active'
-  ) {
-    return;
-  }
-
-  const age =
-    state.city.timeSeconds
-    - (district.activatedAt ?? 0);
-
-  if (age < 6) return;
-
-  const stop =
-    WORLD.line1Stops[2];
-
-  const x = stop.x - 86;
-  const y = stop.y - 100;
-  const w = 92;
-  const h = 58;
-
-  ctx.fillStyle = '#24352a';
-  ctx.fillRect(
-    x,
-    y,
-    w,
-    h,
-  );
-
-  ctx.strokeStyle = '#45644c';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(
-    x,
-    y,
-    w,
-    h,
-  );
-
   for (
-    let index = 0;
-    index < 6;
-    index += 1
+    const reservation
+    of state.city.reservations ?? []
   ) {
-    drawTree(
-      ctx,
-      x + 16 + (index % 3) * 28,
-      y + 22 + Math.floor(index / 3) * 25,
-      index,
-    );
+    if (
+      reservation.facilityType
+      === 'park'
+    ) {
+      const district =
+        state.city.districts.find(
+          (candidate) =>
+            candidate.id === 'park',
+        );
+
+      if (
+        !district
+        || district.status
+          !== 'active'
+      ) {
+        continue;
+      }
+
+      ctx.fillStyle = '#24352a';
+      ctx.fillRect(
+        reservation.x
+          - reservation.w / 2,
+        reservation.y
+          - reservation.h / 2,
+        reservation.w,
+        reservation.h,
+      );
+
+      ctx.strokeStyle = '#45644c';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        reservation.x
+          - reservation.w / 2,
+        reservation.y
+          - reservation.h / 2,
+        reservation.w,
+        reservation.h,
+      );
+
+      const columns =
+        Math.max(
+          3,
+          Math.floor(
+            reservation.w / 55,
+          ),
+        );
+
+      const rows =
+        Math.max(
+          2,
+          Math.floor(
+            reservation.h / 55,
+          ),
+        );
+
+      let seed = 0;
+
+      for (
+        let row = 0;
+        row < rows;
+        row += 1
+      ) {
+        for (
+          let col = 0;
+          col < columns;
+          col += 1
+        ) {
+          drawTree(
+            ctx,
+            reservation.x
+              - reservation.w / 2
+              + 32
+              + col
+                * (
+                  reservation.w - 64
+                )
+                / Math.max(
+                  1,
+                  columns - 1,
+                ),
+            reservation.y
+              - reservation.h / 2
+              + 34
+              + row
+                * (
+                  reservation.h - 68
+                )
+                / Math.max(
+                  1,
+                  rows - 1,
+                ),
+            seed,
+          );
+
+          seed += 1;
+        }
+      }
+
+      continue;
+    }
+
+    if (
+      reservation.facilityType
+      === 'bus-depot'
+    ) {
+      const parkDistrict =
+        state.city.districts.find(
+          (candidate) =>
+            candidate.id === 'park',
+        );
+
+      if (
+        !parkDistrict
+        || parkDistrict.status
+          !== 'active'
+      ) {
+        continue;
+      }
+
+      ctx.save();
+      ctx.setLineDash([8, 8]);
+      ctx.strokeStyle = '#565a55';
+      ctx.globalAlpha =
+        state.depot.built
+          ? 0.35
+          : 0.72;
+      ctx.lineWidth = 2;
+
+      ctx.strokeRect(
+        reservation.x
+          - reservation.w / 2,
+        reservation.y
+          - reservation.h / 2,
+        reservation.w,
+        reservation.h,
+      );
+
+      if (!state.depot.built) {
+        ctx.fillStyle = '#252724';
+        ctx.globalAlpha = 0.28;
+
+        ctx.fillRect(
+          reservation.x
+            - reservation.w / 2,
+          reservation.y
+            - reservation.h / 2,
+          reservation.w,
+          reservation.h,
+        );
+      }
+
+      ctx.restore();
+    }
   }
 }
 
@@ -928,7 +1029,7 @@ export function drawCity(
     }
   }
 
-  drawCityPark(
+  drawReservedSites(
     ctx,
     state,
   );
