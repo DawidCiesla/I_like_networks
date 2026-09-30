@@ -1,0 +1,189 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/world/terrain_renderer.gd" id="2_terrain"]
+[ext_resource type="Script" path="res://scripts/world/vegetation_renderer.gd" id="3_vegetation"]
+[ext_resource type="Script" path="res://scripts/render/network_renderer.gd" id="4_network"]
+[ext_resource type="Script" path="res://scripts/render/city_renderer.gd" id="5_city"]
+[ext_resource type="Script" path="res://scripts/camera/city_camera.gd" id="6_camera"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="7_hud"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="Terrain" type="MeshInstance3D" parent="."]
+script = ExtResource("2_terrain")
+cast_shadow = 0
+
+[node name="Vegetation" type="Node3D" parent="."]
+script = ExtResource("3_vegetation")
+
+[node name="City" type="Node3D" parent="."]
+script = ExtResource("5_city")
+
+[node name="Network" type="Node3D" parent="."]
+script = ExtResource("4_network")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-58, -35, 0)
+light_color = Color(1, 0.93, 0.8, 1)
+light_energy = 1.25
+shadow_enabled = true
+directional_shadow_max_distance = 4200.0
+
+[node name="FillLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-30, 145, 0)
+light_color = Color(0.62, 0.76, 1, 1)
+light_energy = 0.45
+shadow_enabled = false
+
+[node name="CameraRig" type="Node3D" parent="."]
+script = ExtResource("6_camera")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+current = true
+fov = 46.0
+near = 1.0
+far = 9000.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("7_hud")
+
+[node name="Root" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopBar" type="HBoxContainer" parent="HUD/Root"]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 16.0
+offset_right = 870.0
+offset_bottom = 62.0
+theme_override_constants/separation = 18
+
+[node name="Money" type="Label" parent="HUD/Root/TopBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.88, 1)
+theme_override_font_sizes/font_size = 28
+text = "$100"
+
+[node name="Network" type="Label" parent="HUD/Root/TopBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 20
+text = "0 LINES · 0 BUSES"
+
+[node name="SpeedPanel" type="PanelContainer" parent="HUD/Root"]
+layout_mode = 0
+offset_left = 650.0
+offset_top = 16.0
+offset_right = 950.0
+offset_bottom = 62.0
+mouse_filter = 0
+
+[node name="Row" type="HBoxContainer" parent="HUD/Root/SpeedPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Pause" type="Button" parent="HUD/Root/SpeedPanel/Row"]
+layout_mode = 2
+text = "Ⅱ"
+
+[node name="Speed1" type="Button" parent="HUD/Root/SpeedPanel/Row"]
+layout_mode = 2
+text = "1×"
+
+[node name="Speed2" type="Button" parent="HUD/Root/SpeedPanel/Row"]
+layout_mode = 2
+text = "2×"
+
+[node name="Speed4" type="Button" parent="HUD/Root/SpeedPanel/Row"]
+layout_mode = 2
+text = "4×"
+
+[node name="Inspector" type="PanelContainer" parent="HUD/Root"]
+visible = false
+layout_mode = 0
+offset_left = 18.0
+offset_top = 92.0
+offset_right = 390.0
+offset_bottom = 560.0
+mouse_filter = 0
+
+[node name="Margin" type="MarginContainer" parent="HUD/Root/Inspector"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 16
+
+[node name="Content" type="VBoxContainer" parent="HUD/Root/Inspector/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="HUD/Root/Inspector/Margin/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.88, 1)
+theme_override_font_sizes/font_size = 24
+text = "INSPECTOR"
+
+[node name="Body" type="Label" parent="HUD/Root/Inspector/Margin/Content"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.76, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 15
+text = "Object details"
+autowrap_mode = 2
+
+[node name="PrimaryButton" type="Button" parent="HUD/Root/Inspector/Margin/Content"]
+layout_mode = 2
+text = "ACTION"
+
+[node name="FleetButtons" type="VBoxContainer" parent="HUD/Root/Inspector/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="DepotUpgradeButton" type="Button" parent="HUD/Root/Inspector/Margin/Content"]
+visible = false
+layout_mode = 2
+text = "EXPAND GARAGE"
+
+[node name="CloseButton" type="Button" parent="HUD/Root/Inspector/Margin/Content"]
+layout_mode = 2
+text = "CLOSE"
+
+[node name="Objective" type="Label" parent="HUD/Root"]
+layout_mode = 0
+offset_left = 420.0
+offset_top = 836.0
+offset_right = 1180.0
+offset_bottom = 878.0
+theme_override_colors/font_color = Color(0.88, 0.88, 0.82, 1)
+theme_override_font_sizes/font_size = 17
+text = "BUY MARKET SQUARE"
+horizontal_alignment = 1
+
+[node name="Toast" type="Label" parent="HUD/Root"]
+visible = false
+layout_mode = 0
+offset_left = 500.0
+offset_top = 90.0
+offset_right = 1100.0
+offset_bottom = 132.0
+theme_override_colors/font_color = Color(1, 0.94, 0.62, 1)
+theme_override_font_sizes/font_size = 19
+text = "Toast"
+horizontal_alignment = 1
+
+[node name="ResetButton" type="Button" parent="HUD/Root"]
+layout_mode = 0
+offset_left = 1458.0
+offset_top = 16.0
+offset_right = 1582.0
+offset_bottom = 58.0
+mouse_filter = 0
+text = "RESET"
