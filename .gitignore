@@ -3,3 +3,8 @@ node_modules/
 .vscode/
 .idea/
 coverage/
+
+# Godot editor/runtime cache
+godot/.godot/
+godot/.import/
+godot/builds/
