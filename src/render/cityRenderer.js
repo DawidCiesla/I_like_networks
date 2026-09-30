@@ -174,6 +174,23 @@ function drawRoadSurface(
   ctx.restore();
 }
 
+function roadParentsBuilt(
+  state,
+  road,
+) {
+  const parents =
+    road.parentRoadIds ?? [];
+
+  return parents.every(
+    (parentId) =>
+      state.city.roads.some(
+        (candidate) =>
+          candidate.id === parentId
+          && candidate.status === 'built',
+      ),
+  );
+}
+
 function drawPlannedRoad(
   ctx,
   metrics,
@@ -1002,6 +1019,10 @@ export function drawCity(
       road.status === 'planned'
       && district?.status === 'active'
       && road.source === 'city'
+      && roadParentsBuilt(
+        state,
+        road,
+      )
     ) {
       drawPlannedRoad(
         ctx,
