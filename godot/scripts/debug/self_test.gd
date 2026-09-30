@@ -10,6 +10,7 @@ func _init() -> void:
 	_test_route_geometry()
 	_test_terrain_determinism()
 	_test_arrival_fare_simulation()
+	_test_master_plan_fixture()
 	print("GODOT PORT SELF-TEST: PASS")
 	quit(0)
 
@@ -87,3 +88,17 @@ func _test_arrival_fare_simulation() -> void:
 	assert(store.station_level("old-town") == 0)
 
 	store.free()
+
+
+func _test_master_plan_fixture() -> void:
+	var file := FileAccess.open("res://data/master_plan_284731.json", FileAccess.READ)
+	assert(file != null)
+
+	var parsed = JSON.parse_string(file.get_as_text())
+	assert(typeof(parsed) == TYPE_DICTIONARY)
+	assert(int(parsed["seed"]) == Data.DEFAULT_CITY_SEED)
+	assert(parsed["districts"].size() == 15)
+	assert(parsed["roads"].size() == 105)
+	assert(parsed["graphEdges"].size() == 342)
+	assert(parsed["junctions"].size() == 92)
+	assert(parsed["parcels"].size() == 161)
