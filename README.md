@@ -40,15 +40,21 @@ Implemented now:
 - garage capacity limits the total fleet,
 - the depot itself can be expanded,
 - line upgrades unlock progressively,
+- passengers are generated at specific stops with real destinations,
+- waiting passengers are visible at individual stops,
+- buses carry an explicit onboard passenger load,
+- passengers visibly board and alight,
+- **money is credited only when passengers reach their destination and leave the bus**,
+- fare income appears as discrete arrival payments instead of passive per-second income,
 - overloaded services accumulate waiting passengers,
-- Line 2 unlocks only after Line 1 reaches its full route and is operationally stable,
+- Line 2 unlocks only after Line 1 reaches its full route, is operationally stable and the depot has a free vehicle slot,
 - Line 2 then grows with the same map-first pattern,
 - reset returns to the true one-stop fresh start,
 - saves from T1 and earlier prototypes are migrated.
 
 The global BUILD panel is no longer the primary expansion interface. The map is.
 
-See [`docs/bus-era.md`](docs/bus-era.md) for the current progression contract.
+See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract and [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy.
 
 ## Planned transport families
 

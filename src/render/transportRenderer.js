@@ -1,15 +1,16 @@
 import {
   ECONOMY,
   STOP_NAMES,
-  TRANSPORT_MODES,
   canBuildDepot,
   canUnlockLine2,
   getAverageWaitMinutes,
   getBottleneck,
   getDeliveredPassengersPpm,
-  getIncomePerSecond,
+  getLastFareEventValue,
   getLineDemandPpm,
   getNextStopCost,
+  getStopWaitingPassengers,
+  getVehicleOnboardPassengers,
 } from '../simulation/model.js';
 
 const clamp = (value, min, max) =>
@@ -70,48 +71,58 @@ function routeMetrics(points) {
   };
 }
 
-function pointOnRoute(metrics, distance) {
-  if (metrics.total <= 0) {
-    return {
-      x: metrics.points[0]?.x ?? 0,
-      y: metrics.points[0]?.y ?? 0,
-      tx: 1,
-      ty: 0,
-    };
-  }
-
-  const wrapped =
-    ((distance % metrics.total) + metrics.total)
-    % metrics.total;
-
-  const segment =
-    metrics.segments.find(
-      (item) =>
-        wrapped <= item.start + item.length,
-    )
-    ?? metrics.segments.at(-1);
-
-  const local = clamp(
-    (wrapped - segment.start)
-      / Math.max(1, segment.length),
-    0,
-    1,
-  );
-
-  return {
-    x: segment.a.x + segment.dx * local,
-    y: segment.a.y + segment.dy * local,
-    tx: segment.dx / Math.max(1, segment.length),
-    ty: segment.dy / Math.max(1, segment.length),
-  };
-}
-
 function builtRoute(stopRects, stopCount) {
   return routeMetrics(
     stopRects
       .slice(0, Math.max(1, stopCount))
       .map(({ x, y }) => ({ x, y })),
   );
+}
+
+function vehiclePoint(vehicle, stopRects) {
+  const current =
+    stopRects[vehicle.currentStopIndex]
+    ?? stopRects[0];
+
+  if (
+    vehicle.phase !== 'travel'
+    || vehicle.nextStopIndex == null
+  ) {
+    return {
+      x: current.x,
+      y: current.y,
+      tx: vehicle.direction >= 0 ? 1 : -1,
+      ty: 0,
+    };
+  }
+
+  const next =
+    stopRects[vehicle.nextStopIndex]
+    ?? current;
+
+  const duration = Math.max(
+    1e-6,
+    vehicle.phaseDurationMinutes ?? 1,
+  );
+
+  const progress = clamp(
+    1
+      - (vehicle.phaseMinutesRemaining ?? 0)
+        / duration,
+    0,
+    1,
+  );
+
+  const dx = next.x - current.x;
+  const dy = next.y - current.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+
+  return {
+    x: current.x + dx * progress,
+    y: current.y + dy * progress,
+    tx: dx / length,
+    ty: dy / length,
+  };
 }
 
 export class TransportRenderer {
@@ -139,11 +150,18 @@ export class TransportRenderer {
       startY: 0,
     };
 
-    this.time = 0;
     this.selected = null;
     this.hitTargets = [];
     this.onSelectionChanged =
       onSelectionChanged;
+
+    this.seenEventSerial = {
+      line1: 0,
+      line2: 0,
+    };
+
+    this.passengerAnimations = [];
+    this.farePopups = [];
 
     this.#bindInput();
     this.resize();
@@ -280,8 +298,25 @@ export class TransportRenderer {
   }
 
   render(state, deltaSeconds) {
-    this.time += deltaSeconds;
     this.hitTargets = [];
+
+    this.#capturePassengerEvents(
+      state,
+      'line1',
+      WORLD.line1Stops,
+      LINE_1_COLOR,
+    );
+
+    this.#capturePassengerEvents(
+      state,
+      'line2',
+      WORLD.line2Stops,
+      LINE_2_COLOR,
+    );
+
+    this.#updateTransientAnimations(
+      deltaSeconds,
+    );
 
     const ctx = this.ctx;
 
@@ -327,6 +362,8 @@ export class TransportRenderer {
     );
 
     this.#drawBusEra(ctx, state);
+    this.#drawPassengerAnimations(ctx);
+    this.#drawFarePopups(ctx);
 
     ctx.restore();
   }
@@ -380,100 +417,162 @@ export class TransportRenderer {
   }
 
   #drawBusEra(ctx, state) {
-    this.#drawLine1(ctx, state);
-    this.#drawDepot(ctx, state);
-    this.#drawLine2(ctx, state);
-    this.#drawSystemReadout(ctx, state);
-  }
-
-  #drawLine1(ctx, state) {
-    const route = builtRoute(
+    this.#drawLine(
+      ctx,
+      state,
+      'line1',
       WORLD.line1Stops,
-      state.line1.stopCount,
+      STOP_NAMES.line1,
+      LINE_1_COLOR,
+      1,
     );
 
-    if (state.line1.built) {
+    this.#drawDepot(ctx, state);
+
+    if (state.line2.built) {
+      this.#drawLine(
+        ctx,
+        state,
+        'line2',
+        WORLD.line2Stops,
+        STOP_NAMES.line2,
+        LINE_2_COLOR,
+        2,
+      );
+    } else {
+      this.#drawFutureLine2(ctx, state);
+    }
+
+    this.#drawSystemReadout(
+      ctx,
+      state,
+    );
+  }
+
+  #drawLine(
+    ctx,
+    state,
+    lineKey,
+    stopRects,
+    stopNames,
+    color,
+    lineNumber,
+  ) {
+    const line = state[lineKey];
+
+    const route = builtRoute(
+      stopRects,
+      line.stopCount,
+    );
+
+    if (line.built) {
       this.#drawTransitLine(
         ctx,
         route,
-        LINE_1_COLOR,
-        1,
-      );
-
-      this.#drawVehicles(
-        ctx,
-        route,
-        state.line1.fleetCount,
-        LINE_1_COLOR,
-        state.line1.mode,
+        color,
+        lineNumber,
       );
     }
 
     for (
       let index = 0;
-      index < state.line1.stopCount;
+      index < line.stopCount;
       index += 1
     ) {
-      const rect =
-        WORLD.line1Stops[index];
+      if (
+        lineKey === 'line2'
+        && index === 0
+      ) {
+        continue;
+      }
+
+      const rect = stopRects[index];
 
       this.#drawStop(
         ctx,
         rect,
-        STOP_NAMES.line1[index],
+        stopNames[index],
         index + 1,
-        LINE_1_COLOR,
-        this.selected === 'line1',
-        index === 0,
+        color,
+        this.selected === lineKey,
+        lineKey === 'line1' && index === 0,
+      );
+
+      this.#drawWaitingPassengers(
+        ctx,
+        state,
+        lineKey,
+        index,
+        rect,
+        color,
       );
 
       this.hitTargets.push({
-        id: 'line1',
+        id: lineKey,
         rect,
       });
     }
 
-    if (
-      state.line1.stopCount
-      < ECONOMY.maxLine1Stops
-    ) {
+    if (line.built) {
+      for (const vehicle of line.vehicles) {
+        this.#drawVehicle(
+          ctx,
+          vehicle,
+          stopRects,
+          color,
+        );
+      }
+    }
+
+    const maxStops =
+      lineKey === 'line1'
+        ? ECONOMY.maxLine1Stops
+        : ECONOMY.maxLine2Stops;
+
+    if (line.stopCount < maxStops) {
       const current =
-        WORLD.line1Stops[
-          state.line1.stopCount - 1
-        ];
+        stopRects[line.stopCount - 1];
 
       const next =
-        WORLD.line1Stops[
-          state.line1.stopCount
-        ];
+        stopRects[line.stopCount];
 
       const ghostRoute = routeMetrics([
-        { x: current.x, y: current.y },
-        { x: next.x, y: next.y },
+        {
+          x: current.x,
+          y: current.y,
+        },
+        {
+          x: next.x,
+          y: next.y,
+        },
       ]);
 
       this.#drawGhostLine(
         ctx,
         ghostRoute,
-        LINE_1_COLOR,
+        color,
       );
 
       this.#drawFutureStop(
         ctx,
         next,
-        STOP_NAMES.line1[
-          state.line1.stopCount
-        ],
+        stopNames[line.stopCount],
         getNextStopCost(
           state,
-          'line1',
+          lineKey,
         ),
-        LINE_1_COLOR,
-        this.selected === 'futureStop1',
+        color,
+        this.selected
+          === (lineKey === 'line1'
+            ? 'futureStop1'
+            : 'futureStop2'),
       );
 
       this.hitTargets.push({
-        id: 'futureStop1',
+        id:
+          lineKey === 'line1'
+            ? 'futureStop1'
+            : 'futureStop2',
         rect: {
           ...next,
           w: 86,
@@ -481,31 +580,46 @@ export class TransportRenderer {
         },
       });
     }
+  }
 
-    if (
-      state.line1.queuePassengers > 0
-    ) {
-      const first =
-        WORLD.line1Stops[0];
+  #drawFutureLine2(ctx, state) {
+    if (!canUnlockLine2(state)) return;
 
-      this.#drawPassengerQueue(
-        ctx,
-        first.x - 66,
-        first.y + 54,
-        state.line1.queuePassengers,
-        state.line1.waitingCapacityPassengers,
-      );
-    }
+    const start = WORLD.line2Stops[0];
+    const next = WORLD.line2Stops[1];
 
-    if (state.line1.built) {
-      this.#drawRevenuePulse(
-        ctx,
-        state,
-        WORLD.line1Stops[
-          state.line1.stopCount - 1
-        ],
-      );
-    }
+    const route = routeMetrics([
+      {
+        x: start.x,
+        y: start.y,
+      },
+      {
+        x: next.x,
+        y: next.y,
+      },
+    ]);
+
+    this.#drawGhostLine(
+      ctx,
+      route,
+      LINE_2_COLOR,
+    );
+
+    this.#drawFutureLine(
+      ctx,
+      next,
+      ECONOMY.line2BuildCost,
+      this.selected === 'futureLine2',
+    );
+
+    this.hitTargets.push({
+      id: 'futureLine2',
+      rect: {
+        ...next,
+        w: 104,
+        h: 92,
+      },
+    });
   }
 
   #drawDepot(ctx, state) {
@@ -583,155 +697,6 @@ export class TransportRenderer {
     });
   }
 
-  #drawLine2(ctx, state) {
-    if (!state.line2.built) {
-      if (!canUnlockLine2(state)) return;
-
-      const route = routeMetrics([
-        {
-          x: WORLD.line2Stops[0].x,
-          y: WORLD.line2Stops[0].y,
-        },
-        {
-          x: WORLD.line2Stops[1].x,
-          y: WORLD.line2Stops[1].y,
-        },
-      ]);
-
-      this.#drawGhostLine(
-        ctx,
-        route,
-        LINE_2_COLOR,
-      );
-
-      this.#drawFutureLine(
-        ctx,
-        WORLD.line2Stops[1],
-        ECONOMY.line2BuildCost,
-        this.selected === 'futureLine2',
-      );
-
-      this.hitTargets.push({
-        id: 'futureLine2',
-        rect: {
-          ...WORLD.line2Stops[1],
-          w: 104,
-          h: 92,
-        },
-      });
-
-      return;
-    }
-
-    const route = builtRoute(
-      WORLD.line2Stops,
-      state.line2.stopCount,
-    );
-
-    this.#drawTransitLine(
-      ctx,
-      route,
-      LINE_2_COLOR,
-      2,
-    );
-
-    this.#drawVehicles(
-      ctx,
-      route,
-      state.line2.fleetCount,
-      LINE_2_COLOR,
-      state.line2.mode,
-    );
-
-    for (
-      let index = 1;
-      index < state.line2.stopCount;
-      index += 1
-    ) {
-      const rect =
-        WORLD.line2Stops[index];
-
-      this.#drawStop(
-        ctx,
-        rect,
-        STOP_NAMES.line2[index],
-        index + 1,
-        LINE_2_COLOR,
-        this.selected === 'line2',
-        false,
-      );
-
-      this.hitTargets.push({
-        id: 'line2',
-        rect,
-      });
-    }
-
-    if (
-      state.line2.stopCount
-      < ECONOMY.maxLine2Stops
-    ) {
-      const current =
-        WORLD.line2Stops[
-          state.line2.stopCount - 1
-        ];
-
-      const next =
-        WORLD.line2Stops[
-          state.line2.stopCount
-        ];
-
-      const ghostRoute = routeMetrics([
-        { x: current.x, y: current.y },
-        { x: next.x, y: next.y },
-      ]);
-
-      this.#drawGhostLine(
-        ctx,
-        ghostRoute,
-        LINE_2_COLOR,
-      );
-
-      this.#drawFutureStop(
-        ctx,
-        next,
-        STOP_NAMES.line2[
-          state.line2.stopCount
-        ],
-        getNextStopCost(
-          state,
-          'line2',
-        ),
-        LINE_2_COLOR,
-        this.selected === 'futureStop2',
-      );
-
-      this.hitTargets.push({
-        id: 'futureStop2',
-        rect: {
-          ...next,
-          w: 86,
-          h: 86,
-        },
-      });
-    }
-
-    if (
-      state.line2.queuePassengers > 0
-    ) {
-      const firstNewStop =
-        WORLD.line2Stops[1];
-
-      this.#drawPassengerQueue(
-        ctx,
-        firstNewStop.x - 65,
-        firstNewStop.y + 53,
-        state.line2.queuePassengers,
-        state.line2.waitingCapacityPassengers,
-      );
-    }
-  }
-
   #traceRoute(ctx, metrics) {
     ctx.beginPath();
 
@@ -780,12 +745,15 @@ export class TransportRenderer {
     ctx.stroke();
 
     for (
-      let distance = 18;
-      distance < metrics.total;
-      distance += 48
+      let index = 0;
+      index < metrics.segments.length;
+      index += 1
     ) {
-      const point =
-        pointOnRoute(metrics, distance);
+      const segment = metrics.segments[index];
+      const x =
+        segment.a.x + segment.dx * 0.5;
+      const y =
+        segment.a.y + segment.dy * 0.5;
 
       ctx.fillStyle = '#121212';
       ctx.strokeStyle = color;
@@ -793,8 +761,8 @@ export class TransportRenderer {
 
       ctx.beginPath();
       ctx.arc(
-        point.x,
-        point.y,
+        x,
+        y,
         7,
         0,
         Math.PI * 2,
@@ -809,8 +777,8 @@ export class TransportRenderer {
 
       ctx.fillText(
         String(lineNumber),
-        point.x,
-        point.y + 2.5,
+        x,
+        y + 2.5,
       );
     }
 
@@ -856,50 +824,23 @@ export class TransportRenderer {
     ctx.restore();
   }
 
-  #drawVehicles(
+  #drawVehicle(
     ctx,
-    metrics,
-    fleetCount,
+    vehicle,
+    stopRects,
     color,
-    mode,
   ) {
-    if (
-      fleetCount <= 0
-      || metrics.total <= 0
-    ) {
-      return;
-    }
-
-    const modeConfig =
-      TRANSPORT_MODES[mode]
-      ?? TRANSPORT_MODES.bus;
-
-    const speed =
-      26 + modeConfig.speedKph * 0.32;
-
-    for (
-      let index = 0;
-      index < fleetCount;
-      index += 1
-    ) {
-      const point = pointOnRoute(
-        metrics,
-        this.time * speed
-          + index / fleetCount
-            * metrics.total,
+    const point =
+      vehiclePoint(
+        vehicle,
+        stopRects,
       );
 
-      this.#drawBus(
-        ctx,
-        point,
-        color,
-      );
-    }
-  }
-
-  #drawBus(ctx, point, color) {
     const angle =
-      Math.atan2(point.ty, point.tx);
+      Math.atan2(
+        point.ty,
+        point.tx,
+      );
 
     ctx.save();
 
@@ -911,20 +852,54 @@ export class TransportRenderer {
     ctx.rotate(angle);
 
     ctx.fillStyle = '#050505';
-    ctx.fillRect(-10, -6, 20, 12);
+    ctx.fillRect(-11, -7, 22, 14);
 
     ctx.fillStyle = color;
-    ctx.fillRect(-9, -5, 18, 10);
+    ctx.fillRect(-10, -6, 20, 12);
 
     ctx.fillStyle = '#d9f6ff';
-    ctx.fillRect(-6, -4, 4, 4);
-    ctx.fillRect(1, -4, 4, 4);
+    ctx.fillRect(-7, -5, 5, 4);
+    ctx.fillRect(1, -5, 5, 4);
 
     ctx.fillStyle = '#111';
-    ctx.fillRect(-7, 5, 4, 2);
-    ctx.fillRect(3, 5, 4, 2);
+    ctx.fillRect(-8, 6, 4, 2);
+    ctx.fillRect(4, 6, 4, 2);
 
     ctx.restore();
+
+    const onboard =
+      getVehicleOnboardPassengers(vehicle);
+
+    if (onboard > 0.05) {
+      ctx.fillStyle = '#111';
+      ctx.strokeStyle = '#efeee8';
+      ctx.lineWidth = 1.5;
+
+      ctx.fillRect(
+        point.x - 14,
+        point.y - 23,
+        28,
+        14,
+      );
+
+      ctx.strokeRect(
+        point.x - 14,
+        point.y - 23,
+        28,
+        14,
+      );
+
+      ctx.fillStyle = '#efeee8';
+      ctx.font =
+        '8px "Lucida Console", monospace';
+      ctx.textAlign = 'center';
+
+      ctx.fillText(
+        `${Math.round(onboard)} pax`,
+        point.x,
+        point.y - 13,
+      );
+    }
   }
 
   #drawStop(
@@ -1000,6 +975,91 @@ export class TransportRenderer {
       label.toUpperCase(),
       x,
       y + height / 2 + 16,
+    );
+  }
+
+  #drawWaitingPassengers(
+    ctx,
+    state,
+    lineKey,
+    stopIndex,
+    rect,
+    color,
+  ) {
+    const waiting =
+      getStopWaitingPassengers(
+        state,
+        lineKey,
+        stopIndex,
+      );
+
+    if (waiting <= 0.05) return;
+
+    const visible =
+      clamp(
+        Math.ceil(waiting),
+        1,
+        8,
+      );
+
+    const startX =
+      rect.x - 22;
+
+    const y =
+      rect.y + 36;
+
+    for (
+      let index = 0;
+      index < visible;
+      index += 1
+    ) {
+      const px =
+        startX + index * 7;
+
+      ctx.fillStyle = '#efeee8';
+      ctx.fillRect(
+        px,
+        y,
+        3,
+        3,
+      );
+
+      ctx.fillStyle = color;
+      ctx.fillRect(
+        px - 1,
+        y + 4,
+        5,
+        6,
+      );
+    }
+
+    ctx.fillStyle = '#151515';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+
+    ctx.fillRect(
+      rect.x - 19,
+      rect.y + 49,
+      38,
+      14,
+    );
+
+    ctx.strokeRect(
+      rect.x - 19,
+      rect.y + 49,
+      38,
+      14,
+    );
+
+    ctx.fillStyle = '#efeee8';
+    ctx.font =
+      '8px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+
+    ctx.fillText(
+      `${waiting.toFixed(waiting < 10 ? 1 : 0)} WAIT`,
+      rect.x,
+      rect.y + 59,
     );
   }
 
@@ -1166,7 +1226,8 @@ export class TransportRenderer {
       index += 1
     ) {
       const col = index % 4;
-      const row = Math.floor(index / 4);
+      const row =
+        Math.floor(index / 4);
 
       const px =
         x - 36 + col * 24;
@@ -1263,138 +1324,193 @@ export class TransportRenderer {
     );
   }
 
-  #drawPassengerQueue(
-    ctx,
-    x,
-    y,
-    waiting,
-    capacity,
+  #capturePassengerEvents(
+    state,
+    lineKey,
+    stopRects,
+    color,
   ) {
-    const ratio =
-      capacity > 0
-        ? clamp(
-          waiting / capacity,
-          0,
+    const line = state[lineKey];
+
+    if (!Array.isArray(line?.passengerEvents)) {
+      return;
+    }
+
+    const unseen =
+      line.passengerEvents.filter(
+        (event) =>
+          event.serial
+          > this.seenEventSerial[lineKey],
+      );
+
+    for (const event of unseen) {
+      const stop =
+        stopRects[event.stopIndex];
+
+      if (!stop) continue;
+
+      const visibleCount =
+        clamp(
+          Math.ceil(event.count),
           1,
-        )
-        : 0;
+          6,
+        );
 
-    const color =
-      ratio >= 0.9
-        ? '#e91e47'
-        : ratio >= 0.5
-          ? '#f4ca00'
-          : '#efeee8';
+      for (
+        let index = 0;
+        index < visibleCount;
+        index += 1
+      ) {
+        const spread =
+          (index - (visibleCount - 1) / 2)
+          * 6;
 
-    ctx.fillStyle = '#151515';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+        const fromX =
+          event.type === 'board'
+            ? stop.x + spread
+            : stop.x;
 
-    ctx.fillRect(
-      x,
-      y,
-      132,
-      33,
-    );
+        const fromY =
+          event.type === 'board'
+            ? stop.y + 40
+            : stop.y;
 
-    ctx.strokeRect(
-      x,
-      y,
-      132,
-      33,
-    );
+        const toX =
+          event.type === 'board'
+            ? stop.x
+            : stop.x + spread;
 
-    const people = clamp(
-      Math.ceil(ratio * 10),
-      0,
-      10,
-    );
+        const toY =
+          event.type === 'board'
+            ? stop.y
+            : stop.y + 40;
 
-    for (
-      let index = 0;
-      index < 10;
-      index += 1
-    ) {
-      const px =
-        x + 10 + index * 10;
+        this.passengerAnimations.push({
+          type: event.type,
+          color,
+          fromX,
+          fromY,
+          toX,
+          toY,
+          age: 0,
+          duration: 0.75,
+        });
+      }
 
-      ctx.fillStyle =
-        index < people
-          ? color
-          : '#333';
+      if (
+        event.type === 'alight'
+        && event.fare > 0
+      ) {
+        this.farePopups.push({
+          x: stop.x + 28,
+          y: stop.y - 20,
+          value: event.fare,
+          age: 0,
+          duration: 1.5,
+        });
+      }
 
+      this.seenEventSerial[lineKey] =
+        Math.max(
+          this.seenEventSerial[lineKey],
+          event.serial,
+        );
+    }
+  }
+
+  #updateTransientAnimations(
+    deltaSeconds,
+  ) {
+    for (const animation of this.passengerAnimations) {
+      animation.age += deltaSeconds;
+    }
+
+    this.passengerAnimations =
+      this.passengerAnimations.filter(
+        (animation) =>
+          animation.age
+          < animation.duration,
+      );
+
+    for (const popup of this.farePopups) {
+      popup.age += deltaSeconds;
+    }
+
+    this.farePopups =
+      this.farePopups.filter(
+        (popup) =>
+          popup.age
+          < popup.duration,
+      );
+  }
+
+  #drawPassengerAnimations(ctx) {
+    for (const animation of this.passengerAnimations) {
+      const t = clamp(
+        animation.age / animation.duration,
+        0,
+        1,
+      );
+
+      const x =
+        animation.fromX
+        + (animation.toX - animation.fromX)
+          * t;
+
+      const y =
+        animation.fromY
+        + (animation.toY - animation.fromY)
+          * t;
+
+      ctx.globalAlpha =
+        1 - t * 0.25;
+
+      ctx.fillStyle = '#efeee8';
       ctx.fillRect(
-        px,
-        y + 8,
+        x,
+        y,
         4,
         4,
       );
 
+      ctx.fillStyle =
+        animation.color;
+
       ctx.fillRect(
-        px - 1,
-        y + 13,
+        x - 1,
+        y + 5,
         6,
         7,
       );
+
+      ctx.globalAlpha = 1;
     }
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font =
-      '8px "Lucida Console", monospace';
-    ctx.textAlign = 'left';
-
-    ctx.fillText(
-      `WAITING ${waiting.toFixed(0)}`,
-      x + 8,
-      y + 29,
-    );
   }
 
-  #drawRevenuePulse(
-    ctx,
-    state,
-    lastStop,
-  ) {
-    const income =
-      getIncomePerSecond(state);
+  #drawFarePopups(ctx) {
+    for (const popup of this.farePopups) {
+      const t = clamp(
+        popup.age / popup.duration,
+        0,
+        1,
+      );
 
-    if (income <= 0) return;
+      ctx.globalAlpha =
+        1 - t;
 
-    const phase =
-      this.time % 2.2;
+      ctx.fillStyle = '#b9ff8b';
+      ctx.font =
+        '11px "Lucida Console", monospace';
+      ctx.textAlign = 'left';
 
-    const alpha = clamp(
-      1 - phase / 2.2,
-      0.15,
-      1,
-    );
+      ctx.fillText(
+        `+$${popup.value.toFixed(0)}`,
+        popup.x,
+        popup.y - t * 18,
+      );
 
-    ctx.globalAlpha = alpha;
-
-    ctx.fillStyle = '#ffe000';
-    ctx.beginPath();
-
-    ctx.arc(
-      lastStop.x + 42,
-      lastStop.y - phase * 8,
-      7,
-      0,
-      Math.PI * 2,
-    );
-
-    ctx.fill();
-
-    ctx.fillStyle = '#b9ff8b';
-    ctx.font =
-      '10px "Lucida Console", monospace';
-
-    ctx.fillText(
-      `+${income.toFixed(1)}`,
-      lastStop.x + 54,
-      lastStop.y + 3 - phase * 8,
-    );
-
-    ctx.globalAlpha = 1;
+      ctx.globalAlpha = 1;
+    }
   }
 
   #drawSystemReadout(ctx, state) {
@@ -1409,6 +1525,9 @@ export class TransportRenderer {
     const bottleneck =
       getBottleneck(state);
 
+    const lastFare =
+      getLastFareEventValue(state);
+
     const x = -35;
     const y = -250;
 
@@ -1417,17 +1536,17 @@ export class TransportRenderer {
     ctx.lineWidth = 2;
 
     ctx.fillRect(
-      x - 105,
+      x - 112,
       y - 18,
-      210,
-      52,
+      224,
+      66,
     );
 
     ctx.strokeRect(
-      x - 105,
+      x - 112,
       y - 18,
-      210,
-      52,
+      224,
+      66,
     );
 
     ctx.fillStyle = '#efeee8';
@@ -1436,8 +1555,8 @@ export class TransportRenderer {
     ctx.textAlign = 'left';
 
     ctx.fillText(
-      `DELIVERED ${delivered.toFixed(1)} pax/min`,
-      x - 95,
+      `RECENT ARRIVALS ${delivered.toFixed(1)} pax/min`,
+      x - 102,
       y,
     );
 
@@ -1448,7 +1567,7 @@ export class TransportRenderer {
 
     ctx.fillText(
       `AVG WAIT ${wait.toFixed(1)} min`,
-      x - 95,
+      x - 102,
       y + 14,
     );
 
@@ -1459,8 +1578,18 @@ export class TransportRenderer {
 
     ctx.fillText(
       `STATUS ${bottleneck.toUpperCase()}`,
-      x - 95,
+      x - 102,
       y + 28,
+    );
+
+    ctx.fillStyle = '#b9ff8b';
+
+    ctx.fillText(
+      lastFare > 0
+        ? `LAST ARRIVAL +$${lastFare.toFixed(0)}`
+        : 'LAST ARRIVAL —',
+      x - 102,
+      y + 42,
     );
   }
 
