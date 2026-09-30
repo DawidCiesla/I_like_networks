@@ -4,17 +4,18 @@ import {
   TRANSPORT_MODES,
   canBuildDepot,
   canUnlockLine2,
-  getAbandonmentPercent,
   getAverageWaitMinutes,
   getBottleneck,
   getDeliveredPassengersPpm,
   getGarageUsed,
-  getIncomePerSecond,
+  getLastFareEventValue,
   getLineCapacityPpm,
   getLineDemandPpm,
   getLineFrequencyPerHour,
   getLineHeadwayMinutes,
+  getLineOnboardPassengers,
   getLineOneWayMinutes,
+  getLineWaitingPassengers,
   getNextStopCost,
   getUpgradeCost,
   getVehiclePurchaseCost,
@@ -172,8 +173,8 @@ export class Hud {
     const delivered =
       getDeliveredPassengersPpm(state);
 
-    const income =
-      getIncomePerSecond(state);
+    const lastFare =
+      getLastFareEventValue(state);
 
     this.el.money.textContent =
       compact(state.money);
@@ -182,7 +183,9 @@ export class Hud {
       `${delivered.toFixed(1)} pax/min`;
 
     this.el.income.textContent =
-      `+${compact(income)}/s`;
+      lastFare > 0
+        ? `LAST +${compact(lastFare)}`
+        : 'LAST —';
 
     if (this.el.progress) {
       this.el.progress.textContent =
@@ -442,8 +445,8 @@ export class Hud {
             title: 'Build stop',
             detail:
               state.line1.stopCount === 1
-                ? 'Creates the first service segment and includes one starter bus'
-                : 'Extends the existing line without moving earlier stops',
+                ? 'Starts Line 1 with one real bus; fares are paid only when passengers arrive'
+                : 'Extends the route and creates another origin/destination',
             costLabel: money(
               getNextStopCost(
                 state,
@@ -491,7 +494,7 @@ export class Hud {
             command: 'build-stop-2',
             title: 'Build stop',
             detail:
-              'Extends Line 2 along the visible ghost segment',
+              'Extends Line 2 and creates new passenger trips',
             costLabel: money(
               getNextStopCost(
                 state,
@@ -535,7 +538,7 @@ export class Hud {
             command: 'build-depot',
             title: 'Build Bus Depot',
             detail:
-              'Unlocks purchasing additional buses and garage upgrades',
+              'Unlocks purchasing additional physical buses',
             costLabel: money(
               ECONOMY.depotBuildCost,
             ),
@@ -572,7 +575,7 @@ export class Hud {
           },
           {
             label: 'REQUIRES',
-            value: 'STABLE LINE 1',
+            value: 'FREE DEPOT SLOT',
           },
         ],
         actions: [
@@ -580,7 +583,7 @@ export class Hud {
             command: 'build-line-2',
             title: 'Open Bus Line 2',
             detail:
-              'Creates a new branch from City Park with one starter bus',
+              'Creates a second passenger service with one physical starter bus',
             costLabel: money(
               ECONOMY.line2BuildCost,
             ),
@@ -598,6 +601,7 @@ export class Hud {
 
   #getLineView(state, lineKey) {
     const line = state[lineKey];
+
     const isLine1 =
       lineKey === 'line1';
 
@@ -623,6 +627,18 @@ export class Hud {
         lineKey,
       );
 
+    const waiting =
+      getLineWaitingPassengers(
+        state,
+        lineKey,
+      );
+
+    const onboard =
+      getLineOnboardPassengers(
+        state,
+        lineKey,
+      );
+
     const mode =
       TRANSPORT_MODES[line.mode];
 
@@ -636,7 +652,7 @@ export class Hud {
             ? 'shelter1'
             : 'shelter2',
           'Improve stops',
-          '+30 passengers of waiting capacity',
+          '+30 waiting spaces at each stop',
         ),
       );
     }
@@ -654,7 +670,7 @@ export class Hud {
             ? 'catchment1'
             : 'catchment2',
           'Expand catchment',
-          '+0.5 pax/min demand per outer stop',
+          '+0.5 pax/min generated at every stop',
         ),
       );
     }
@@ -663,12 +679,26 @@ export class Hud {
       kicker: 'SERVICE',
       title: `Bus Line ${lineNumber}`,
       subtitle:
-        `${line.stopCount} stop${line.stopCount === 1 ? '' : 's'} · ${mode.label}`,
+        `${line.stopCount} stop${line.stopCount === 1 ? '' : 's'} · fares on arrival`,
       stats: [
         {
           label: 'FLEET',
           value:
             `${line.fleetCount} bus${line.fleetCount === 1 ? '' : 'es'}`,
+        },
+        {
+          label: 'ON BOARD',
+          value:
+            `${onboard.toFixed(onboard < 10 ? 1 : 0)} pax`,
+        },
+        {
+          label: 'WAITING',
+          value:
+            `${waiting.toFixed(waiting < 10 ? 1 : 0)} pax`,
+          className:
+            waiting > 8
+              ? 'metric-warning'
+              : '',
         },
         {
           label: 'HEADWAY',
@@ -680,11 +710,6 @@ export class Hud {
           ),
         },
         {
-          label: 'FREQUENCY',
-          value:
-            `${getLineFrequencyPerHour(state, lineKey).toFixed(1)}/h`,
-        },
-        {
           label: 'ONE-WAY',
           value: formatMinutes(
             getLineOneWayMinutes(
@@ -694,7 +719,7 @@ export class Hud {
           ),
         },
         {
-          label: 'CAPACITY',
+          label: 'THEORETICAL CAP.',
           value:
             `${capacity.toFixed(1)} pax/min`,
         },
@@ -708,13 +733,14 @@ export class Hud {
               : '',
         },
         {
-          label: 'WAITING',
+          label: 'RECENT ARRIVALS',
           value:
-            `${line.queuePassengers.toFixed(0)} pax`,
-          className:
-            line.queuePassengers > 0
-              ? 'metric-warning'
-              : '',
+            `${line.lastDeliveredPpm.toFixed(1)} pax/min`,
+        },
+        {
+          label: 'AVG WAIT',
+          value:
+            `${getAverageWaitMinutes(state).toFixed(1)} min`,
         },
       ],
       actions,
@@ -744,7 +770,7 @@ export class Hud {
         command: 'add-vehicle-1',
         title: 'Buy bus for Line 1',
         detail:
-          'Adds one vehicle, reduces headway and raises line capacity',
+          'Adds a real bus to the route and increases departures',
         costLabel:
           line1Full
             ? 'MAX'
@@ -763,7 +789,7 @@ export class Hud {
         command: 'add-vehicle-2',
         title: 'Buy bus for Line 2',
         detail:
-          'Assigns a new bus directly to Line 2',
+          'Adds a real bus to Line 2',
         costLabel:
           line2Full
             ? 'MAX'
@@ -790,7 +816,7 @@ export class Hud {
       kicker: 'FACILITY',
       title: 'Bus Depot',
       subtitle:
-        'Buy and assign vehicles to active lines',
+        'Vehicles bought here appear directly on their assigned line',
       stats: [
         {
           label: 'GARAGE',
@@ -853,6 +879,16 @@ export class Hud {
     }
 
     if (!state.line2.built) {
+      if (
+        state.line1.stopCount
+          >= ECONOMY.maxLine1Stops
+        && getBottleneck(state) === 'none'
+        && getGarageUsed(state)
+          >= state.depot.garageSlots
+      ) {
+        return 'EXPAND DEPOT FOR LINE 2';
+      }
+
       return canUnlockLine2(state)
         ? 'LINE 2 UNLOCKED'
         : `${state.line1.stopCount} / 5 STOPS · BUILD LINE 1`;
@@ -867,7 +903,7 @@ export class Hud {
 
     if (!state.line1.built) {
       this.el.objective.textContent =
-        'Click the ghost stop on the map to start Bus Line 1.';
+        'Buy Market Square. Passengers will wait, board the bus and pay only after arriving.';
       return;
     }
 
@@ -875,13 +911,11 @@ export class Hud {
       state.line1.stopCount < 3
     ) {
       this.el.objective.textContent =
-        'Let Line 1 earn money, then click the next ghost stop to extend it.';
+        'Watch passengers board, ride and pay when they exit. Use that fare money to extend Line 1.';
       return;
     }
 
-    if (
-      canBuildDepot(state)
-    ) {
+    if (canBuildDepot(state)) {
       this.el.objective.textContent =
         'Bus Depot unlocked. Click its ghost building beside City Park.';
       return;
@@ -892,7 +926,7 @@ export class Hud {
       && state.depot.built
     ) {
       this.el.objective.textContent =
-        'Line 1 is overloaded. Open the depot and assign another bus.';
+        'Passengers are waiting. Open the depot and add another physical bus.';
       return;
     }
 
@@ -906,8 +940,17 @@ export class Hud {
     }
 
     if (
-      canUnlockLine2(state)
+      state.depot.built
+      && getGarageUsed(state)
+        >= state.depot.garageSlots
+      && !state.line2.built
     ) {
+      this.el.objective.textContent =
+        'Line 1 is ready. Expand the depot to make room for the Line 2 starter bus.';
+      return;
+    }
+
+    if (canUnlockLine2(state)) {
       this.el.objective.textContent =
         'Line 2 unlocked. Click the yellow branch at City Park.';
       return;
@@ -921,11 +964,9 @@ export class Hud {
       return;
     }
 
-    if (
-      bottleneck === 'line-2'
-    ) {
+    if (bottleneck === 'line-2') {
       this.el.objective.textContent =
-        'Line 2 is overloaded. Buy another bus from the depot.';
+        'Line 2 passengers are waiting. Add another bus from the depot.';
       return;
     }
 
@@ -939,7 +980,7 @@ export class Hud {
     }
 
     this.el.objective.textContent =
-      'Bus network established. The next era can introduce new transport modes.';
+      'Bus network established. Every dollar now comes from completed passenger trips.';
   }
 
   toast(message) {
