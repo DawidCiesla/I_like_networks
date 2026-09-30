@@ -1037,6 +1037,8 @@ export class ThreeTransportRenderer {
       new Map();
     this.buildingObjects =
       new Map();
+    this.parcelById =
+      new Map();
     this.treeData = [];
     this.treeTrunks = null;
     this.treeCrowns = null;
@@ -1370,6 +1372,17 @@ export class ThreeTransportRenderer {
 
     this.roadObjects.clear();
     this.buildingObjects.clear();
+
+    this.parcelById =
+      new Map(
+        state.city.parcels.map(
+          (parcel) => [
+            parcel.id,
+            parcel,
+          ],
+        ),
+      );
+
     this.treeData = [];
     this.treeTrunks = null;
     this.treeCrowns = null;
@@ -1802,21 +1815,11 @@ export class ThreeTransportRenderer {
             === 'constructing',
       );
 
-    const parcelById =
-      new Map(
-        state.city.parcels.map(
-          (parcel) => [
-            parcel.id,
-            parcel,
-          ],
-        ),
-      );
-
     const occupiedParcels =
       state.city.buildings
         .map(
           (building) =>
-            parcelById.get(
+            this.parcelById.get(
               building.parcelId,
             ),
         )
@@ -1911,6 +1914,8 @@ export class ThreeTransportRenderer {
   #roadVisualSignature(
     state,
     road,
+    roadById,
+    districtById,
   ) {
     if (road.status === 'built') {
       return 'built';
@@ -1940,20 +1945,25 @@ export class ThreeTransportRenderer {
     }
 
     const district =
-      state.city.districts.find(
-        (candidate) =>
-          candidate.id
-          === road.districtId,
+      districtById.get(
+        road.districtId,
+      );
+
+    const parentsBuilt =
+      (
+        road.parentRoadIds
+        ?? []
+      ).every(
+        (parentId) =>
+          roadById.get(parentId)
+            ?.status === 'built',
       );
 
     const plannedVisible =
       road.source === 'city'
       && district?.status
         === 'active'
-      && roadParentsBuilt(
-        state,
-        road,
-      );
+      && parentsBuilt;
 
     return plannedVisible
       ? 'planned'
@@ -2128,6 +2138,26 @@ export class ThreeTransportRenderer {
     const liveRoadIds =
       new Set();
 
+    const roadById =
+      new Map(
+        state.city.roads.map(
+          (road) => [
+            road.id,
+            road,
+          ],
+        ),
+      );
+
+    const districtById =
+      new Map(
+        state.city.districts.map(
+          (district) => [
+            district.id,
+            district,
+          ],
+        ),
+      );
+
     for (
       const road
       of state.city.roads
@@ -2138,6 +2168,8 @@ export class ThreeTransportRenderer {
         this.#roadVisualSignature(
           state,
           road,
+          roadById,
+          districtById,
         );
 
       const existing =
@@ -2505,16 +2537,6 @@ export class ThreeTransportRenderer {
   }
 
   #syncBuildings(state) {
-    const parcelById =
-      new Map(
-        state.city.parcels.map(
-          (parcel) => [
-            parcel.id,
-            parcel,
-          ],
-        ),
-      );
-
     const liveIds =
       new Set();
 
@@ -2523,7 +2545,7 @@ export class ThreeTransportRenderer {
       of state.city.buildings
     ) {
       const parcel =
-        parcelById.get(
+        this.parcelById.get(
           building.parcelId,
         );
 
@@ -3364,7 +3386,7 @@ export class ThreeTransportRenderer {
 
     const ambientCount =
       Math.min(
-        18,
+        12,
         Math.floor(
           builtBuildings / 2,
         ),
