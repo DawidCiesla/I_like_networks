@@ -194,3 +194,37 @@ Buildings do not yet:
 - create road congestion.
 
 Those are natural later extensions once the visual city layer is established.
+
+
+## Natural-layout revision
+
+The first city renderer generated four local streets and a repeated building pattern around almost every stop. At higher stages those independent micro-grids collided with each other and with the main bus corridors.
+
+The city now uses a planned-lot model.
+
+Each district defines:
+
+- a small number of deliberate secondary streets,
+- candidate building parcels,
+- a district-specific building profile.
+
+Before a building is rendered, its parcel is checked against:
+
+- every visible primary road,
+- every secondary road,
+- all active stops,
+- the Bus Depot footprint,
+- all previously accepted buildings.
+
+This means development can become denser without buildings appearing on carriageways or inside each other.
+
+The mature Bus Era intentionally targets a moderate density rather than filling every empty pixel. Empty space between districts is part of the visual design and leaves room for later tram corridors, plazas and larger transport facilities.
+
+Operational map clutter is also reduced:
+
+- the floating world-space system statistics card is removed,
+- bus load labels are compact numeric badges,
+- waiting-passenger information sits beside the stop rather than below the stop name,
+- the shared interchange ring is smaller.
+
+Detailed numbers remain available in the HUD and contextual Inspector.
