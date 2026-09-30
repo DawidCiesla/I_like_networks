@@ -181,7 +181,6 @@ func _add_ribbon(
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	instance.receive_shadows = true
 	parent.add_child(instance)
 
 func _road_points(road: Dictionary) -> Array[Vector2]:
@@ -339,6 +338,8 @@ func _create_building(building: Dictionary, parcel: Dictionary) -> Dictionary:
 		"mesh": mesh_instance,
 		"material": material,
 		"height": height,
+		"width": width,
+		"depth": depth,
 		"ground": ground,
 		"roof": null,
 	}
@@ -370,9 +371,9 @@ func _update_building(entry: Dictionary, building: Dictionary) -> void:
 	var roof := MeshInstance3D.new()
 	var prism := PrismMesh.new()
 	prism.size = Vector3(
-		mesh_instance.mesh.size.x * 1.05,
+		float(entry["width"]) * 1.05,
 		5.5,
-		mesh_instance.mesh.size.z * 1.05
+		float(entry["depth"]) * 1.05
 	)
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color("#654a3b")
