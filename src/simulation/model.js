@@ -1600,10 +1600,6 @@ function generatePassengers(
     return;
   }
 
-  const perDestinationRate =
-    line.demandPerStopPpm
-    / (line.stopCount - 1);
-
   let abandoned = 0;
 
   for (
@@ -1611,6 +1607,17 @@ function generatePassengers(
     origin < line.stopCount;
     origin += 1
   ) {
+    const perDestinationRate =
+      getStopDemandPpm(
+        state,
+        lineKey,
+        origin,
+      )
+      / Math.max(
+        1,
+        line.stopCount - 1,
+      );
+
     for (
       let destination = 0;
       destination < line.stopCount;
@@ -1629,16 +1636,28 @@ function generatePassengers(
         origin,
       );
 
+    const stationId =
+      getStationId(
+        lineKey,
+        origin,
+      );
+
+    const waitingCapacity =
+      getStationWaitingCapacity(
+        state,
+        stationId,
+      );
+
     if (
       waiting
-      > line.waitingCapacityPassengers
+      > waitingCapacity
     ) {
       const keepRatio =
-        line.waitingCapacityPassengers
+        waitingCapacity
         / waiting;
 
       const excess =
-        waiting - line.waitingCapacityPassengers;
+        waiting - waitingCapacity;
 
       abandoned += excess;
 
@@ -2046,17 +2065,16 @@ export function advanceSimulation(
 
   state.elapsedSeconds += deltaSeconds;
 
-  simulateLine(
-    state,
-    'line1',
-    deltaMinutes,
-  );
-
-  simulateLine(
-    state,
-    'line2',
-    deltaMinutes,
-  );
+  for (
+    const lineKey
+    of LINE_KEYS
+  ) {
+    simulateLine(
+      state,
+      lineKey,
+      deltaMinutes,
+    );
+  }
 
   advanceCitySimulation(
     state,
