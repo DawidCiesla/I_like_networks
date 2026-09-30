@@ -9,6 +9,8 @@ test('browser-facing modules load without missing named exports', async () => {
 
   assert.equal(typeof renderer.TransportRenderer, 'function');
   assert.equal(typeof hud.Hud, 'function');
-  assert.equal(typeof actions.buildFirstLine, 'function');
+  assert.equal(typeof actions.buildNextStop, 'function');
+  assert.equal(typeof actions.buildDepot, 'function');
+  assert.equal(typeof actions.buildLine2, 'function');
   assert.equal(typeof storage.loadState, 'function');
 });
