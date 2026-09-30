@@ -1,36 +1,43 @@
 import {
+  ECONOMY,
+  STOP_NAMES,
   TRANSPORT_MODES,
-  getAbandonmentPercent,
+  canBuildDepot,
+  canUnlockLine2,
   getAverageWaitMinutes,
-  getCorridorADemandPpm,
-  getCorridorBDemandPpm,
+  getBottleneck,
   getDeliveredPassengersPpm,
   getIncomePerSecond,
+  getLineDemandPpm,
+  getNextStopCost,
 } from '../simulation/model.js';
 
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const clamp = (value, min, max) =>
+  Math.min(max, Math.max(min, value));
 
-const LINE_A_COLOR = '#0797ec';
-const LINE_B_COLOR = '#f4ca00';
+const LINE_1_COLOR = '#0797ec';
+const LINE_2_COLOR = '#f4ca00';
 
 const WORLD = Object.freeze({
-  stopsA: [
-    { x: -430, y: -120, w: 44, h: 54 },
-    { x: -340, y: -120, w: 44, h: 54 },
-    { x: -250, y: -120, w: 44, h: 54 },
-    { x: -160, y: -120, w: 44, h: 54 },
+  line1Stops: [
+    { x: -430, y: -80, w: 58, h: 64 },
+    { x: -280, y: -80, w: 58, h: 64 },
+    { x: -130, y: -110, w: 58, h: 64 },
+    { x: 40, y: -70, w: 58, h: 64 },
+    { x: 220, y: -105, w: 66, h: 70 },
   ],
-  terminalA: { x: -65, y: -120, w: 92, h: 74 },
-  interchange: { x: 85, y: -120, w: 116, h: 112 },
-  stationA: { x: 365, y: -120, w: 126, h: 120 },
-
-  stopsB: [
-    { x: -350, y: 180, w: 44, h: 54 },
-    { x: -260, y: 180, w: 44, h: 54 },
-    { x: -170, y: 180, w: 44, h: 54 },
-    { x: -80, y: 180, w: 44, h: 54 },
+  line2Stops: [
+    { x: -130, y: -110, w: 58, h: 64 },
+    { x: -35, y: 85, w: 58, h: 64 },
+    { x: 125, y: 175, w: 58, h: 64 },
+    { x: 310, y: 195, w: 66, h: 70 },
   ],
-  stationB: { x: 365, y: 180, w: 126, h: 120 },
+  depot: {
+    x: -115,
+    y: 55,
+    w: 118,
+    h: 86,
+  },
 });
 
 function routeMetrics(points) {
@@ -44,26 +51,49 @@ function routeMetrics(points) {
     const dy = b.y - a.y;
     const length = Math.hypot(dx, dy);
 
-    segments.push({ a, b, dx, dy, length, start: total });
+    segments.push({
+      a,
+      b,
+      dx,
+      dy,
+      length,
+      start: total,
+    });
+
     total += length;
   }
 
-  return { points, segments, total };
+  return {
+    points,
+    segments,
+    total,
+  };
 }
 
 function pointOnRoute(metrics, distance) {
   if (metrics.total <= 0) {
-    return { x: 0, y: 0, tx: 1, ty: 0 };
+    return {
+      x: metrics.points[0]?.x ?? 0,
+      y: metrics.points[0]?.y ?? 0,
+      tx: 1,
+      ty: 0,
+    };
   }
 
-  const wrapped = ((distance % metrics.total) + metrics.total) % metrics.total;
+  const wrapped =
+    ((distance % metrics.total) + metrics.total)
+    % metrics.total;
 
-  const segment = metrics.segments.find(
-    (item) => wrapped <= item.start + item.length,
-  ) ?? metrics.segments.at(-1);
+  const segment =
+    metrics.segments.find(
+      (item) =>
+        wrapped <= item.start + item.length,
+    )
+    ?? metrics.segments.at(-1);
 
   const local = clamp(
-    (wrapped - segment.start) / Math.max(1, segment.length),
+    (wrapped - segment.start)
+      / Math.max(1, segment.length),
     0,
     1,
   );
@@ -76,37 +106,13 @@ function pointOnRoute(metrics, distance) {
   };
 }
 
-const LINE_A_ROUTE = routeMetrics([
-  { x: WORLD.stopsA[0].x, y: WORLD.stopsA[0].y },
-  { x: WORLD.terminalA.x, y: WORLD.terminalA.y },
-  { x: WORLD.interchange.x, y: WORLD.interchange.y },
-  { x: WORLD.stationA.x - 64, y: WORLD.stationA.y },
-]);
-
-const LINE_B_FEEDER_ROUTE = routeMetrics([
-  { x: WORLD.stopsB[0].x, y: WORLD.stopsB[0].y },
-  { x: WORLD.stopsB[3].x, y: WORLD.stopsB[3].y },
-  { x: 15, y: WORLD.stopsB[3].y },
-  { x: WORLD.interchange.x, y: WORLD.interchange.y + 58 },
-]);
-
-const LINE_B_DESTINATION_ROUTE = routeMetrics([
-  { x: WORLD.interchange.x + 58, y: WORLD.interchange.y + 8 },
-  { x: 200, y: -20 },
-  { x: 250, y: 70 },
-  { x: WORLD.stationB.x - 64, y: WORLD.stationB.y },
-]);
-
-const LINE_B_FULL_ROUTE = routeMetrics([
-  { x: WORLD.stopsB[0].x, y: WORLD.stopsB[0].y },
-  { x: WORLD.stopsB[3].x, y: WORLD.stopsB[3].y },
-  { x: 15, y: WORLD.stopsB[3].y },
-  { x: WORLD.interchange.x, y: WORLD.interchange.y + 58 },
-  { x: WORLD.interchange.x + 58, y: WORLD.interchange.y + 8 },
-  { x: 200, y: -20 },
-  { x: 250, y: 70 },
-  { x: WORLD.stationB.x - 64, y: WORLD.stationB.y },
-]);
+function builtRoute(stopRects, stopCount) {
+  return routeMetrics(
+    stopRects
+      .slice(0, Math.max(1, stopCount))
+      .map(({ x, y }) => ({ x, y })),
+  );
+}
 
 export class TransportRenderer {
   constructor(canvas, { onSelectionChanged } = {}) {
@@ -114,8 +120,17 @@ export class TransportRenderer {
     this.ctx = canvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
 
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.camera = { x: 0, y: 0, zoom: 1 };
+    this.dpr = Math.min(
+      window.devicePixelRatio || 1,
+      2,
+    );
+
+    this.camera = {
+      x: 65,
+      y: 20,
+      zoom: 1,
+    };
+
     this.pointer = {
       dragging: false,
       x: 0,
@@ -127,7 +142,8 @@ export class TransportRenderer {
     this.time = 0;
     this.selected = null;
     this.hitTargets = [];
-    this.onSelectionChanged = onSelectionChanged;
+    this.onSelectionChanged =
+      onSelectionChanged;
 
     this.#bindInput();
     this.resize();
@@ -138,7 +154,8 @@ export class TransportRenderer {
   }
 
   resize() {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect =
+      this.canvas.getBoundingClientRect();
 
     this.canvas.width = Math.max(
       1,
@@ -154,53 +171,71 @@ export class TransportRenderer {
   }
 
   #bindInput() {
-    this.canvas.addEventListener('pointerdown', (event) => {
-      this.pointer.dragging = true;
-      this.pointer.x = event.clientX;
-      this.pointer.y = event.clientY;
-      this.pointer.startX = event.clientX;
-      this.pointer.startY = event.clientY;
-      this.canvas.setPointerCapture(event.pointerId);
-    });
+    this.canvas.addEventListener(
+      'pointerdown',
+      (event) => {
+        this.pointer.dragging = true;
+        this.pointer.x = event.clientX;
+        this.pointer.y = event.clientY;
+        this.pointer.startX = event.clientX;
+        this.pointer.startY = event.clientY;
+        this.canvas.setPointerCapture(
+          event.pointerId,
+        );
+      },
+    );
 
-    this.canvas.addEventListener('pointermove', (event) => {
-      if (!this.pointer.dragging) return;
+    this.canvas.addEventListener(
+      'pointermove',
+      (event) => {
+        if (!this.pointer.dragging) return;
 
-      this.camera.x +=
-        (event.clientX - this.pointer.x)
-        / this.camera.zoom;
+        this.camera.x +=
+          (event.clientX - this.pointer.x)
+          / this.camera.zoom;
 
-      this.camera.y +=
-        (event.clientY - this.pointer.y)
-        / this.camera.zoom;
+        this.camera.y +=
+          (event.clientY - this.pointer.y)
+          / this.camera.zoom;
 
-      this.pointer.x = event.clientX;
-      this.pointer.y = event.clientY;
-    });
+        this.pointer.x = event.clientX;
+        this.pointer.y = event.clientY;
+      },
+    );
 
-    this.canvas.addEventListener('pointerup', (event) => {
-      const moved = Math.hypot(
-        event.clientX - this.pointer.startX,
-        event.clientY - this.pointer.startY,
-      );
+    this.canvas.addEventListener(
+      'pointerup',
+      (event) => {
+        const moved = Math.hypot(
+          event.clientX - this.pointer.startX,
+          event.clientY - this.pointer.startY,
+        );
 
-      this.pointer.dragging = false;
+        this.pointer.dragging = false;
 
-      if (moved < 5) {
-        this.#selectAt(event.clientX, event.clientY);
-      }
-    });
+        if (moved < 5) {
+          this.#selectAt(
+            event.clientX,
+            event.clientY,
+          );
+        }
+      },
+    );
 
-    this.canvas.addEventListener('wheel', (event) => {
-      event.preventDefault();
+    this.canvas.addEventListener(
+      'wheel',
+      (event) => {
+        event.preventDefault();
 
-      this.camera.zoom = clamp(
-        this.camera.zoom
-          * (event.deltaY > 0 ? 0.9 : 1.1),
-        0.55,
-        2.2,
-      );
-    }, { passive: false });
+        this.camera.zoom = clamp(
+          this.camera.zoom
+            * (event.deltaY > 0 ? 0.9 : 1.1),
+          0.55,
+          2.2,
+        );
+      },
+      { passive: false },
+    );
 
     window.addEventListener(
       'resize',
@@ -209,7 +244,8 @@ export class TransportRenderer {
   }
 
   #screenToWorld(clientX, clientY) {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect =
+      this.canvas.getBoundingClientRect();
 
     return {
       x:
@@ -224,10 +260,8 @@ export class TransportRenderer {
   }
 
   #selectAt(clientX, clientY) {
-    const point = this.#screenToWorld(
-      clientX,
-      clientY,
-    );
+    const point =
+      this.#screenToWorld(clientX, clientY);
 
     const target = [...this.hitTargets]
       .reverse()
@@ -239,7 +273,10 @@ export class TransportRenderer {
       ));
 
     this.selected = target?.id ?? null;
-    this.onSelectionChanged?.(this.selected);
+
+    this.onSelectionChanged?.(
+      this.selected,
+    );
   }
 
   render(state, deltaSeconds) {
@@ -247,8 +284,12 @@ export class TransportRenderer {
     this.hitTargets = [];
 
     const ctx = this.ctx;
-    const width = this.canvas.width / this.dpr;
-    const height = this.canvas.height / this.dpr;
+
+    const width =
+      this.canvas.width / this.dpr;
+
+    const height =
+      this.canvas.height / this.dpr;
 
     ctx.setTransform(
       this.dpr,
@@ -262,14 +303,30 @@ export class TransportRenderer {
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, width, height);
 
-    this.#drawBackground(ctx, width, height);
+    this.#drawBackground(
+      ctx,
+      width,
+      height,
+    );
 
     ctx.save();
-    ctx.translate(width / 2, height / 2);
-    ctx.scale(this.camera.zoom, this.camera.zoom);
-    ctx.translate(this.camera.x, this.camera.y);
 
-    this.#drawTransportMap(ctx, state);
+    ctx.translate(
+      width / 2,
+      height / 2,
+    );
+
+    ctx.scale(
+      this.camera.zoom,
+      this.camera.zoom,
+    );
+
+    ctx.translate(
+      this.camera.x,
+      this.camera.y,
+    );
+
+    this.#drawBusEra(ctx, state);
 
     ctx.restore();
   }
@@ -281,11 +338,13 @@ export class TransportRenderer {
     const spacing = 22;
 
     const offsetX =
-      ((this.camera.x * this.camera.zoom) % spacing + spacing)
+      ((this.camera.x * this.camera.zoom)
+        % spacing + spacing)
       % spacing;
 
     const offsetY =
-      ((this.camera.y * this.camera.zoom) % spacing + spacing)
+      ((this.camera.y * this.camera.zoom)
+        % spacing + spacing)
       % spacing;
 
     ctx.fillStyle = '#242424';
@@ -303,235 +362,394 @@ export class TransportRenderer {
         const px = Math.round(x);
         const py = Math.round(y);
 
-        ctx.fillRect(px - 2, py, 5, 1);
-        ctx.fillRect(px, py - 2, 1, 5);
+        ctx.fillRect(
+          px - 2,
+          py,
+          5,
+          1,
+        );
+
+        ctx.fillRect(
+          px,
+          py - 2,
+          1,
+          5,
+        );
       }
     }
   }
 
-  #drawTransportMap(ctx, state) {
-    if (state.corridorA.lineBuilt) {
+  #drawBusEra(ctx, state) {
+    this.#drawLine1(ctx, state);
+    this.#drawDepot(ctx, state);
+    this.#drawLine2(ctx, state);
+    this.#drawSystemReadout(ctx, state);
+  }
+
+  #drawLine1(ctx, state) {
+    const route = builtRoute(
+      WORLD.line1Stops,
+      state.line1.stopCount,
+    );
+
+    if (state.line1.built) {
       this.#drawTransitLine(
         ctx,
-        LINE_A_ROUTE,
-        LINE_A_COLOR,
+        route,
+        LINE_1_COLOR,
         1,
       );
 
       this.#drawVehicles(
         ctx,
-        LINE_A_ROUTE,
-        state.corridorA.fleetCount,
-        LINE_A_COLOR,
-        state.corridorA.mode,
-      );
-    } else {
-      this.#drawGhostLine(
-        ctx,
-        LINE_A_ROUTE,
+        route,
+        state.line1.fleetCount,
+        LINE_1_COLOR,
+        state.line1.mode,
       );
     }
 
     for (
       let index = 0;
-      index < state.corridorA.stopCount;
+      index < state.line1.stopCount;
       index += 1
     ) {
-      const rect = WORLD.stopsA[index];
+      const rect =
+        WORLD.line1Stops[index];
 
       this.#drawStop(
         ctx,
         rect,
-        `A${index + 1}`,
-        LINE_A_COLOR,
-        this.selected === 'corridorA',
+        STOP_NAMES.line1[index],
+        index + 1,
+        LINE_1_COLOR,
+        this.selected === 'line1',
+        index === 0,
       );
 
       this.hitTargets.push({
-        id: 'corridorA',
+        id: 'line1',
         rect,
       });
     }
 
-    if (state.terminalA.built) {
-      this.#drawTerminal(
+    if (
+      state.line1.stopCount
+      < ECONOMY.maxLine1Stops
+    ) {
+      const current =
+        WORLD.line1Stops[
+          state.line1.stopCount - 1
+        ];
+
+      const next =
+        WORLD.line1Stops[
+          state.line1.stopCount
+        ];
+
+      const ghostRoute = routeMetrics([
+        { x: current.x, y: current.y },
+        { x: next.x, y: next.y },
+      ]);
+
+      this.#drawGhostLine(
         ctx,
-        WORLD.terminalA,
-        'NORTHSIDE',
-        LINE_A_COLOR,
-        this.selected === 'terminalA',
+        ghostRoute,
+        LINE_1_COLOR,
+      );
+
+      this.#drawFutureStop(
+        ctx,
+        next,
+        STOP_NAMES.line1[
+          state.line1.stopCount
+        ],
+        getNextStopCost(
+          state,
+          'line1',
+        ),
+        LINE_1_COLOR,
+        this.selected === 'futureStop1',
       );
 
       this.hitTargets.push({
-        id: 'terminalA',
-        rect: WORLD.terminalA,
-      });
-    } else if (state.corridorA.lineBuilt) {
-      this.#drawFutureMarker(
-        ctx,
-        WORLD.terminalA.x,
-        WORLD.terminalA.y,
-        LINE_A_COLOR,
-      );
-    }
-
-    if (state.interchange.built) {
-      this.#drawInterchange(
-        ctx,
-        WORLD.interchange,
-        state,
-        this.selected === 'interchange',
-      );
-
-      this.hitTargets.push({
-        id: 'interchange',
-        rect: WORLD.interchange,
-      });
-    } else if (state.corridorA.lineBuilt) {
-      this.#drawFutureMarker(
-        ctx,
-        WORLD.interchange.x,
-        WORLD.interchange.y,
-        LINE_A_COLOR,
-      );
-    }
-
-    this.#drawStation(
-      ctx,
-      WORLD.stationA,
-      'CENTRAL',
-      LINE_A_COLOR,
-      state.stationA.capacityPpm,
-      this.selected === 'stationA',
-    );
-
-    this.hitTargets.push({
-      id: 'stationA',
-      rect: WORLD.stationA,
-    });
-
-    if (state.corridorB.built) {
-      this.#drawTransitLine(
-        ctx,
-        LINE_B_FEEDER_ROUTE,
-        LINE_B_COLOR,
-        2,
-      );
-
-      if (!state.stationB.built) {
-        this.#drawVehicles(
-          ctx,
-          LINE_B_FEEDER_ROUTE,
-          state.corridorB.fleetCount,
-          LINE_B_COLOR,
-          state.corridorB.mode,
-        );
-      }
-
-      for (
-        let index = 0;
-        index < state.corridorB.stopCount;
-        index += 1
-      ) {
-        const rect = WORLD.stopsB[index];
-
-        this.#drawStop(
-          ctx,
-          rect,
-          `B${index + 1}`,
-          LINE_B_COLOR,
-          this.selected === 'corridorB',
-        );
-
-        this.hitTargets.push({
-          id: 'corridorB',
-          rect,
-        });
-      }
-    }
-
-    if (state.stationB.built) {
-      this.#drawTransitLine(
-        ctx,
-        LINE_B_DESTINATION_ROUTE,
-        LINE_B_COLOR,
-        2,
-      );
-
-      this.#drawVehicles(
-        ctx,
-        LINE_B_FULL_ROUTE,
-        state.corridorB.fleetCount,
-        LINE_B_COLOR,
-        state.corridorB.mode,
-      );
-
-      this.#drawStation(
-        ctx,
-        WORLD.stationB,
-        'HARBOR',
-        LINE_B_COLOR,
-        state.stationB.capacityPpm,
-        this.selected === 'stationB',
-      );
-
-      this.hitTargets.push({
-        id: 'stationB',
-        rect: WORLD.stationB,
+        id: 'futureStop1',
+        rect: {
+          ...next,
+          w: 86,
+          h: 86,
+        },
       });
     }
 
     if (
-      state.terminalA.built
-      && state.terminalA.queuePassengers > 0
+      state.line1.queuePassengers > 0
     ) {
+      const first =
+        WORLD.line1Stops[0];
+
       this.#drawPassengerQueue(
         ctx,
-        WORLD.terminalA.x - 70,
-        WORLD.terminalA.y + 58,
-        state.terminalA.queuePassengers,
-        state.terminalA.waitingCapacityPassengers,
+        first.x - 66,
+        first.y + 54,
+        state.line1.queuePassengers,
+        state.line1.waitingCapacityPassengers,
       );
     }
 
-    if (
-      state.corridorB.built
-      && state.corridorB.queuePassengers > 0
-    ) {
-      this.#drawPassengerQueue(
-        ctx,
-        WORLD.stopsB[0].x - 48,
-        WORLD.stopsB[0].y + 54,
-        state.corridorB.queuePassengers,
-        state.corridorB.waitingCapacityPassengers,
-      );
-    }
-
-    if (state.interchange.built) {
-      const totalWaiting =
-        state.interchange.queuePassengers
-        + state.interchange.destinationQueuesPassengers.primary
-        + state.interchange.destinationQueuesPassengers.secondary;
-
-      if (totalWaiting > 0) {
-        this.#drawPassengerQueue(
-          ctx,
-          WORLD.interchange.x - 72,
-          WORLD.interchange.y + 74,
-          totalWaiting,
-          state.interchange.waitingCapacityPassengers * 2,
-        );
-      }
-    }
-
-    if (state.corridorA.lineBuilt) {
+    if (state.line1.built) {
       this.#drawRevenuePulse(
         ctx,
         state,
+        WORLD.line1Stops[
+          state.line1.stopCount - 1
+        ],
       );
     }
+  }
 
-    this.#drawSystemReadout(ctx, state);
+  #drawDepot(ctx, state) {
+    const anchor =
+      WORLD.line1Stops[2];
+
+    if (state.depot.built) {
+      const spur = routeMetrics([
+        {
+          x: anchor.x,
+          y: anchor.y,
+        },
+        {
+          x: WORLD.depot.x,
+          y: WORLD.depot.y - 35,
+        },
+      ]);
+
+      this.#drawServiceSpur(
+        ctx,
+        spur,
+        '#b7b7ae',
+      );
+
+      this.#drawDepotBuilding(
+        ctx,
+        WORLD.depot,
+        state,
+        this.selected === 'depot',
+      );
+
+      this.hitTargets.push({
+        id: 'depot',
+        rect: WORLD.depot,
+      });
+
+      return;
+    }
+
+    if (!canBuildDepot(state)) {
+      return;
+    }
+
+    const spur = routeMetrics([
+      {
+        x: anchor.x,
+        y: anchor.y,
+      },
+      {
+        x: WORLD.depot.x,
+        y: WORLD.depot.y - 35,
+      },
+    ]);
+
+    this.#drawGhostLine(
+      ctx,
+      spur,
+      '#b7b7ae',
+    );
+
+    this.#drawFutureDepot(
+      ctx,
+      WORLD.depot,
+      ECONOMY.depotBuildCost,
+      this.selected === 'futureDepot',
+    );
+
+    this.hitTargets.push({
+      id: 'futureDepot',
+      rect: {
+        ...WORLD.depot,
+        w: 132,
+        h: 100,
+      },
+    });
+  }
+
+  #drawLine2(ctx, state) {
+    if (!state.line2.built) {
+      if (!canUnlockLine2(state)) return;
+
+      const route = routeMetrics([
+        {
+          x: WORLD.line2Stops[0].x,
+          y: WORLD.line2Stops[0].y,
+        },
+        {
+          x: WORLD.line2Stops[1].x,
+          y: WORLD.line2Stops[1].y,
+        },
+      ]);
+
+      this.#drawGhostLine(
+        ctx,
+        route,
+        LINE_2_COLOR,
+      );
+
+      this.#drawFutureLine(
+        ctx,
+        WORLD.line2Stops[1],
+        ECONOMY.line2BuildCost,
+        this.selected === 'futureLine2',
+      );
+
+      this.hitTargets.push({
+        id: 'futureLine2',
+        rect: {
+          ...WORLD.line2Stops[1],
+          w: 104,
+          h: 92,
+        },
+      });
+
+      return;
+    }
+
+    const route = builtRoute(
+      WORLD.line2Stops,
+      state.line2.stopCount,
+    );
+
+    this.#drawTransitLine(
+      ctx,
+      route,
+      LINE_2_COLOR,
+      2,
+    );
+
+    this.#drawVehicles(
+      ctx,
+      route,
+      state.line2.fleetCount,
+      LINE_2_COLOR,
+      state.line2.mode,
+    );
+
+    for (
+      let index = 1;
+      index < state.line2.stopCount;
+      index += 1
+    ) {
+      const rect =
+        WORLD.line2Stops[index];
+
+      this.#drawStop(
+        ctx,
+        rect,
+        STOP_NAMES.line2[index],
+        index + 1,
+        LINE_2_COLOR,
+        this.selected === 'line2',
+        false,
+      );
+
+      this.hitTargets.push({
+        id: 'line2',
+        rect,
+      });
+    }
+
+    if (
+      state.line2.stopCount
+      < ECONOMY.maxLine2Stops
+    ) {
+      const current =
+        WORLD.line2Stops[
+          state.line2.stopCount - 1
+        ];
+
+      const next =
+        WORLD.line2Stops[
+          state.line2.stopCount
+        ];
+
+      const ghostRoute = routeMetrics([
+        { x: current.x, y: current.y },
+        { x: next.x, y: next.y },
+      ]);
+
+      this.#drawGhostLine(
+        ctx,
+        ghostRoute,
+        LINE_2_COLOR,
+      );
+
+      this.#drawFutureStop(
+        ctx,
+        next,
+        STOP_NAMES.line2[
+          state.line2.stopCount
+        ],
+        getNextStopCost(
+          state,
+          'line2',
+        ),
+        LINE_2_COLOR,
+        this.selected === 'futureStop2',
+      );
+
+      this.hitTargets.push({
+        id: 'futureStop2',
+        rect: {
+          ...next,
+          w: 86,
+          h: 86,
+        },
+      });
+    }
+
+    if (
+      state.line2.queuePassengers > 0
+    ) {
+      const firstNewStop =
+        WORLD.line2Stops[1];
+
+      this.#drawPassengerQueue(
+        ctx,
+        firstNewStop.x - 65,
+        firstNewStop.y + 53,
+        state.line2.queuePassengers,
+        state.line2.waitingCapacityPassengers,
+      );
+    }
+  }
+
+  #traceRoute(ctx, metrics) {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      metrics.points[0].x,
+      metrics.points[0].y,
+    );
+
+    for (
+      let index = 1;
+      index < metrics.points.length;
+      index += 1
+    ) {
+      ctx.lineTo(
+        metrics.points[index].x,
+        metrics.points[index].y,
+      );
+    }
   }
 
   #drawTransitLine(
@@ -540,6 +758,8 @@ export class TransportRenderer {
     color,
     lineNumber,
   ) {
+    if (metrics.points.length < 2) return;
+
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -559,67 +779,13 @@ export class TransportRenderer {
     this.#traceRoute(ctx, metrics);
     ctx.stroke();
 
-    this.#drawLineMarkers(
-      ctx,
-      metrics,
-      color,
-      lineNumber,
-    );
-
-    ctx.restore();
-  }
-
-  #drawGhostLine(ctx, metrics) {
-    ctx.save();
-    ctx.setLineDash([6, 8]);
-
-    ctx.strokeStyle = '#393939';
-    ctx.lineWidth = 10;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#656565';
-    ctx.lineWidth = 2;
-    this.#traceRoute(ctx, metrics);
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  #traceRoute(ctx, metrics) {
-    ctx.beginPath();
-    ctx.moveTo(
-      metrics.points[0].x,
-      metrics.points[0].y,
-    );
-
     for (
-      let index = 1;
-      index < metrics.points.length;
-      index += 1
-    ) {
-      ctx.lineTo(
-        metrics.points[index].x,
-        metrics.points[index].y,
-      );
-    }
-  }
-
-  #drawLineMarkers(
-    ctx,
-    metrics,
-    color,
-    lineNumber,
-  ) {
-    for (
-      let distance = 8;
+      let distance = 18;
       distance < metrics.total;
-      distance += 34
+      distance += 48
     ) {
-      const point = pointOnRoute(
-        metrics,
-        distance,
-      );
+      const point =
+        pointOnRoute(metrics, distance);
 
       ctx.fillStyle = '#121212';
       ctx.strokeStyle = color;
@@ -629,7 +795,7 @@ export class TransportRenderer {
       ctx.arc(
         point.x,
         point.y,
-        6,
+        7,
         0,
         Math.PI * 2,
       );
@@ -637,14 +803,57 @@ export class TransportRenderer {
       ctx.stroke();
 
       ctx.fillStyle = '#f0efe8';
-      ctx.font = '7px "Lucida Console", monospace';
+      ctx.font =
+        '7px "Lucida Console", monospace';
       ctx.textAlign = 'center';
+
       ctx.fillText(
         String(lineNumber),
         point.x,
         point.y + 2.5,
       );
     }
+
+    ctx.restore();
+  }
+
+  #drawGhostLine(
+    ctx,
+    metrics,
+    color,
+  ) {
+    if (metrics.points.length < 2) return;
+
+    ctx.save();
+    ctx.setLineDash([6, 8]);
+    ctx.lineCap = 'round';
+
+    ctx.strokeStyle = '#303030';
+    ctx.lineWidth = 12;
+    this.#traceRoute(ctx, metrics);
+    ctx.stroke();
+
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.48;
+    ctx.lineWidth = 3;
+    this.#traceRoute(ctx, metrics);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  #drawServiceSpur(
+    ctx,
+    metrics,
+    color,
+  ) {
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    this.#traceRoute(ctx, metrics);
+    ctx.stroke();
+    ctx.restore();
   }
 
   #drawVehicles(
@@ -654,33 +863,30 @@ export class TransportRenderer {
     color,
     mode,
   ) {
-    if (fleetCount <= 0) return;
-
-    const count = clamp(
-      fleetCount,
-      1,
-      8,
-    );
+    if (
+      fleetCount <= 0
+      || metrics.total <= 0
+    ) {
+      return;
+    }
 
     const modeConfig =
       TRANSPORT_MODES[mode]
       ?? TRANSPORT_MODES.bus;
 
     const speed =
-      28 + modeConfig.speedKph * 0.35;
+      26 + modeConfig.speedKph * 0.32;
 
     for (
       let index = 0;
-      index < count;
+      index < fleetCount;
       index += 1
     ) {
-      const distance =
-        this.time * speed
-        + (index / count) * metrics.total;
-
       const point = pointOnRoute(
         metrics,
-        distance,
+        this.time * speed
+          + index / fleetCount
+            * metrics.total,
       );
 
       this.#drawBus(
@@ -692,10 +898,8 @@ export class TransportRenderer {
   }
 
   #drawBus(ctx, point, color) {
-    const angle = Math.atan2(
-      point.ty,
-      point.tx,
-    );
+    const angle =
+      Math.atan2(point.ty, point.tx);
 
     ctx.save();
 
@@ -707,18 +911,18 @@ export class TransportRenderer {
     ctx.rotate(angle);
 
     ctx.fillStyle = '#050505';
-    ctx.fillRect(-9, -5, 18, 10);
+    ctx.fillRect(-10, -6, 20, 12);
 
     ctx.fillStyle = color;
-    ctx.fillRect(-8, -4, 16, 8);
+    ctx.fillRect(-9, -5, 18, 10);
 
     ctx.fillStyle = '#d9f6ff';
-    ctx.fillRect(-5, -3, 4, 3);
-    ctx.fillRect(1, -3, 4, 3);
+    ctx.fillRect(-6, -4, 4, 4);
+    ctx.fillRect(1, -4, 4, 4);
 
     ctx.fillStyle = '#111';
-    ctx.fillRect(-6, 4, 4, 2);
-    ctx.fillRect(2, 4, 4, 2);
+    ctx.fillRect(-7, 5, 4, 2);
+    ctx.fillRect(3, 5, 4, 2);
 
     ctx.restore();
   }
@@ -727,8 +931,10 @@ export class TransportRenderer {
     ctx,
     rect,
     label,
+    number,
     color,
     selected,
+    origin,
   ) {
     const { x, y } = rect;
 
@@ -740,52 +946,68 @@ export class TransportRenderer {
       );
     }
 
-    ctx.fillStyle = '#0b0b0b';
+    const width = origin ? 48 : 38;
+    const height = origin ? 50 : 42;
+
+    ctx.fillStyle = '#050505';
+
     ctx.fillRect(
-      x - 18,
-      y - 23,
-      36,
-      46,
+      x - width / 2 - 3,
+      y - height / 2 - 3,
+      width + 6,
+      height + 6,
     );
 
     ctx.fillStyle = '#efeee8';
+
     ctx.fillRect(
-      x - 14,
-      y - 19,
-      28,
-      38,
+      x - width / 2,
+      y - height / 2,
+      width,
+      height,
+    );
+
+    ctx.fillStyle = '#2b2b2b';
+
+    ctx.fillRect(
+      x - width / 2 + 6,
+      y - height / 2 + 6,
+      width - 12,
+      height - 12,
     );
 
     ctx.fillStyle = color;
+
     ctx.fillRect(
-      x - 3,
+      x - 4,
       y - 15,
-      6,
-      23,
+      8,
+      20,
     );
 
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(
-      x - 9,
-      y + 10,
-      18,
-      5,
-    );
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '8px "Lucida Console", monospace';
+    ctx.fillStyle = '#f3f2eb';
+    ctx.font =
+      '8px "Lucida Console", monospace';
     ctx.textAlign = 'center';
+
     ctx.fillText(
-      label,
+      String(number),
       x,
-      y + 37,
+      y - 22,
+    );
+
+    ctx.fillText(
+      label.toUpperCase(),
+      x,
+      y + height / 2 + 16,
     );
   }
 
-  #drawTerminal(
+  #drawFutureStop(
     ctx,
     rect,
     label,
+    cost,
     color,
     selected,
   ) {
@@ -794,68 +1016,102 @@ export class TransportRenderer {
     if (selected) {
       this.#drawSelection(
         ctx,
-        rect,
+        {
+          ...rect,
+          w: 72,
+          h: 72,
+        },
         color,
       );
     }
 
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(
-      x - 46,
-      y - 37,
-      92,
-      74,
-    );
+    ctx.save();
+    ctx.globalAlpha = 0.64;
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
 
-    ctx.fillStyle = '#efeee8';
-    ctx.fillRect(
-      x - 41,
-      y - 32,
-      82,
-      64,
-    );
-
-    ctx.fillStyle = '#7d817d';
-    ctx.fillRect(
-      x - 34,
+    ctx.strokeRect(
+      x - 22,
       y - 25,
-      68,
+      44,
       50,
     );
 
-    ctx.fillStyle = '#151515';
-    ctx.fillRect(
-      x - 27,
-      y - 14,
-      54,
-      24,
+    ctx.restore();
+
+    ctx.fillStyle = '#777';
+    ctx.font =
+      '8px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+
+    ctx.fillText(
+      label.toUpperCase(),
+      x,
+      y + 39,
     );
 
-    for (
-      let index = 0;
-      index < 4;
-      index += 1
-    ) {
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        x - 22 + index * 14,
-        y - 8,
-        8,
-        8,
-      );
-    }
+    ctx.fillStyle = '#f4ca00';
 
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '9px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
     ctx.fillText(
-      label,
+      `$${cost}`,
       x,
-      y + 52,
+      y + 51,
     );
   }
 
-  #drawInterchange(
+  #drawFutureDepot(
+    ctx,
+    rect,
+    cost,
+    selected,
+  ) {
+    const { x, y } = rect;
+
+    if (selected) {
+      this.#drawSelection(
+        ctx,
+        rect,
+        '#efeee8',
+      );
+    }
+
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = '#efeee8';
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+      x - 55,
+      y - 38,
+      110,
+      76,
+    );
+
+    ctx.restore();
+
+    ctx.fillStyle = '#b8b8b1';
+    ctx.font =
+      '9px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+
+    ctx.fillText(
+      'BUS DEPOT',
+      x,
+      y - 3,
+    );
+
+    ctx.fillStyle = '#f4ca00';
+
+    ctx.fillText(
+      `UNLOCKED · $${cost}`,
+      x,
+      y + 14,
+    );
+  }
+
+  #drawDepotBuilding(
     ctx,
     rect,
     state,
@@ -867,228 +1123,143 @@ export class TransportRenderer {
       this.#drawSelection(
         ctx,
         rect,
-        '#f3f3ec',
+        '#efeee8',
       );
     }
 
     ctx.fillStyle = '#050505';
     ctx.fillRect(
-      x - 58,
-      y - 56,
-      116,
-      112,
+      x - 59,
+      y - 43,
+      118,
+      86,
     );
 
     ctx.fillStyle = '#efeee8';
     ctx.fillRect(
-      x - 52,
-      y - 50,
-      104,
-      100,
+      x - 54,
+      y - 38,
+      108,
+      76,
     );
 
-    ctx.fillStyle = '#777b77';
+    ctx.fillStyle = '#555954';
     ctx.fillRect(
-      x - 44,
-      y - 42,
-      88,
-      84,
+      x - 47,
+      y - 31,
+      94,
+      62,
     );
 
-    ctx.fillStyle = '#151515';
-    ctx.fillRect(
-      x - 35,
-      y - 27,
-      70,
-      54,
+    const used =
+      state.line1.fleetCount
+      + state.line2.fleetCount;
+
+    const slots = Math.min(
+      state.depot.garageSlots,
+      8,
     );
 
-    ctx.strokeStyle = LINE_A_COLOR;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(x - 25, y - 10);
-    ctx.lineTo(x + 25, y - 10);
-    ctx.stroke();
+    for (
+      let index = 0;
+      index < slots;
+      index += 1
+    ) {
+      const col = index % 4;
+      const row = Math.floor(index / 4);
 
-    ctx.strokeStyle = LINE_B_COLOR;
-    ctx.beginPath();
-    ctx.moveTo(x - 25, y + 10);
-    ctx.lineTo(x + 25, y + 10);
-    ctx.stroke();
+      const px =
+        x - 36 + col * 24;
+
+      const py =
+        y - 16 + row * 27;
+
+      ctx.fillStyle =
+        index < used
+          ? '#0797ec'
+          : '#232323';
+
+      ctx.fillRect(
+        px,
+        py,
+        15,
+        9,
+      );
+
+      ctx.strokeStyle = '#111';
+      ctx.strokeRect(
+        px,
+        py,
+        15,
+        9,
+      );
+    }
 
     ctx.fillStyle = '#efeee8';
-    ctx.font = '9px "Lucida Console", monospace';
+    ctx.font =
+      '9px "Lucida Console", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(
-      'INTERCHANGE',
-      x,
-      y + 73,
-    );
 
-    this.#drawCapacityBadge(
-      ctx,
+    ctx.fillText(
+      'BUS DEPOT',
       x,
-      y - 69,
-      state.interchange.transferCapacityPpm,
-      '#efeee8',
+      y + 57,
     );
   }
 
-  #drawStation(
+  #drawFutureLine(
     ctx,
     rect,
-    label,
-    color,
-    capacity,
+    cost,
     selected,
   ) {
-    const { x, y } = rect;
-
     if (selected) {
       this.#drawSelection(
         ctx,
-        rect,
-        color,
+        {
+          ...rect,
+          w: 96,
+          h: 86,
+        },
+        LINE_2_COLOR,
       );
     }
 
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(
-      x - 63,
-      y - 60,
-      126,
-      120,
-    );
-
-    ctx.fillStyle = '#efeee8';
-    ctx.fillRect(
-      x - 57,
-      y - 54,
-      114,
-      108,
-    );
-
-    ctx.fillStyle = '#999b96';
-    ctx.fillRect(
-      x - 48,
-      y - 45,
-      96,
-      90,
-    );
-
     ctx.fillStyle = '#151515';
-    ctx.fillRect(
-      x - 36,
-      y - 31,
-      72,
-      55,
-    );
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-
-    for (
-      let row = -19;
-      row <= 13;
-      row += 16
-    ) {
-      ctx.beginPath();
-      ctx.moveTo(
-        x - 26,
-        y + row,
-      );
-      ctx.lineTo(
-        x + 26,
-        y + row,
-      );
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '10px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(
-      label,
-      x,
-      y + 78,
-    );
-
-    this.#drawCapacityBadge(
-      ctx,
-      x,
-      y - 75,
-      capacity,
-      color,
-    );
-  }
-
-  #drawCapacityBadge(
-    ctx,
-    x,
-    y,
-    value,
-    color,
-  ) {
-    const text = String(
-      Math.round(value),
-    );
-
-    const width =
-      text.length >= 3
-        ? 35
-        : 29;
-
-    ctx.fillStyle = '#202020';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-
-    ctx.fillRect(
-      x - width / 2,
-      y - 10,
-      width,
-      20,
-    );
-
-    ctx.strokeRect(
-      x - width / 2,
-      y - 10,
-      width,
-      20,
-    );
-
-    ctx.fillStyle = '#efeee8';
-    ctx.font = '10px "Lucida Console", monospace';
-    ctx.textAlign = 'center';
-
-    ctx.fillText(
-      text,
-      x,
-      y + 4,
-    );
-  }
-
-  #drawFutureMarker(
-    ctx,
-    x,
-    y,
-    color,
-  ) {
-    ctx.fillStyle = '#151515';
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = LINE_2_COLOR;
     ctx.lineWidth = 2;
 
     ctx.fillRect(
-      x - 8,
-      y - 8,
-      16,
-      16,
+      rect.x - 47,
+      rect.y - 27,
+      94,
+      54,
     );
 
     ctx.strokeRect(
-      x - 8,
-      y - 8,
-      16,
-      16,
+      rect.x - 47,
+      rect.y - 27,
+      94,
+      54,
+    );
+
+    ctx.fillStyle = '#efeee8';
+    ctx.font =
+      '9px "Lucida Console", monospace';
+    ctx.textAlign = 'center';
+
+    ctx.fillText(
+      'NEW BUS LINE',
+      rect.x,
+      rect.y - 5,
+    );
+
+    ctx.fillStyle = '#f4ca00';
+
+    ctx.fillText(
+      `LINE 2 · $${cost}`,
+      rect.x,
+      rect.y + 12,
     );
   }
 
@@ -1101,7 +1272,11 @@ export class TransportRenderer {
   ) {
     const ratio =
       capacity > 0
-        ? clamp(waiting / capacity, 0, 1)
+        ? clamp(
+          waiting / capacity,
+          0,
+          1,
+        )
         : 0;
 
     const color =
@@ -1164,7 +1339,8 @@ export class TransportRenderer {
     }
 
     ctx.fillStyle = '#efeee8';
-    ctx.font = '8px "Lucida Console", monospace';
+    ctx.font =
+      '8px "Lucida Console", monospace';
     ctx.textAlign = 'left';
 
     ctx.fillText(
@@ -1177,8 +1353,10 @@ export class TransportRenderer {
   #drawRevenuePulse(
     ctx,
     state,
+    lastStop,
   ) {
-    const income = getIncomePerSecond(state);
+    const income =
+      getIncomePerSecond(state);
 
     if (income <= 0) return;
 
@@ -1191,45 +1369,36 @@ export class TransportRenderer {
       1,
     );
 
-    const x =
-      WORLD.stationA.x + 76;
-
-    const y =
-      WORLD.stationA.y
-      + 15
-      - phase * 8;
-
     ctx.globalAlpha = alpha;
 
     ctx.fillStyle = '#ffe000';
     ctx.beginPath();
+
     ctx.arc(
-      x,
-      y,
-      8,
+      lastStop.x + 42,
+      lastStop.y - phase * 8,
+      7,
       0,
       Math.PI * 2,
     );
+
     ctx.fill();
 
     ctx.fillStyle = '#b9ff8b';
-    ctx.font = '11px "Lucida Console", monospace';
-    ctx.textAlign = 'left';
+    ctx.font =
+      '10px "Lucida Console", monospace';
 
     ctx.fillText(
       `+${income.toFixed(1)}`,
-      x + 13,
-      y + 4,
+      lastStop.x + 54,
+      lastStop.y + 3 - phase * 8,
     );
 
     ctx.globalAlpha = 1;
   }
 
-  #drawSystemReadout(
-    ctx,
-    state,
-  ) {
-    if (!state.corridorA.lineBuilt) return;
+  #drawSystemReadout(ctx, state) {
+    if (!state.line1.built) return;
 
     const delivered =
       getDeliveredPassengersPpm(state);
@@ -1237,37 +1406,38 @@ export class TransportRenderer {
     const wait =
       getAverageWaitMinutes(state);
 
-    const abandonment =
-      getAbandonmentPercent(state);
+    const bottleneck =
+      getBottleneck(state);
 
     const x = -35;
-    const y = -245;
+    const y = -250;
 
     ctx.fillStyle = '#151515';
     ctx.strokeStyle = '#4e4e4e';
     ctx.lineWidth = 2;
 
     ctx.fillRect(
-      x - 95,
+      x - 105,
       y - 18,
-      190,
+      210,
       52,
     );
 
     ctx.strokeRect(
-      x - 95,
+      x - 105,
       y - 18,
-      190,
+      210,
       52,
     );
 
     ctx.fillStyle = '#efeee8';
-    ctx.font = '9px "Lucida Console", monospace';
+    ctx.font =
+      '9px "Lucida Console", monospace';
     ctx.textAlign = 'left';
 
     ctx.fillText(
-      `DELIVERED ${delivered.toFixed(0)} pax/min`,
-      x - 85,
+      `DELIVERED ${delivered.toFixed(1)} pax/min`,
+      x - 95,
       y,
     );
 
@@ -1278,18 +1448,18 @@ export class TransportRenderer {
 
     ctx.fillText(
       `AVG WAIT ${wait.toFixed(1)} min`,
-      x - 85,
+      x - 95,
       y + 14,
     );
 
     ctx.fillStyle =
-      abandonment > 0
-        ? '#e91e47'
-        : '#aaa9a2';
+      bottleneck === 'none'
+        ? '#aaa9a2'
+        : '#e91e47';
 
     ctx.fillText(
-      `LEFT QUEUE ${abandonment.toFixed(1)}%`,
-      x - 85,
+      `STATUS ${bottleneck.toUpperCase()}`,
+      x - 95,
       y + 28,
     );
   }

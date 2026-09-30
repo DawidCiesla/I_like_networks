@@ -1086,3 +1086,31 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
   color: #ff6079;
   background: #241217;
 }
+
+
+/* Bus Era — map-first progression */
+#transport-canvas:active {
+  cursor: grabbing;
+}
+
+.bus-era-progress {
+  padding: 2px 0 1px;
+  color: #d7d7cf;
+  font-size: 8px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.inspector-panel {
+  max-height: calc(100vh - 160px);
+}
+
+.inspector-action .buy-pill {
+  min-width: 82px;
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .bus-era-progress {
+    font-size: 8px;
+  }
+}
