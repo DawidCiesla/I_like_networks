@@ -3649,6 +3649,16 @@ export class ThreeTransportRenderer {
       LINE_2_COLOR,
     );
 
+    drawLineVehicles(
+      'line3',
+      LINE_3_COLOR,
+    );
+
+    drawLineVehicles(
+      'line4',
+      LINE_4_COLOR,
+    );
+
     const builtRoads =
       state.city.roads.filter(
         (road) =>
