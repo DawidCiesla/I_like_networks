@@ -485,7 +485,6 @@ export class TransportRenderer {
     if (
       state.terminalA.built
       && state.terminalA.queuePassengers > 0
-      && !state.interchange.built
     ) {
       this.#drawPassengerQueue(
         ctx,
@@ -493,6 +492,19 @@ export class TransportRenderer {
         WORLD.terminalA.y + 58,
         state.terminalA.queuePassengers,
         state.terminalA.waitingCapacityPassengers,
+      );
+    }
+
+    if (
+      state.corridorB.built
+      && state.corridorB.queuePassengers > 0
+    ) {
+      this.#drawPassengerQueue(
+        ctx,
+        WORLD.stopsB[0].x - 48,
+        WORLD.stopsB[0].y + 54,
+        state.corridorB.queuePassengers,
+        state.corridorB.waitingCapacityPassengers,
       );
     }
 
