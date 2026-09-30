@@ -16,6 +16,7 @@ import {
   getLineOnboardPassengers,
   getLineWaitingPassengers,
   getNextStopCost,
+  getRouteLengthKm,
   getStopWaitingPassengers,
 } from '../src/simulation/model.js';
 
@@ -161,6 +162,40 @@ test('boarding and alighting are emitted as explicit passenger events', () => {
         event.type === 'alight'
         && event.fare > 0,
     ),
+  );
+});
+
+test('bus simulation uses the authored world-scale segment lengths', () => {
+  const state =
+    createInitialState();
+
+  buildNextStop(
+    state,
+    'line1',
+  );
+
+  assert.ok(
+    Math.abs(
+      getRouteLengthKm(
+        state,
+        'line1',
+      ) - 0.368,
+    ) < 1e-9,
+  );
+
+  buildNextStop(
+    state,
+    'line1',
+  );
+
+  assert.ok(
+    Math.abs(
+      getRouteLengthKm(
+        state,
+        'line1',
+      )
+      - 1.042856688271599,
+    ) < 1e-9,
   );
 });
 
