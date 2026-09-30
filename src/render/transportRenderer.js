@@ -1,4 +1,5 @@
 import {
+  TRANSPORT_MODES,
   getAbandonmentPercent,
   getAverageWaitMinutes,
   getCorridorADemandPpm,
@@ -91,6 +92,17 @@ const LINE_B_FEEDER_ROUTE = routeMetrics([
 ]);
 
 const LINE_B_DESTINATION_ROUTE = routeMetrics([
+  { x: WORLD.interchange.x + 58, y: WORLD.interchange.y + 8 },
+  { x: 200, y: -20 },
+  { x: 250, y: 70 },
+  { x: WORLD.stationB.x - 64, y: WORLD.stationB.y },
+]);
+
+const LINE_B_FULL_ROUTE = routeMetrics([
+  { x: WORLD.stopsB[0].x, y: WORLD.stopsB[0].y },
+  { x: WORLD.stopsB[3].x, y: WORLD.stopsB[3].y },
+  { x: 15, y: WORLD.stopsB[3].y },
+  { x: WORLD.interchange.x, y: WORLD.interchange.y + 58 },
   { x: WORLD.interchange.x + 58, y: WORLD.interchange.y + 8 },
   { x: 200, y: -20 },
   { x: 250, y: 70 },
@@ -310,9 +322,9 @@ export class TransportRenderer {
       this.#drawVehicles(
         ctx,
         LINE_A_ROUTE,
-        state.corridorA.lineCapacityPpm,
+        state.corridorA.fleetCount,
         LINE_A_COLOR,
-        'bus',
+        state.corridorA.mode,
       );
     } else {
       this.#drawGhostLine(
@@ -407,13 +419,15 @@ export class TransportRenderer {
         2,
       );
 
-      this.#drawVehicles(
-        ctx,
-        LINE_B_FEEDER_ROUTE,
-        state.corridorB.lineCapacityPpm,
-        LINE_B_COLOR,
-        'bus',
-      );
+      if (!state.stationB.built) {
+        this.#drawVehicles(
+          ctx,
+          LINE_B_FEEDER_ROUTE,
+          state.corridorB.fleetCount,
+          LINE_B_COLOR,
+          state.corridorB.mode,
+        );
+      }
 
       for (
         let index = 0;
@@ -447,10 +461,10 @@ export class TransportRenderer {
 
       this.#drawVehicles(
         ctx,
-        LINE_B_DESTINATION_ROUTE,
-        state.stationB.capacityPpm,
+        LINE_B_FULL_ROUTE,
+        state.corridorB.fleetCount,
         LINE_B_COLOR,
-        'bus',
+        state.corridorB.mode,
       );
 
       this.#drawStation(
@@ -625,22 +639,24 @@ export class TransportRenderer {
   #drawVehicles(
     ctx,
     metrics,
-    capacityPpm,
+    fleetCount,
     color,
     mode,
   ) {
-    if (capacityPpm <= 0) return;
+    if (fleetCount <= 0) return;
 
     const count = clamp(
-      Math.ceil(capacityPpm / 20),
+      fleetCount,
       1,
-      5,
+      8,
     );
 
+    const modeConfig =
+      TRANSPORT_MODES[mode]
+      ?? TRANSPORT_MODES.bus;
+
     const speed =
-      mode === 'bus'
-        ? 35
-        : 48;
+      28 + modeConfig.speedKph * 0.35;
 
     for (
       let index = 0;
