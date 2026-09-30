@@ -2,13 +2,13 @@
 
 A passenger-transport incremental / management game prototype.
 
-The project started as a network-management prototype, but the core systems have now been refactored into a multimodal passenger transport game. The long-term direction is not limited to trains: buses, trams, metro, regional rail, ferries and air transport can all become distinct layers of the same growing transport network.
+The long-term direction is a single growing multimodal transport system rather than a train-only game. Buses, trams, metro, regional rail, ferries and air transport are intended to become distinct layers with different economics and operating characteristics.
 
 ## Current development status
 
-**Transport Refactor — Phase T0**
+**Transport T1 — Fleet, Frequency and Travel Time**
 
-The current build validates the transport-domain version of the existing simulation before adding the next major gameplay phase.
+The current build replaces abstract line-capacity upgrades with explicit vehicle fleets.
 
 Implemented now:
 
@@ -18,18 +18,38 @@ Implemented now:
 - Central Interchange,
 - optional Bus Line 2 from Riverside,
 - optional Harbor Station,
-- visible pixel-art buses moving on lines,
-- passenger waiting queues,
-- average waiting time,
-- passengers abandoning overcrowded queues,
-- capacity bottlenecks on lines, terminals, interchange and destination stations,
+- explicit bus fleet size per line,
+- vehicle capacity,
+- route length,
+- one-way travel time,
+- full cycle time,
+- service headway,
+- service frequency,
+- line capacity derived from fleet and cycle time,
+- purchasing individual buses,
+- visible bus count matching the actual fleet,
+- adding a stop increases both passenger demand and line cycle time,
+- source queues when a line cannot carry all waiting passengers,
+- average passenger waiting time includes scheduled service headway,
+- passengers abandoning overcrowded waiting areas,
 - contextual upgrades attached to the selected transport element,
-- additive map growth: existing stops and lines do not move when new infrastructure is built,
-- compact BUILD menu for genuinely new infrastructure,
-- save migration from the previous network versions,
-- dependency-free simulation tests.
+- additive map growth,
+- save migration from T0 and the previous network prototypes.
 
-Future transport modes are already represented in the domain model:
+A key T1 rule is:
+
+```text
+line capacity =
+vehicle capacity × fleet size / full cycle time
+```
+
+This means adding another stop is no longer a free expansion. The line becomes longer, headway worsens, and the player may need another vehicle.
+
+See [`docs/transport-t1.md`](docs/transport-t1.md) for the current phase contract.
+
+## Planned transport families
+
+The domain model contains baseline operating characteristics for:
 
 - bus,
 - tram,
@@ -38,9 +58,7 @@ Future transport modes are already represented in the domain model:
 - ferry,
 - air.
 
-Only buses are active in T0. Later phases will give the other modes distinct mechanics rather than treating them as cosmetic replacements.
-
-See [`docs/transport-t0.md`](docs/transport-t0.md) for the refactor contract.
+Only buses are active in T1. Later phases should unlock other modes as genuinely different transport systems rather than cosmetic replacements.
 
 ## Core progression principle
 
@@ -50,7 +68,7 @@ Building a new station, interchange or transport mode must not rearrange infrast
 
 Upgrades are contextual:
 
-- click a line to manage its stops and service capacity,
+- click a line to manage fleet, stops and passenger catchment,
 - click a terminal to manage platform and waiting capacity,
 - click the interchange to inspect transfers and services,
 - click a destination station to increase arrival capacity.
@@ -82,14 +100,12 @@ npm run check
 
 ## Architecture
 
-The game remains separated into independent layers:
-
 ```text
-passenger simulation state + rules
-             ↓
-          main loop
-           ↙   ↘
- transport renderer   contextual HUD
+passenger simulation state + fleet/service rules
+                    ↓
+                 main loop
+                  ↙   ↘
+       transport renderer   contextual HUD
 ```
 
-Passenger flows are aggregated in the simulation. Individual visible buses and waiting-person icons are presentation-layer representations, so later city-scale networks do not require simulating every passenger as an independent rendered object.
+Passenger flows remain aggregated in the simulation. Visible buses represent the actual fleet count, but individual passengers are not simulated as independent rendered entities. This keeps the architecture suitable for much larger future transport networks.
