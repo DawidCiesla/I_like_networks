@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171717" />
-    <title>I Like Transit — Transport T1</title>
+    <title>I Like Transit — Bus Era</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -38,52 +38,30 @@
 
         <section class="message-bar pixel-window">
           <div class="face-icon">⌣</div>
-          <div id="objective-text">Start your first passenger service.</div>
-          <span class="message-tag">Transport T1 ↓</span>
+          <div id="objective-text">Click the next station on the map.</div>
+          <span class="message-tag">BUS ERA ↓</span>
         </section>
       </div>
 
       <section class="legend-box pixel-window" aria-label="Legend">
         <div class="window-title legend-title">LINES</div>
+
         <div class="transit-legend-row">
           <span class="legend-line blue"></span>
           <span>1 BUS</span>
         </div>
+
         <div class="transit-legend-row">
           <span class="legend-line yellow"></span>
           <span>2 BUS</span>
         </div>
-        <div class="transit-legend-row future">
-          <span class="legend-line green dashed"></span>
-          <span>TRAM</span>
-        </div>
-        <div class="transit-legend-row future">
-          <span class="legend-line magenta dashed"></span>
-          <span>RAIL</span>
-        </div>
+
         <div class="legend-separator"></div>
-        <div class="legend-icons">
-          <button title="Transport map">⌂</button>
-          <button title="Settings">⚙</button>
-          <button title="Region">◎</button>
+
+        <div id="progress-text" class="bus-era-progress">
+          1 / 5 STOPS
         </div>
       </section>
-
-      <div class="build-dock">
-        <button id="build-menu-button" class="build-menu-button pixel-window" type="button">
-          <span class="build-plus">＋</span>
-          <span>BUILD</span>
-        </button>
-
-        <section id="build-panel" class="build-panel pixel-window hidden" aria-label="Build menu">
-          <div class="panel-heading-row">
-            <div class="window-title">BUILD</div>
-            <button id="build-panel-close" class="panel-close" type="button" aria-label="Close build menu">×</button>
-          </div>
-          <div id="build-list" class="build-list"></div>
-          <div id="build-empty" class="build-empty hidden">No new infrastructure available.</div>
-        </section>
-      </div>
 
       <section id="inspector-panel" class="inspector-panel pixel-window hidden" aria-label="Selected transport element">
         <div class="panel-heading-row">
@@ -91,31 +69,23 @@
             <div id="inspector-kicker" class="inspector-kicker">SELECTED</div>
             <div id="inspector-title" class="inspector-title">Transport element</div>
           </div>
+
           <button id="inspector-close" class="panel-close" type="button" aria-label="Close inspector">×</button>
         </div>
 
         <div id="inspector-subtitle" class="inspector-subtitle"></div>
         <div id="inspector-stats" class="inspector-stats"></div>
         <div id="inspector-actions" class="inspector-actions"></div>
-
-        <section id="inspector-services" class="inspector-routes hidden">
-          <div class="dash-divider"></div>
-          <div class="window-title">SERVICE BOARD</div>
-          <div class="route-head service-head">
-            <span>DESTINATION</span>
-            <span>LINE</span>
-            <span>EVERY</span>
-          </div>
-          <div id="service-board-body"></div>
-          <div class="route-traffic">
-            <div><span>CENTRAL</span><strong id="service-a-throughput">0 pax/min</strong></div>
-            <div><span>HARBOR</span><strong id="service-b-throughput">0 pax/min</strong></div>
-          </div>
-        </section>
       </section>
 
-      <button id="reset-button" class="reset-button" type="button" title="Erase all progress and restart">RESET GAME</button>
-      <div class="hint">CLICK A STOP / STATION TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM</div>
+      <button id="reset-button" class="reset-button" type="button" title="Erase all progress and restart">
+        RESET GAME
+      </button>
+
+      <div class="hint">
+        CLICK GHOST STOPS / BUILDINGS TO EXPAND • CLICK BUILT OBJECTS TO INSPECT • DRAG TO PAN • WHEEL TO ZOOM
+      </div>
+
       <div id="toast" class="toast pixel-window" aria-live="polite"></div>
     </main>
 
