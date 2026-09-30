@@ -28,7 +28,7 @@ export const ECONOMY = Object.freeze({
   line4StopBaseCost: 210,
   line4StopCostGrowth: 1.6,
   busBaseCost: 70,
-  busCostGrowth: 1.4,
+  busCostGrowth: 1.32,
   maxLine1Stops: 5,
   maxLine2Stops: 4,
   maxLine3Stops: 5,
@@ -40,8 +40,8 @@ export const ECONOMY = Object.freeze({
 export const UPGRADES = Object.freeze({
   depot: {
     baseCost: 160,
-    costGrowth: 1.8,
-    delta: 2,
+    costGrowth: 1.65,
+    delta: 4,
   },
 });
 
@@ -50,10 +50,10 @@ export const STATION_UPGRADE = Object.freeze({
   baseCost: 55,
   costGrowth: 1.85,
   waitingCapacityByLevel: [
-    35,
-    55,
-    85,
-    125,
+    45,
+    70,
+    105,
+    150,
   ],
   demandBonusByLevel: [
     0,
@@ -63,9 +63,9 @@ export const STATION_UPGRADE = Object.freeze({
   ],
   dwellReductionByLevel: [
     0,
-    0.02,
-    0.04,
-    0.06,
+    0.025,
+    0.055,
+    0.085,
   ],
   tierNames: [
     'Stop',
