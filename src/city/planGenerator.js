@@ -431,14 +431,11 @@ function addRoadCandidate(
 
   road = trimmed.road;
 
-  const connectionRoadIds =
-    [
-      ...parentRoadIds,
-    ];
+  const connectionRoadIds = [];
 
   if (
     trimmed.connectionRoadId
-    && !connectionRoadIds.includes(
+    && !parentRoadIds.includes(
       trimmed.connectionRoadId,
     )
   ) {
@@ -463,6 +460,9 @@ function addRoadCandidate(
 
   if (
     endAttachment
+    && !parentRoadIds.includes(
+      endAttachment.road.id,
+    )
     && !connectionRoadIds.includes(
       endAttachment.road.id,
     )
@@ -508,8 +508,10 @@ function addRoadCandidate(
       road,
       roads,
       {
-        allowedTouchRoadIds:
-          connectionRoadIds,
+        allowedTouchRoadIds: [
+          ...parentRoadIds,
+          ...connectionRoadIds,
+        ],
         reservations,
         ignoreReservationIds,
       },
@@ -522,7 +524,8 @@ function addRoadCandidate(
   const finalRoad = {
     ...road,
     parentRoadIds:
-      connectionRoadIds,
+      [...parentRoadIds],
+    connectionRoadIds,
     status: 'planned',
     constructionProgress: 0,
   };
