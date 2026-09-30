@@ -15,6 +15,7 @@ import {
   getStationLevel,
   getStationServedLines,
   getStationTierName,
+  isStationBuilt,
 } from '../simulation/model.js';
 
 import {
@@ -2902,6 +2903,7 @@ export class ThreeTransportRenderer {
       detail = null,
       stationLevel = 0,
       shared = false,
+      connectionGhost = false,
     } = {},
   ) {
     const group =
@@ -2935,43 +2937,45 @@ export class ThreeTransportRenderer {
         ? 0xe6e5dd
         : color;
 
-    const base =
-      new THREE.Mesh(
-        new THREE.CylinderGeometry(
-          radius,
-          radius,
-          ghost ? 2.2 : 3.2 + level,
-          16,
-        ),
-        new THREE.MeshStandardMaterial({
-          color:
-            ghost
-              ? 0x242824
-              : baseColor,
-          emissive:
-            selected
-              ? color
-              : 0x000000,
-          emissiveIntensity:
-            selected
-              ? 0.8
-              : 0,
-          transparent: ghost,
-          opacity:
-            ghost
-              ? 0.58
-              : 1,
-          roughness: 0.72,
-        }),
-      );
+    if (!connectionGhost) {
+      const base =
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            radius,
+            radius,
+            ghost ? 2.2 : 3.2 + level,
+            16,
+          ),
+          new THREE.MeshStandardMaterial({
+            color:
+              ghost
+                ? 0x242824
+                : baseColor,
+            emissive:
+              selected
+                ? color
+                : 0x000000,
+            emissiveIntensity:
+              selected
+                ? 0.8
+                : 0,
+            transparent: ghost,
+            opacity:
+              ghost
+                ? 0.58
+                : 1,
+            roughness: 0.72,
+          }),
+        );
 
-    base.position.y =
-      ground
-      + 2
-      + level * 0.5;
+      base.position.y =
+        ground
+        + 2
+        + level * 0.5;
 
-    base.castShadow = false;
-    group.add(base);
+      base.castShadow = false;
+      group.add(base);
+    }
 
     if (
       !ghost
@@ -3047,18 +3051,28 @@ export class ThreeTransportRenderer {
     }
 
     if (ghost) {
+      const ringRadius =
+        connectionGhost
+          ? 32
+          : 18;
+
       const ring =
         new THREE.Mesh(
           new THREE.TorusGeometry(
-            18,
-            1.8,
+            ringRadius,
+            connectionGhost
+              ? 2.8
+              : 1.8,
             8,
-            24,
+            28,
           ),
           new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.72,
+            opacity:
+              connectionGhost
+                ? 0.88
+                : 0.72,
           }),
         );
 
@@ -3066,9 +3080,39 @@ export class ThreeTransportRenderer {
         Math.PI / 2;
 
       ring.position.y =
-        ground + 1.2;
+        ground
+        + (
+          connectionGhost
+            ? 5
+            : 1.2
+        );
 
       group.add(ring);
+
+      if (connectionGhost) {
+        const inner =
+          new THREE.Mesh(
+            new THREE.TorusGeometry(
+              26,
+              1.2,
+              7,
+              24,
+            ),
+            new THREE.MeshBasicMaterial({
+              color,
+              transparent: true,
+              opacity: 0.5,
+            }),
+          );
+
+        inner.rotation.x =
+          Math.PI / 2;
+
+        inner.position.y =
+          ground + 5.4;
+
+        group.add(inner);
+      }
     }
 
     const label =
@@ -3269,6 +3313,20 @@ export class ThreeTransportRenderer {
       const selection =
         `futureStop:${lineKey}`;
 
+      const futureStationId =
+        STATION_IDS[lineKey][
+          line.stopCount
+        ];
+
+      const connectionGhost =
+        Boolean(
+          futureStationId
+          && isStationBuilt(
+            state,
+            futureStationId,
+          ),
+        );
+
       this.#stopObject(
         state,
         stops[line.stopCount],
@@ -3281,7 +3339,10 @@ export class ThreeTransportRenderer {
             this.selected
             === selection,
           detail:
-            `$${getNextStopCost(state, lineKey)}`,
+            connectionGhost
+              ? `CONNECT  ${getNextStopCost(state, lineKey)}`
+              : `${getNextStopCost(state, lineKey)}`,
+          connectionGhost,
         },
       );
     }
