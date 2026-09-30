@@ -975,6 +975,9 @@ export class ThreeTransportRenderer {
     this.roadGroup =
       new THREE.Group();
 
+    this.junctionGroup =
+      new THREE.Group();
+
     this.buildingGroup =
       new THREE.Group();
 
@@ -992,6 +995,7 @@ export class ThreeTransportRenderer {
       this.terrainGroup,
       this.natureGroup,
       this.roadGroup,
+      this.junctionGroup,
       this.buildingGroup,
       this.transportGroup,
       this.vehicleGroup,
@@ -1322,14 +1326,29 @@ export class ThreeTransportRenderer {
 
     this.#buildTerrain(state);
 
-    this.roadObjects.clear();
-    this.buildingObjects.clear();
-    this.natureOccupancySignature = null;
-    this.junctionSignature = null;
+    clearGroup(
+      this.roadGroup,
+    );
+
+    clearGroup(
+      this.junctionGroup,
+    );
+
+    clearGroup(
+      this.buildingGroup,
+    );
 
     clearGroup(
       this.natureGroup,
     );
+
+    this.roadObjects.clear();
+    this.buildingObjects.clear();
+    this.treeData = [];
+    this.treeTrunks = null;
+    this.treeCrowns = null;
+    this.natureOccupancySignature = null;
+    this.junctionSignature = null;
 
     this.#buildNatureBase(state);
   }
