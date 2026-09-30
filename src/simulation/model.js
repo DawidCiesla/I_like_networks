@@ -4,7 +4,14 @@ import {
   ensureCityRuntime,
 } from '../city/cityModel.js';
 
-export const GAME_VERSION = 11;
+export const GAME_VERSION = 12;
+
+export const LINE_KEYS = Object.freeze([
+  'line1',
+  'line2',
+  'line3',
+  'line4',
+]);
 
 export const ECONOMY = Object.freeze({
   startingMoney: 100,
@@ -14,10 +21,18 @@ export const ECONOMY = Object.freeze({
   line2BuildCost: 220,
   line2StopBaseCost: 75,
   line2StopCostGrowth: 1.55,
+  line3BuildCost: 520,
+  line3StopBaseCost: 135,
+  line3StopCostGrowth: 1.58,
+  line4BuildCost: 950,
+  line4StopBaseCost: 210,
+  line4StopCostGrowth: 1.6,
   busBaseCost: 70,
   busCostGrowth: 1.4,
   maxLine1Stops: 5,
   maxLine2Stops: 4,
+  maxLine3Stops: 5,
+  maxLine4Stops: 5,
   maxVehiclesPerLine: 8,
   farePerPassenger: 12,
 });
@@ -48,6 +63,36 @@ export const UPGRADES = Object.freeze({
     costGrowth: 1.7,
     delta: 0.5,
   },
+});
+
+export const STATION_UPGRADE = Object.freeze({
+  maxLevel: 3,
+  baseCost: 55,
+  costGrowth: 1.85,
+  waitingCapacityByLevel: [
+    35,
+    55,
+    85,
+    125,
+  ],
+  demandBonusByLevel: [
+    0,
+    0.2,
+    0.45,
+    0.75,
+  ],
+  dwellReductionByLevel: [
+    0,
+    0.02,
+    0.04,
+    0.06,
+  ],
+  tierNames: [
+    'Stop',
+    'Shelter',
+    'Station',
+    'Hub',
+  ],
 });
 
 export const TRANSPORT_MODES = Object.freeze({
@@ -115,6 +160,50 @@ export const STOP_NAMES = Object.freeze({
     'Museum',
     'Harbor',
   ],
+  line3: [
+    'University',
+    'North Quarter',
+    'Hillcrest',
+    'Northgate',
+    'Meadow End',
+  ],
+  line4: [
+    'Harbor',
+    'Docklands',
+    'Eastgate',
+    'Stadium',
+    'Central',
+  ],
+});
+
+export const STATION_IDS = Object.freeze({
+  line1: [
+    'old-town',
+    'market-square',
+    'city-park',
+    'university',
+    'central',
+  ],
+  line2: [
+    'city-park',
+    'riverside',
+    'museum',
+    'harbor',
+  ],
+  line3: [
+    'university',
+    'north-quarter',
+    'hillcrest',
+    'northgate',
+    'meadow-end',
+  ],
+  line4: [
+    'harbor',
+    'docklands',
+    'eastgate',
+    'stadium',
+    'central',
+  ],
 });
 
 const GAME_MINUTES_PER_REAL_SECOND = 0.25;
@@ -140,6 +229,26 @@ const LINE_CONFIG = Object.freeze({
     ],
     demandPerStopPpm: 2.8,
     maxStops: ECONOMY.maxLine2Stops,
+  },
+  line3: {
+    segmentLengthsKm: [
+      0.7830968791975276,
+      0.7388566882715992,
+      0.6588566882715992,
+      0.5948566882715993,
+    ],
+    demandPerStopPpm: 3.1,
+    maxStops: ECONOMY.maxLine3Stops,
+  },
+  line4: {
+    segmentLengthsKm: [
+      0.738856688271599,
+      0.6748566882715991,
+      0.6588566882715992,
+      1.202856688271599,
+    ],
+    demandPerStopPpm: 3.4,
+    maxStops: ECONOMY.maxLine4Stops,
   },
 });
 
