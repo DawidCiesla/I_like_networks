@@ -31,6 +31,45 @@ const canvas =
 let state = loadState();
 let hud;
 let resetInProgress = false;
+let saveScheduled = false;
+
+const scheduleSave = () => {
+  if (
+    resetInProgress
+    || saveScheduled
+  ) {
+    return;
+  }
+
+  saveScheduled = true;
+
+  const commit = () => {
+    saveScheduled = false;
+
+    if (!resetInProgress) {
+      saveState(state);
+    }
+  };
+
+  if (
+    typeof window.requestIdleCallback
+    === 'function'
+  ) {
+    window.requestIdleCallback(
+      commit,
+      {
+        timeout: 1200,
+      },
+    );
+
+    return;
+  }
+
+  window.setTimeout(
+    commit,
+    0,
+  );
+};
 
 const toastFailure = (result) => {
   const messages = {
@@ -66,6 +105,7 @@ hud = new Hud({
       buildNextStop(state, 'line1');
 
     if (result.ok) {
+      scheduleSave();
       renderer.setSelection('line1');
       hud.setSelection('line1');
 
@@ -84,6 +124,7 @@ hud = new Hud({
       buildNextStop(state, 'line2');
 
     if (result.ok) {
+      scheduleSave();
       renderer.setSelection('line2');
       hud.setSelection('line2');
       hud.toast('Line 2 extended to the new stop.');
@@ -97,6 +138,7 @@ hud = new Hud({
       buildDepot(state);
 
     if (result.ok) {
+      scheduleSave();
       renderer.setSelection('depot');
       hud.setSelection('depot');
       hud.toast(
@@ -112,6 +154,7 @@ hud = new Hud({
       buildLine2(state);
 
     if (result.ok) {
+      scheduleSave();
       renderer.setSelection('line2');
       hud.setSelection('line2');
       hud.toast(
@@ -127,6 +170,7 @@ hud = new Hud({
       addVehicle(state, 'line1');
 
     if (result.ok) {
+      scheduleSave();
       hud.toast(
         'Bus assigned to Line 1. Headway reduced.',
       );
@@ -140,6 +184,7 @@ hud = new Hud({
       addVehicle(state, 'line2');
 
     if (result.ok) {
+      scheduleSave();
       hud.toast(
         'Bus assigned to Line 2. Headway reduced.',
       );
@@ -153,6 +198,7 @@ hud = new Hud({
       buyUpgrade(state, type);
 
     if (result.ok) {
+      scheduleSave();
       hud.toast('Upgrade purchased.');
     } else {
       toastFailure(result);
@@ -161,6 +207,7 @@ hud = new Hud({
 
   onSpeed: (speed) => {
     setSimulationSpeed(state, speed);
+    scheduleSave();
   },
 
   onInspectorClose: () => {
@@ -183,6 +230,7 @@ hud = new Hud({
 
 let last = performance.now();
 let saveAccumulator = 0;
+let lastHudRender = 0;
 
 function frame(now) {
   const delta = Math.min(
@@ -202,12 +250,18 @@ function frame(now) {
     delta,
   );
 
-  hud.render(state);
+  if (
+    now - lastHudRender
+    >= 100
+  ) {
+    hud.render(state);
+    lastHudRender = now;
+  }
 
   saveAccumulator += delta;
 
-  if (saveAccumulator >= 2) {
-    saveState(state);
+  if (saveAccumulator >= 12) {
+    scheduleSave();
     saveAccumulator = 0;
   }
 
