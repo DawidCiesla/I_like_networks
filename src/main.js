@@ -231,14 +231,29 @@ hud = new Hud({
 let last = performance.now();
 let saveAccumulator = 0;
 let lastHudRender = 0;
+let lastRenderedAt = 0;
+
+const TARGET_FRAME_INTERVAL_MS =
+  1000 / 60;
 
 function frame(now) {
+  requestAnimationFrame(frame);
+
+  if (
+    now - lastRenderedAt
+    < TARGET_FRAME_INTERVAL_MS
+      * 0.92
+  ) {
+    return;
+  }
+
   const delta = Math.min(
     (now - last) / 1000,
     0.1,
   );
 
   last = now;
+  lastRenderedAt = now;
 
   advanceSimulation(
     state,
@@ -265,7 +280,6 @@ function frame(now) {
     saveAccumulator = 0;
   }
 
-  requestAnimationFrame(frame);
 }
 
 window.addEventListener(
