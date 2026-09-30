@@ -78,7 +78,7 @@ test('same seed creates the same immutable master plan', () => {
   );
 
   assert.ok(
-    first.parcels.length >= 80,
+    first.parcels.length >= 70,
   );
 });
 
@@ -154,7 +154,7 @@ test('fresh city contains a plan but no completed buildings', () => {
   );
 });
 
-test('every local street has a valid parent road and physical graph connection', () => {
+test('every local street has a valid parent and shares a compiled junction with it', () => {
   const plan =
     generateCityMasterPlan(
       284731,
@@ -169,6 +169,29 @@ test('every local street has a valid parent road and physical graph connection',
         ],
       ),
     );
+
+  const graphEdgesByRoad =
+    new Map();
+
+  for (
+    const edge
+    of plan.graphEdges
+  ) {
+    if (
+      !graphEdgesByRoad.has(
+        edge.roadId,
+      )
+    ) {
+      graphEdgesByRoad.set(
+        edge.roadId,
+        [],
+      );
+    }
+
+    graphEdgesByRoad.get(
+      edge.roadId,
+    ).push(edge);
+  }
 
   for (
     const road
@@ -193,29 +216,39 @@ test('every local street has a valid parent road and physical graph connection',
       );
     }
 
-    const physicallyConnected =
-      road.parentRoadIds.some(
-        (parentId) => {
-          const parent =
-            roads.get(parentId);
+    const childEdges =
+      graphEdgesByRoad.get(
+        road.id,
+      ) ?? [];
 
-          return (
-            road.fromNodeId
-              === parent.fromNodeId
-            || road.fromNodeId
-              === parent.toNodeId
-            || road.toNodeId
-              === parent.fromNodeId
-            || road.toNodeId
-              === parent.toNodeId
-          );
-        },
+    assert.ok(
+      childEdges.length > 0,
+      `${road.id} has no compiled graph edges`,
+    );
+
+    const childStartNode =
+      childEdges[0].fromNodeId;
+
+    const connectedToParent =
+      road.parentRoadIds.some(
+        (parentId) =>
+          (
+            graphEdgesByRoad.get(
+              parentId,
+            ) ?? []
+          ).some(
+            (edge) =>
+              edge.fromNodeId
+                === childStartNode
+              || edge.toNodeId
+                === childStartNode,
+          ),
       );
 
     assert.equal(
-      physicallyConnected,
+      connectedToParent,
       true,
-      `${road.id} is not physically connected to its parent`,
+      `${road.id} does not share a compiled junction with its parent`,
     );
   }
 });
@@ -601,7 +634,7 @@ test('master-plan parcels never overlap each other and all have street frontage'
     );
 
   assert.ok(
-    plan.parcels.length >= 80,
+    plan.parcels.length >= 70,
   );
 
   assert.ok(

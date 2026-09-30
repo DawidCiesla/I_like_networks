@@ -129,7 +129,7 @@ The camera therefore supports much wider zoom-out than before. The city is a nav
 
 ## Road graph
 
-The default Bus Era master plan now contains roughly fifty road edges, including arterials and local streets.
+The default Bus Era master plan now contains roughly sixty semantic roads across arterial, collector, local and service classes. These compile into a larger set of routing graph edges at real junctions.
 
 Each edge stores:
 
@@ -407,7 +407,7 @@ This means city growth can be watched in normal gameplay.
 
 Game state is now version 9.
 
-City-state schema is version 2.
+City-state schema is version 3.
 
 Older Bus Era saves migrate into the new city model.
 
@@ -490,3 +490,20 @@ Key invariants are now enforced by tests:
 8. built roads and buildings remain stable after later network expansion.
 
 These constraints should be preserved when procedural city expansion is introduced beyond the current authored Bus Era.
+
+
+## Intersection-aware topology revision
+
+Road planning now uses the dedicated `roadTopology.js` core.
+
+The previous district blueprint could still place independent polylines too close to one another. The new pipeline validates every generated district street against the complete road network.
+
+District morphology is now generated in hierarchy:
+
+```text
+arterial → collector → cross streets → side / loop streets
+```
+
+Every accepted road is checked for snapping, intersection angle, parallel corridor separation and reserved-site collision.
+
+After planning, crossings are compiled into persistent junction nodes and graph edges. See [`road-topology.md`](road-topology.md) for the topology contract.

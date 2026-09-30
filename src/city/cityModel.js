@@ -2,7 +2,7 @@ import {
   generateCityMasterPlan,
 } from './planGenerator.js';
 
-export const CITY_VERSION = 2;
+export const CITY_VERSION = 3;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
@@ -184,6 +184,10 @@ function projectDurationForRoad(
 
   if (road.class === 'arterial') {
     return 8 + length / 32;
+  }
+
+  if (road.class === 'collector') {
+    return 7 + length / 29;
   }
 
   return 6 + length / 26;
@@ -926,6 +930,10 @@ export function createInitialCityState(
     timeSeconds: 0,
     nextProjectId: 1,
     nodes: masterPlan.nodes,
+    graphEdges:
+      masterPlan.graphEdges,
+    junctions:
+      masterPlan.junctions,
     roads: masterPlan.roads,
     districts:
       masterPlan.districts,
@@ -968,6 +976,20 @@ export function ensureCityRuntime(
     )
       ? state.city.timeSeconds
       : 0;
+
+  state.city.graphEdges =
+    Array.isArray(
+      state.city.graphEdges,
+    )
+      ? state.city.graphEdges
+      : [];
+
+  state.city.junctions =
+    Array.isArray(
+      state.city.junctions,
+    )
+      ? state.city.junctions
+      : [];
 
   state.city.buildings =
     Array.isArray(

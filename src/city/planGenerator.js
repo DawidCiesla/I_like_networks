@@ -4,6 +4,20 @@ import {
   getSegmentRoute,
 } from '../render/transportLayout.js';
 
+import {
+  ROAD_TOPOLOGY,
+  closestPointOnRoad,
+  compileRoadGraph,
+  distance,
+  findNearestAttachment,
+  normalize,
+  polylineLength,
+  roadHalfWidth,
+  snapCandidateStartToRoad,
+  trimRoadToFirstIntersection,
+  validateRoadCandidate,
+} from './roadTopology.js';
+
 const DISTRICT_SPECS = Object.freeze([
   {
     id: 'oldTown',
@@ -13,9 +27,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'residential',
     parentRoadId: 'arterial-oldTown-existing',
     branchSide: 1,
-    depth: 220,
-    arm: 180,
-    roadTier: 1,
+    depth: 250,
+    halfWidth: 210,
+    crossRoadCount: 2,
   },
   {
     id: 'market',
@@ -25,9 +39,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'mixed',
     parentRoadId: 'arterial-line1-0',
     branchSide: -1,
-    depth: 250,
-    arm: 210,
-    roadTier: 2,
+    depth: 280,
+    halfWidth: 235,
+    crossRoadCount: 2,
   },
   {
     id: 'park',
@@ -37,9 +51,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'park',
     parentRoadId: 'arterial-line1-1',
     branchSide: 1,
-    depth: 230,
-    arm: 190,
-    roadTier: 1,
+    depth: 270,
+    halfWidth: 215,
+    crossRoadCount: 2,
   },
   {
     id: 'university',
@@ -49,9 +63,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'campus',
     parentRoadId: 'arterial-line1-2',
     branchSide: -1,
-    depth: 260,
-    arm: 220,
-    roadTier: 2,
+    depth: 310,
+    halfWidth: 245,
+    crossRoadCount: 2,
   },
   {
     id: 'central',
@@ -61,9 +75,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'central',
     parentRoadId: 'arterial-line1-3',
     branchSide: 1,
-    depth: 300,
-    arm: 250,
-    roadTier: 3,
+    depth: 350,
+    halfWidth: 285,
+    crossRoadCount: 3,
   },
   {
     id: 'riverside',
@@ -73,9 +87,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'riverside',
     parentRoadId: 'arterial-line2-0',
     branchSide: 1,
-    depth: 240,
-    arm: 200,
-    roadTier: 1,
+    depth: 280,
+    halfWidth: 225,
+    crossRoadCount: 2,
   },
   {
     id: 'museum',
@@ -85,9 +99,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'mixed',
     parentRoadId: 'arterial-line2-1',
     branchSide: -1,
-    depth: 260,
-    arm: 220,
-    roadTier: 2,
+    depth: 300,
+    halfWidth: 245,
+    crossRoadCount: 2,
   },
   {
     id: 'harbor',
@@ -97,9 +111,9 @@ const DISTRICT_SPECS = Object.freeze([
     theme: 'industrial',
     parentRoadId: 'arterial-line2-2',
     branchSide: 1,
-    depth: 300,
-    arm: 260,
-    roadTier: 2,
+    depth: 350,
+    halfWidth: 300,
+    crossRoadCount: 2,
   },
 ]);
 
@@ -130,163 +144,29 @@ function unitRandom(seed, key) {
   );
 }
 
-function normalize(dx, dy) {
-  const length =
-    Math.hypot(dx, dy);
-
-  if (length <= 1e-9) {
-    return {
-      x: 1,
-      y: 0,
-    };
-  }
-
-  return {
-    x: dx / length,
-    y: dy / length,
-  };
-}
-
-function add(point, vector, scale) {
-  return {
-    x:
-      point.x
-      + vector.x * scale,
-    y:
-      point.y
-      + vector.y * scale,
-  };
-}
-
 function getStop(spec) {
   return WORLD[
     spec.lineKey + 'Stops'
   ][spec.stopIndex];
 }
 
-function roadNodeKey(point) {
-  return (
-    `${Math.round(point.x * 10)}:`
-    + `${Math.round(point.y * 10)}`
-  );
-}
-
-function ensureNode(
-  nodes,
-  nodeByKey,
+function add(
   point,
+  vector,
+  amount,
 ) {
-  const key =
-    roadNodeKey(point);
-
-  if (nodeByKey.has(key)) {
-    return nodeByKey.get(key);
-  }
-
-  const id =
-    `node-${nodes.length + 1}`;
-
-  nodes.push({
-    id,
-    x: point.x,
-    y: point.y,
-  });
-
-  nodeByKey.set(
-    key,
-    id,
-  );
-
-  return id;
-}
-
-function makeEdge(
-  nodes,
-  nodeByKey,
-  {
-    id,
-    districtId,
-    roadClass,
-    points,
-    unlock = null,
-    buildOrder = 0,
-    source = 'city',
-    parentRoadIds = [],
-  },
-) {
-  const first =
-    points[0];
-
-  const last =
-    points[points.length - 1];
-
   return {
-    id,
-    districtId,
-    class: roadClass,
-    source,
-    fromNodeId:
-      ensureNode(
-        nodes,
-        nodeByKey,
-        first,
-      ),
-    toNodeId:
-      ensureNode(
-        nodes,
-        nodeByKey,
-        last,
-      ),
-    points:
-      points.map(
-        (point) => ({
-          ...point,
-        }),
-      ),
-    unlock,
-    buildOrder,
-    parentRoadIds:
-      [...parentRoadIds],
-    status: 'planned',
-    constructionProgress: 0,
+    x:
+      point.x
+      + vector.x * amount,
+    y:
+      point.y
+      + vector.y * amount,
   };
-}
-
-function getIncomingDirection(
-  spec,
-) {
-  if (spec.id === 'oldTown') {
-    return {
-      x: 1,
-      y: 0,
-    };
-  }
-
-  const route =
-    spec.lineKey === 'line1'
-      ? getSegmentRoute(
-        'line1',
-        spec.stopIndex - 1,
-        spec.stopIndex,
-      )
-      : getSegmentRoute(
-        'line2',
-        spec.stopIndex - 1,
-        spec.stopIndex,
-      );
-
-  const last =
-    route.segments.at(-1);
-
-  return normalize(
-    last?.dx ?? 1,
-    last?.dy ?? 0,
-  );
 }
 
 function getPrimaryRoadSpecs() {
   const specs = [];
-
   const oldTown =
     WORLD.line1Stops[0];
 
@@ -294,10 +174,10 @@ function getPrimaryRoadSpecs() {
     id:
       'arterial-oldTown-existing',
     districtId: 'oldTown',
-    roadClass: 'arterial',
+    class: 'arterial',
     points: [
       {
-        x: oldTown.x - 320,
+        x: oldTown.x - 380,
         y: oldTown.y,
       },
       {
@@ -309,6 +189,8 @@ function getPrimaryRoadSpecs() {
     buildOrder: -20,
     source: 'existing-arterial',
     parentRoadIds: [],
+    status: 'planned',
+    constructionProgress: 0,
   });
 
   for (
@@ -323,13 +205,17 @@ function getPrimaryRoadSpecs() {
         DISTRICT_SPECS[
           segment + 1
         ].id,
-      roadClass: 'arterial',
+      class: 'arterial',
       points:
         getSegmentRoute(
           'line1',
           segment,
           segment + 1,
-        ).points,
+        ).points.map(
+          (point) => ({
+            ...point,
+          }),
+        ),
       unlock: {
         lineKey: 'line1',
         stopCount:
@@ -343,6 +229,8 @@ function getPrimaryRoadSpecs() {
           ? 'arterial-oldTown-existing'
           : `arterial-line1-${segment - 1}`,
       ],
+      status: 'planned',
+      constructionProgress: 0,
     });
   }
 
@@ -358,13 +246,17 @@ function getPrimaryRoadSpecs() {
         DISTRICT_SPECS[
           segment + 5
         ].id,
-      roadClass: 'arterial',
+      class: 'arterial',
       points:
         getSegmentRoute(
           'line2',
           segment,
           segment + 1,
-        ).points,
+        ).points.map(
+          (point) => ({
+            ...point,
+          }),
+        ),
       unlock: {
         lineKey: 'line2',
         stopCount:
@@ -378,15 +270,23 @@ function getPrimaryRoadSpecs() {
           ? 'arterial-line1-1'
           : `arterial-line2-${segment - 1}`,
       ],
+      status: 'planned',
+      constructionProgress: 0,
     });
   }
 
   specs.push({
     id: 'depot-access',
     districtId: 'park',
-    roadClass: 'service',
+    class: 'service',
     points:
-      getDepotSpurRoute().points,
+      getDepotSpurRoute()
+        .points
+        .map(
+          (point) => ({
+            ...point,
+          }),
+        ),
     unlock: {
       lineKey: 'line1',
       stopCount: 3,
@@ -397,278 +297,333 @@ function getPrimaryRoadSpecs() {
     parentRoadIds: [
       'arterial-line1-1',
     ],
+    status: 'planned',
+    constructionProgress: 0,
   });
 
   return specs;
 }
 
-function localRoadBlueprints(
-  spec,
+function createReservations() {
+  const parkStop =
+    WORLD.line1Stops[2];
+
+  return [
+    {
+      id:
+        'reservation-bus-depot',
+      type: 'facility',
+      facilityType:
+        'bus-depot',
+      x: WORLD.depot.x,
+      y: WORLD.depot.y,
+      w: 250,
+      h: 190,
+      padding: 34,
+      status: 'reserved',
+    },
+    {
+      id:
+        'reservation-city-park',
+      type: 'open-space',
+      facilityType: 'park',
+      x:
+        parkStop.x - 225,
+      y:
+        parkStop.y - 245,
+      w: 285,
+      h: 220,
+      padding: 24,
+      status: 'reserved',
+    },
+  ];
+}
+
+function tangentOnRoadAtPoint(
+  road,
+  point,
 ) {
-  const anchor =
+  const closest =
+    closestPointOnRoad(
+      point,
+      road,
+    );
+
+  if (!closest) {
+    return {
+      x: 1,
+      y: 0,
+    };
+  }
+
+  const a =
+    road.points[
+      closest.segmentIndex
+    ];
+
+  const b =
+    road.points[
+      closest.segmentIndex + 1
+    ];
+
+  return normalize(
+    b.x - a.x,
+    b.y - a.y,
+  );
+}
+
+function endpointNearRoad(
+  point,
+  road,
+  tolerance = 2.5,
+) {
+  const closest =
+    closestPointOnRoad(
+      point,
+      road,
+    );
+
+  return Boolean(
+    closest
+    && closest.distance
+      <= tolerance,
+  );
+}
+
+function addRoadCandidate(
+  roads,
+  candidate,
+  reservations,
+  {
+    ignoreReservationIds = [],
+  } = {},
+) {
+  const parentRoadIds =
+    candidate.parentRoadIds
+      ?? [];
+
+  const snapped =
+    snapCandidateStartToRoad(
+      candidate,
+      roads,
+      parentRoadIds,
+    );
+
+  if (!snapped.ok) {
+    return {
+      ok: false,
+      reason: snapped.reason,
+    };
+  }
+
+  let road =
+    snapped.road;
+
+  const trimmed =
+    trimRoadToFirstIntersection(
+      road,
+      roads,
+      {
+        ignoreRoadIds:
+          parentRoadIds,
+      },
+    );
+
+  road = trimmed.road;
+
+  const connectionRoadIds = [];
+
+  if (
+    trimmed.connectionRoadId
+    && !parentRoadIds.includes(
+      trimmed.connectionRoadId,
+    )
+  ) {
+    connectionRoadIds.push(
+      trimmed.connectionRoadId,
+    );
+  }
+
+  const end =
+    road.points.at(-1);
+
+  const endAttachment =
+    findNearestAttachment(
+      end,
+      roads,
+      {
+        maxDistance:
+          ROAD_TOPOLOGY
+            .roadSnapRadius,
+      },
+    );
+
+  if (
+    endAttachment
+    && !parentRoadIds.includes(
+      endAttachment.road.id,
+    )
+    && !connectionRoadIds.includes(
+      endAttachment.road.id,
+    )
+    && polylineLength(
+      road.points,
+    )
+      >= ROAD_TOPOLOGY
+        .minimumJunctionSpacing
+  ) {
+    road = {
+      ...road,
+      points: [
+        ...road.points.slice(
+          0,
+          -1,
+        ),
+        {
+          ...endAttachment.point,
+        },
+      ],
+    };
+
+    connectionRoadIds.push(
+      endAttachment.road.id,
+    );
+  }
+
+  if (
+    polylineLength(
+      road.points,
+    )
+    < ROAD_TOPOLOGY
+      .minimumJunctionSpacing
+  ) {
+    return {
+      ok: false,
+      reason: 'too-short-after-snap',
+    };
+  }
+
+  const validation =
+    validateRoadCandidate(
+      road,
+      roads,
+      {
+        allowedTouchRoadIds: [
+          ...parentRoadIds,
+          ...connectionRoadIds,
+        ],
+        reservations,
+        ignoreReservationIds,
+      },
+    );
+
+  if (!validation.ok) {
+    return validation;
+  }
+
+  const finalRoad = {
+    ...road,
+    parentRoadIds:
+      [...parentRoadIds],
+    connectionRoadIds,
+    status: 'planned',
+    constructionProgress: 0,
+  };
+
+  roads.push(finalRoad);
+
+  return {
+    ok: true,
+    road: finalRoad,
+  };
+}
+
+function makeCollectorCandidate(
+  spec,
+  parentRoad,
+  side,
+) {
+  const stop =
     getStop(spec);
 
+  const attachment =
+    closestPointOnRoad(
+      stop,
+      parentRoad,
+    );
+
+  const start =
+    attachment?.point
+      ?? {
+        x: stop.x,
+        y: stop.y,
+      };
+
   const tangent =
-    getIncomingDirection(spec);
+    tangentOnRoadAtPoint(
+      parentRoad,
+      start,
+    );
 
   const normal = {
     x:
-      -tangent.y
-      * spec.branchSide,
+      -tangent.y * side,
     y:
-      tangent.x
-      * spec.branchSide,
+      tangent.x * side,
   };
 
-  const branchEnd =
+  const end =
     add(
-      anchor,
+      start,
       normal,
       spec.depth,
     );
 
-  const leftEnd =
-    add(
-      branchEnd,
-      tangent,
-      -spec.arm,
-    );
-
-  const rightEnd =
-    add(
-      branchEnd,
-      tangent,
-      spec.arm,
-    );
-
-  const roads = [
-    {
+  return {
+    road: {
       id:
-        `local-${spec.id}-spine`,
-      points: [
-        {
-          x: anchor.x,
-          y: anchor.y,
-        },
-        branchEnd,
-      ],
-      parentRoadIds: [
-        spec.parentRoadId,
-      ],
+        `collector-${spec.id}`,
+      districtId: spec.id,
+      class: 'collector',
+      source: 'city',
       buildOrder: 0,
-    },
-    {
-      id:
-        `local-${spec.id}-west`,
-      points: [
-        branchEnd,
-        leftEnd,
-      ],
       parentRoadIds: [
-        `local-${spec.id}-spine`,
+        parentRoad.id,
       ],
-      buildOrder: 1,
-    },
-    {
-      id:
-        `local-${spec.id}-east`,
       points: [
-        branchEnd,
-        rightEnd,
+        { ...start },
+        {
+          x:
+            start.x
+            + normal.x
+              * spec.depth * 0.52,
+          y:
+            start.y
+            + normal.y
+              * spec.depth * 0.52,
+        },
+        end,
       ],
-      parentRoadIds: [
-        `local-${spec.id}-spine`,
-      ],
-      buildOrder: 1,
+      unlock: {
+        districtId: spec.id,
+      },
     },
-  ];
-
-  if (spec.roadTier >= 2) {
-    const outerDepth =
-      spec.depth * 0.72;
-
-    const leftOuter =
-      add(
-        leftEnd,
-        normal,
-        outerDepth,
-      );
-
-    const rightOuter =
-      add(
-        rightEnd,
-        normal,
-        outerDepth,
-      );
-
-    roads.push(
-      {
-        id:
-          `local-${spec.id}-west-outer`,
-        points: [
-          leftEnd,
-          leftOuter,
-        ],
-        parentRoadIds: [
-          `local-${spec.id}-west`,
-        ],
-        buildOrder: 2,
-      },
-      {
-        id:
-          `local-${spec.id}-east-outer`,
-        points: [
-          rightEnd,
-          rightOuter,
-        ],
-        parentRoadIds: [
-          `local-${spec.id}-east`,
-        ],
-        buildOrder: 2,
-      },
-      {
-        id:
-          `local-${spec.id}-outer-link`,
-        points: [
-          leftOuter,
-          rightOuter,
-        ],
-        parentRoadIds: [
-          `local-${spec.id}-west-outer`,
-          `local-${spec.id}-east-outer`,
-        ],
-        buildOrder: 3,
-      },
-    );
-  }
-
-  if (spec.roadTier >= 3) {
-    const farDepth =
-      spec.depth * 0.65;
-
-    const farStart =
-      add(
-        leftEnd,
-        tangent,
-        -spec.arm * 0.65,
-      );
-
-    const farEnd =
-      add(
-        farStart,
-        normal,
-        farDepth,
-      );
-
-    roads.push({
-      id:
-        `local-${spec.id}-far-branch`,
-      points: [
-        leftEnd,
-        farStart,
-        farEnd,
-      ],
-      parentRoadIds: [
-        `local-${spec.id}-west`,
-      ],
-      buildOrder: 4,
-    });
-  }
-
-  return roads;
+    tangent,
+    normal,
+  };
 }
 
-function distancePointToSegment(
-  point,
-  a,
-  b,
-) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSquared =
-    dx * dx + dy * dy;
-
-  if (lengthSquared <= 1e-9) {
-    return Math.hypot(
-      point.x - a.x,
-      point.y - a.y,
-    );
-  }
-
-  const t =
-    Math.min(
-      1,
-      Math.max(
-        0,
-        (
-          (point.x - a.x) * dx
-          + (point.y - a.y) * dy
-        ) / lengthSquared,
-      ),
-    );
-
-  return Math.hypot(
-    point.x
-      - (a.x + dx * t),
-    point.y
-      - (a.y + dy * t),
-  );
-}
-
-function distancePointToRoad(
-  point,
+function pointAlongPolyline(
   road,
+  fraction,
 ) {
-  let minimum =
-    Number.POSITIVE_INFINITY;
+  const target =
+    polylineLength(
+      road.points,
+    )
+    * fraction;
 
-  for (
-    let index = 0;
-    index < road.points.length - 1;
-    index += 1
-  ) {
-    minimum =
-      Math.min(
-        minimum,
-        distancePointToSegment(
-          point,
-          road.points[index],
-          road.points[index + 1],
-        ),
-      );
-  }
-
-  return minimum;
-}
-
-function roadLength(road) {
-  let total = 0;
-
-  for (
-    let index = 0;
-    index < road.points.length - 1;
-    index += 1
-  ) {
-    total += Math.hypot(
-      road.points[index + 1].x
-        - road.points[index].x,
-      road.points[index + 1].y
-        - road.points[index].y,
-    );
-  }
-
-  return total;
-}
-
-function pointOnRoad(
-  road,
-  distanceAlong,
-) {
-  let remaining =
-    Math.max(
-      0,
-      distanceAlong,
-    );
+  let travelled = 0;
 
   for (
     let index = 0;
@@ -681,53 +636,300 @@ function pointOnRoad(
     const b =
       road.points[index + 1];
 
-    const dx =
-      b.x - a.x;
-
-    const dy =
-      b.y - a.y;
-
     const length =
-      Math.hypot(dx, dy);
+      distance(a, b);
 
     if (
-      remaining <= length
-      || index
-        === road.points.length - 2
+      travelled + length
+      >= target
     ) {
       const local =
         length <= 1e-9
           ? 0
-          : Math.min(
-            1,
-            remaining / length,
-          );
-
-      const tangent =
-        normalize(dx, dy);
+          : (
+            target - travelled
+          ) / length;
 
       return {
         x:
-          a.x + dx * local,
+          a.x
+          + (b.x - a.x)
+            * local,
         y:
-          a.y + dy * local,
-        tx: tangent.x,
-        ty: tangent.y,
+          a.y
+          + (b.y - a.y)
+            * local,
       };
     }
 
-    remaining -= length;
+    travelled += length;
   }
 
-  const last =
-    road.points.at(-1);
+  return {
+    ...road.points.at(-1),
+  };
+}
+
+function makeCrossCandidate(
+  spec,
+  collector,
+  tangent,
+  fraction,
+  direction,
+  index,
+) {
+  const start =
+    pointAlongPolyline(
+      collector,
+      fraction,
+    );
+
+  const variation =
+    0.9
+    + (
+      (index % 2) * 0.08
+    );
+
+  const end =
+    add(
+      start,
+      tangent,
+      direction
+        * spec.halfWidth
+        * variation,
+    );
 
   return {
-    x: last.x,
-    y: last.y,
-    tx: 1,
-    ty: 0,
+    id:
+      `local-${spec.id}-`
+      + `cross-${index}-`
+      + (
+        direction < 0
+          ? 'left'
+          : 'right'
+      ),
+    districtId: spec.id,
+    class: 'local',
+    source: 'city',
+    buildOrder:
+      1 + index,
+    parentRoadIds: [
+      collector.id,
+    ],
+    points: [
+      { ...start },
+      end,
+    ],
+    unlock: {
+      districtId: spec.id,
+    },
   };
+}
+
+function roadEndpoint(
+  road,
+) {
+  return {
+    ...road.points.at(-1),
+  };
+}
+
+function makeSideCandidate(
+  spec,
+  firstRoad,
+  secondRoad,
+  sideLabel,
+  buildOrder,
+) {
+  return {
+    id:
+      `local-${spec.id}-side-`
+      + sideLabel
+      + '-'
+      + buildOrder,
+    districtId: spec.id,
+    class: 'local',
+    source: 'city',
+    buildOrder,
+    parentRoadIds: [
+      firstRoad.id,
+      secondRoad.id,
+    ],
+    points: [
+      roadEndpoint(firstRoad),
+      roadEndpoint(secondRoad),
+    ],
+    unlock: {
+      districtId: spec.id,
+    },
+  };
+}
+
+function generateDistrictRoads(
+  roads,
+  reservations,
+  spec,
+) {
+  const parentRoad =
+    roads.find(
+      (road) =>
+        road.id
+        === spec.parentRoadId,
+    );
+
+  if (!parentRoad) {
+    return [];
+  }
+
+  const preferredSides = [
+    spec.branchSide,
+    -spec.branchSide,
+  ];
+
+  let collector = null;
+  let tangent = null;
+
+  for (
+    const side
+    of preferredSides
+  ) {
+    const proposal =
+      makeCollectorCandidate(
+        spec,
+        parentRoad,
+        side,
+      );
+
+    const added =
+      addRoadCandidate(
+        roads,
+        proposal.road,
+        reservations,
+      );
+
+    if (added.ok) {
+      collector =
+        added.road;
+
+      tangent =
+        proposal.tangent;
+
+      break;
+    }
+  }
+
+  if (!collector) {
+    return [];
+  }
+
+  const districtRoads = [
+    collector,
+  ];
+
+  const fractions =
+    spec.crossRoadCount >= 3
+      ? [0.34, 0.62, 0.9]
+      : [0.46, 0.86];
+
+  const leftRoads = [];
+  const rightRoads = [];
+
+  fractions.forEach(
+    (fraction, index) => {
+      const left =
+        addRoadCandidate(
+          roads,
+          makeCrossCandidate(
+            spec,
+            collector,
+            tangent,
+            fraction,
+            -1,
+            index,
+          ),
+          reservations,
+        );
+
+      if (left.ok) {
+        leftRoads.push(
+          left.road,
+        );
+
+        districtRoads.push(
+          left.road,
+        );
+      }
+
+      const right =
+        addRoadCandidate(
+          roads,
+          makeCrossCandidate(
+            spec,
+            collector,
+            tangent,
+            fraction,
+            1,
+            index,
+          ),
+          reservations,
+        );
+
+      if (right.ok) {
+        rightRoads.push(
+          right.road,
+        );
+
+        districtRoads.push(
+          right.road,
+        );
+      }
+    },
+  );
+
+  const connectSides = (
+    sideRoads,
+    label,
+  ) => {
+    for (
+      let index = 0;
+      index < sideRoads.length - 1;
+      index += 1
+    ) {
+      const candidate =
+        makeSideCandidate(
+          spec,
+          sideRoads[index],
+          sideRoads[index + 1],
+          label,
+          10 + index,
+        );
+
+      const added =
+        addRoadCandidate(
+          roads,
+          candidate,
+          reservations,
+        );
+
+      if (added.ok) {
+        districtRoads.push(
+          added.road,
+        );
+      }
+    }
+  };
+
+  connectSides(
+    leftRoads,
+    'left',
+  );
+
+  connectSides(
+    rightRoads,
+    'right',
+  );
+
+  return districtRoads;
 }
 
 function parcelFootprint(
@@ -736,14 +938,14 @@ function parcelFootprint(
 ) {
   if (zone === 'industrial') {
     return {
-      w: 62,
-      h: 48,
+      w: 66,
+      h: 50,
     };
   }
 
   if (zone === 'civic') {
     return {
-      w: 58,
+      w: 60,
       h: 48,
     };
   }
@@ -755,28 +957,30 @@ function parcelFootprint(
     return {
       w:
         density >= 3
-          ? 52
-          : 44,
+          ? 54
+          : 46,
       h:
         density >= 3
           ? 46
-          : 38,
+          : 39,
     };
   }
 
   return {
     w:
       density >= 2
-        ? 42
-        : 34,
+        ? 44
+        : 36,
     h:
       density >= 2
-        ? 38
-        : 30,
+        ? 39
+        : 31,
   };
 }
 
-function densityForTheme(theme) {
+function densityForTheme(
+  theme,
+) {
   if (theme === 'central') return 3;
   if (theme === 'campus') return 2;
   if (theme === 'mixed') return 2;
@@ -856,58 +1060,106 @@ function zoneFor(
   );
 }
 
-function createReservations() {
-  const parkStop =
-    WORLD.line1Stops[2];
+function roadDirectionAtDistance(
+  road,
+  target,
+) {
+  let travelled = 0;
 
-  return [
-    {
-      id: 'reservation-bus-depot',
-      type: 'facility',
-      facilityType: 'bus-depot',
-      x: WORLD.depot.x,
-      y: WORLD.depot.y,
-      w: 230,
-      h: 170,
-      padding: 28,
-      status: 'reserved',
+  for (
+    let index = 0;
+    index < road.points.length - 1;
+    index += 1
+  ) {
+    const a =
+      road.points[index];
+
+    const b =
+      road.points[index + 1];
+
+    const length =
+      distance(a, b);
+
+    if (
+      travelled + length
+      >= target
+    ) {
+      const local =
+        length <= 1e-9
+          ? 0
+          : (
+            target - travelled
+          ) / length;
+
+      const tangent =
+        normalize(
+          b.x - a.x,
+          b.y - a.y,
+        );
+
+      return {
+        point: {
+          x:
+            a.x
+            + (b.x - a.x)
+              * local,
+          y:
+            a.y
+            + (b.y - a.y)
+              * local,
+        },
+        tangent,
+      };
+    }
+
+    travelled += length;
+  }
+
+  const last =
+    road.points.at(-1);
+
+  const previous =
+    road.points.at(-2)
+    ?? {
+      x: last.x - 1,
+      y: last.y,
+    };
+
+  return {
+    point: {
+      ...last,
     },
-    {
-      id: 'reservation-city-park',
-      type: 'open-space',
-      facilityType: 'park',
-      x: parkStop.x - 190,
-      y: parkStop.y - 210,
-      w: 250,
-      h: 190,
-      padding: 18,
-      status: 'reserved',
-    },
-  ];
+    tangent:
+      normalize(
+        last.x - previous.x,
+        last.y - previous.y,
+      ),
+  };
 }
 
-function boxesOverlap(
-  a,
-  b,
-  margin = 8,
+function rectanglesOverlap(
+  first,
+  second,
+  margin = 0,
 ) {
   return !(
-    a.x + a.w + margin
-      < b.x
-    || b.x + b.w + margin
-      < a.x
-    || a.y + a.h + margin
-      < b.y
-    || b.y + b.h + margin
-      < a.y
+    first.x + first.w + margin
+      < second.x
+    || second.x + second.w + margin
+      < first.x
+    || first.y + first.h + margin
+      < second.y
+    || second.y + second.h + margin
+      < first.y
   );
 }
 
-function reservationBox(
+function reservationRect(
   reservation,
 ) {
   const padding =
-    reservation.padding ?? 0;
+    reservation.padding
+    ?? 0;
 
   return {
     x:
@@ -927,10 +1179,23 @@ function reservationBox(
   };
 }
 
+function parcelRect(parcel) {
+  return {
+    x:
+      parcel.x
+      - parcel.w / 2,
+    y:
+      parcel.y
+      - parcel.h / 2,
+    w: parcel.w,
+    h: parcel.h,
+  };
+}
+
 function createParcelCandidates(
   seed,
   spec,
-  localRoads,
+  districtRoads,
 ) {
   const density =
     densityForTheme(
@@ -939,41 +1204,43 @@ function createParcelCandidates(
 
   const candidates = [];
 
-  localRoads.forEach(
+  districtRoads.forEach(
     (road, roadIndex) => {
       const length =
-        roadLength(road);
+        polylineLength(
+          road.points,
+        );
 
       const spacing =
         spec.theme === 'central'
-          ? 72
+          ? 76
           : spec.theme === 'industrial'
-            ? 92
-            : 82;
+            ? 98
+            : 86;
 
       const start =
         Math.min(
-          55,
-          length * 0.3,
+          58,
+          length * 0.32,
         );
 
       const end =
         Math.max(
           start,
-          length - 38,
+          length - 42,
         );
 
       let sampleIndex = 0;
 
       for (
-        let distance = start;
-        distance <= end;
-        distance += spacing
+        let along = start;
+        along <= end;
+        along += spacing
       ) {
-        const point =
-          pointOnRoad(
+        const sample =
+          roadDirectionAtDistance(
             road,
-            distance,
+            along,
           );
 
         for (
@@ -981,8 +1248,10 @@ function createParcelCandidates(
           of [-1, 1]
         ) {
           const key =
-            `${spec.id}:${road.id}:`
-            + `${sampleIndex}:${side}`;
+            `${spec.id}:`
+            + `${road.id}:`
+            + `${sampleIndex}:`
+            + side;
 
           const zone =
             zoneFor(
@@ -1012,20 +1281,21 @@ function createParcelCandidates(
               localDensity,
             );
 
-          const offset =
-            (
-              road.class === 'local'
-                ? 46
-                : 54
-            )
-            + footprint.h / 2;
-
           const normal = {
             x:
-              -point.ty * side,
+              -sample.tangent.y
+              * side,
             y:
-              point.tx * side,
+              sample.tangent.x
+              * side,
           };
+
+          const roadOffset =
+            roadHalfWidth(
+              road.class,
+            )
+            + 13
+            + footprint.h / 2;
 
           const jitterAlong =
             (
@@ -1033,7 +1303,7 @@ function createParcelCandidates(
                 seed,
                 key + ':along',
               ) - 0.5
-            ) * 12;
+            ) * 10;
 
           const jitterAway =
             (
@@ -1041,36 +1311,39 @@ function createParcelCandidates(
                 seed,
                 key + ':away',
               ) - 0.5
-            ) * 8;
+            ) * 6;
 
           candidates.push({
             id:
               `parcel-${spec.id}-`
               + `${candidates.length + 1}`,
-            districtId: spec.id,
+            districtId:
+              spec.id,
             blockId: null,
             x:
-              point.x
-              + point.tx * jitterAlong
+              sample.point.x
+              + sample.tangent.x
+                * jitterAlong
               + normal.x
-                * (offset + jitterAway),
+                * (
+                  roadOffset
+                  + jitterAway
+                ),
             y:
-              point.y
-              + point.ty * jitterAlong
+              sample.point.y
+              + sample.tangent.y
+                * jitterAlong
               + normal.y
-                * (offset + jitterAway),
+                * (
+                  roadOffset
+                  + jitterAway
+                ),
             w:
               footprint.w + 12,
             h:
               footprint.h + 12,
             frontage:
-              Math.max(
-                18,
-                Math.min(
-                  spacing - 10,
-                  footprint.w,
-                ),
-              ),
+              footprint.w,
             setback:
               6
               + Math.round(
@@ -1109,6 +1382,7 @@ function validateParcels(
   candidates,
   roads,
   reservations,
+  roadGraph,
 ) {
   const stops = [
     ...WORLD.line1Stops,
@@ -1121,103 +1395,117 @@ function validateParcels(
     const parcel
     of candidates
   ) {
-    const parcelBox = {
-      x:
-        parcel.x
-        - parcel.w / 2,
-      y:
-        parcel.y
-        - parcel.h / 2,
-      w: parcel.w,
-      h: parcel.h,
-    };
+    const box =
+      parcelRect(
+        parcel,
+      );
 
-    const reservedCollision =
+    const reservationConflict =
       reservations.some(
         (reservation) =>
-          boxesOverlap(
-            parcelBox,
-            reservationBox(
+          rectanglesOverlap(
+            box,
+            reservationRect(
               reservation,
             ),
-            0,
           ),
       );
 
-    if (reservedCollision) {
+    if (reservationConflict) {
       continue;
     }
 
-    const stopCollision =
+    const stopConflict =
       stops.some(
         (stop) =>
-          Math.hypot(
-            parcel.x - stop.x,
-            parcel.y - stop.y,
+          distance(
+            parcel,
+            stop,
           ) < 72,
       );
 
-    if (stopCollision) {
+    if (stopConflict) {
       continue;
     }
 
-    const unrelatedRoadCollision =
-      roads.some(
-        (road) => {
-          if (
-            road.id
-            === parcel.frontageRoadId
-          ) {
-            return false;
-          }
-
-          const clearance =
-            road.class === 'arterial'
-              ? 38
-              : 24;
-
-          return (
-            distancePointToRoad(
-              parcel,
-              road,
-            )
-            < Math.max(
-              parcel.w,
-              parcel.h,
-            ) / 2
-              + clearance
-          );
-        },
+    const junctionConflict =
+      roadGraph.junctions.some(
+        (junction) =>
+          distance(
+            parcel,
+            junction,
+          ) < 48,
       );
 
-    if (unrelatedRoadCollision) {
+    if (junctionConflict) {
       continue;
     }
 
-    const parcelCollision =
+    let roadConflict = false;
+
+    for (
+      const road
+      of roads
+    ) {
+      if (
+        road.id
+        === parcel.frontageRoadId
+      ) {
+        continue;
+      }
+
+      const closest =
+        closestPointOnRoad(
+          parcel,
+          road,
+        );
+
+      if (!closest) {
+        continue;
+      }
+
+      const required =
+        Math.max(
+          parcel.w,
+          parcel.h,
+        ) / 2
+        + roadHalfWidth(
+          road.class,
+        )
+        + 10;
+
+      if (
+        closest.distance
+        < required
+      ) {
+        roadConflict = true;
+        break;
+      }
+    }
+
+    if (roadConflict) {
+      continue;
+    }
+
+    const parcelConflict =
       accepted.some(
         (candidate) =>
-          boxesOverlap(
-            parcelBox,
-            {
-              x:
-                candidate.x
-                - candidate.w / 2,
-              y:
-                candidate.y
-                - candidate.h / 2,
-              w: candidate.w,
-              h: candidate.h,
-            },
+          rectanglesOverlap(
+            box,
+            parcelRect(
+              candidate,
+            ),
             10,
           ),
       );
 
-    if (parcelCollision) {
+    if (parcelConflict) {
       continue;
     }
 
-    accepted.push(parcel);
+    accepted.push(
+      parcel,
+    );
   }
 
   return accepted;
@@ -1249,7 +1537,7 @@ function makeBlocks(
     ) {
       const key =
         `${parcel.frontageRoadId}:`
-        + `${parcel.frontageSide}`;
+        + parcel.frontageSide;
 
       if (!groups.has(key)) {
         groups.set(
@@ -1263,9 +1551,14 @@ function makeBlocks(
       );
     }
 
-    const blockIds = [];
+    district.blockIds = [];
+    district.parcelIds =
+      districtParcels.map(
+        (parcel) =>
+          parcel.id,
+      );
 
-    let blockIndex = 1;
+    let index = 1;
 
     for (
       const group
@@ -1273,15 +1566,17 @@ function makeBlocks(
     ) {
       const id =
         `block-${district.id}-`
-        + blockIndex;
-
-      blockIds.push(id);
+        + index;
 
       const parcelIds =
         group.map(
           (parcel) =>
             parcel.id,
         );
+
+      district.blockIds.push(
+        id,
+      );
 
       blocks.push({
         id,
@@ -1298,142 +1593,97 @@ function makeBlocks(
         parcel.blockId = id;
       }
 
-      blockIndex += 1;
+      index += 1;
     }
-
-    district.blockIds =
-      blockIds;
-
-    district.parcelIds =
-      districtParcels.map(
-        (parcel) =>
-          parcel.id,
-      );
   }
 
   return blocks;
 }
 
+function createDistrictRecord(
+  spec,
+  roadIds,
+) {
+  const stop =
+    getStop(spec);
+
+  return {
+    id: spec.id,
+    name: spec.name,
+    lineKey:
+      spec.lineKey,
+    stopIndex:
+      spec.stopIndex,
+    theme:
+      spec.theme,
+    anchor: {
+      x: stop.x,
+      y: stop.y,
+    },
+    parentRoadId:
+      spec.parentRoadId,
+    roadIds,
+    blockIds: [],
+    parcelIds: [],
+    status: 'locked',
+    activatedAt: null,
+    developmentLevel: 0,
+  };
+}
+
 export function generateCityMasterPlan(
   seed = 284731,
 ) {
-  const nodes = [];
-  const nodeByKey =
-    new Map();
+  const reservations =
+    createReservations();
 
-  const roads = [];
+  const roads =
+    getPrimaryRoadSpecs();
+
   const districts = [];
-  const allCandidates = [];
-
-  for (
-    const spec
-    of getPrimaryRoadSpecs()
-  ) {
-    roads.push(
-      makeEdge(
-        nodes,
-        nodeByKey,
-        spec,
-      ),
-    );
-  }
+  const parcelCandidates = [];
 
   for (
     const spec
     of DISTRICT_SPECS
   ) {
-    const blueprints =
-      localRoadBlueprints(
+    const districtRoads =
+      generateDistrictRoads(
+        roads,
+        reservations,
         spec,
       );
 
-    const roadIds = [];
-
-    for (
-      const blueprint
-      of blueprints
-    ) {
-      roadIds.push(
-        blueprint.id,
-      );
-
-      const road =
-        makeEdge(
-          nodes,
-          nodeByKey,
-          {
-            id: blueprint.id,
-            districtId:
-              spec.id,
-            roadClass: 'local',
-            points:
-              blueprint.points,
-            unlock: {
-              districtId:
-                spec.id,
-            },
-            buildOrder:
-              blueprint.buildOrder,
-            source: 'city',
-            parentRoadIds:
-              blueprint.parentRoadIds,
-          },
-        );
-
-      roads.push(road);
-    }
-
-    const localRoads =
-      roads.filter(
-        (road) =>
-          roadIds.includes(
+    districts.push(
+      createDistrictRecord(
+        spec,
+        districtRoads.map(
+          (road) =>
             road.id,
-          ),
-      );
-
-    allCandidates.push(
-      ...createParcelCandidates(
-        seed,
-        spec,
-        localRoads,
+        ),
       ),
     );
 
-    const stop =
-      getStop(spec);
-
-    districts.push({
-      id: spec.id,
-      name: spec.name,
-      lineKey:
-        spec.lineKey,
-      stopIndex:
-        spec.stopIndex,
-      theme:
-        spec.theme,
-      anchor: {
-        x: stop.x,
-        y: stop.y,
-      },
-      parentRoadId:
-        spec.parentRoadId,
-      roadIds,
-      blockIds: [],
-      parcelIds: [],
-      status: 'locked',
-      activatedAt: null,
-      developmentLevel: 0,
-    });
+    parcelCandidates.push(
+      ...createParcelCandidates(
+        seed,
+        spec,
+        districtRoads,
+      ),
+    );
   }
 
-  const reservations =
-    createReservations();
+  const roadGraph =
+    compileRoadGraph(
+      roads,
+    );
 
   const parcels =
     validateParcels(
-      allCandidates,
+      parcelCandidates,
       roads,
       reservations,
+      roadGraph,
     );
 
   const blocks =
@@ -1444,7 +1694,12 @@ export function generateCityMasterPlan(
 
   return {
     seed,
-    nodes,
+    nodes:
+      roadGraph.nodes,
+    graphEdges:
+      roadGraph.edges,
+    junctions:
+      roadGraph.junctions,
     roads,
     districts,
     blocks,

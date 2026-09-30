@@ -39,6 +39,9 @@ Implemented now:
 - the city has a persistent deterministic master plan stored in the save,
 - roads, districts, blocks and parcels exist as real simulation objects rather than renderer decorations,
 - every local street has explicit parent-road dependencies and construction grows outward from already connected streets,
+- road planning is intersection-aware: candidates snap to the network, split at real crossings, reject acute crossings and reject overlapping / near-parallel corridors,
+- the persistent city stores a compiled junction graph so crossings become real graph nodes rather than visual line overlaps,
+- roads are generated hierarchically as arterial → collector → local streets,
 - predefined infrastructure uses protected reservations, so later parcels can never invade the Bus Depot or City Park site,
 - each new stop activates a district but does not instantly spawn a finished neighborhood,
 - secondary streets are constructed over time,
@@ -49,6 +52,7 @@ Implemented now:
 - houses, shops, apartments, campus buildings, industrial areas and later taller central buildings appear progressively,
 - ambient road traffic increases as the city expands,
 - map labels and passenger counters stay compact so transport remains readable,
+- junction rendering closes road surfaces into seamless T-junctions and crossroads instead of overlapping strokes,
 - old stops and previously built route segments never move when the line grows,
 - the second stop starts Line 1 with one starter bus,
 - line length, cycle time, headway and capacity grow naturally with expansion,
@@ -71,7 +75,7 @@ Implemented now:
 
 The global BUILD panel is no longer the primary expansion interface. The map is.
 
-See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, and [`docs/city-generation-system.md`](docs/city-generation-system.md) for the persistent city simulation architecture.
+See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, [`docs/city-generation-system.md`](docs/city-generation-system.md) for persistent city simulation, and [`docs/road-topology.md`](docs/road-topology.md) for street-graph invariants.
 
 ## Planned transport families
 
