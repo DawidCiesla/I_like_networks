@@ -333,6 +333,178 @@ function parcelFootprint(zone, density) {
   return { w: 32, h: 28 };
 }
 
+
+function distancePointToSegment(
+  point,
+  a,
+  b,
+) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared =
+    dx * dx + dy * dy;
+
+  if (lengthSquared <= 1e-9) {
+    return Math.hypot(
+      point.x - a.x,
+      point.y - a.y,
+    );
+  }
+
+  const t = Math.min(
+    1,
+    Math.max(
+      0,
+      (
+        (point.x - a.x) * dx
+        + (point.y - a.y) * dy
+      ) / lengthSquared,
+    ),
+  );
+
+  return Math.hypot(
+    point.x - (a.x + dx * t),
+    point.y - (a.y + dy * t),
+  );
+}
+
+function distancePointToRoad(
+  point,
+  road,
+) {
+  let minimum =
+    Number.POSITIVE_INFINITY;
+
+  for (
+    let index = 0;
+    index < road.points.length - 1;
+    index += 1
+  ) {
+    minimum = Math.min(
+      minimum,
+      distancePointToSegment(
+        point,
+        road.points[index],
+        road.points[index + 1],
+      ),
+    );
+  }
+
+  return minimum;
+}
+
+function boxesOverlap(
+  a,
+  b,
+  margin = 8,
+) {
+  return !(
+    a.x + a.w + margin < b.x
+    || b.x + b.w + margin < a.x
+    || a.y + a.h + margin < b.y
+    || b.y + b.h + margin < a.y
+  );
+}
+
+function validateParcels(
+  parcels,
+  roads,
+) {
+  const stops = [
+    ...WORLD.line1Stops,
+    ...WORLD.line2Stops.slice(1),
+  ];
+
+  const accepted = [];
+
+  for (const parcel of parcels) {
+    const footprintRadius =
+      Math.max(
+        parcel.w,
+        parcel.h,
+      ) / 2;
+
+    const roadCollision =
+      roads.some(
+        (road) =>
+          distancePointToRoad(
+            parcel,
+            road,
+          )
+          < footprintRadius
+            + (
+              road.class === 'arterial'
+                ? 22
+                : 12
+            ),
+      );
+
+    if (roadCollision) {
+      continue;
+    }
+
+    const stopCollision =
+      stops.some(
+        (stop) =>
+          Math.hypot(
+            parcel.x - stop.x,
+            parcel.y - stop.y,
+          ) < 54,
+      );
+
+    if (stopCollision) {
+      continue;
+    }
+
+    const depotCollision =
+      Math.abs(
+        parcel.x - WORLD.depot.x,
+      ) < 86
+      && Math.abs(
+        parcel.y - WORLD.depot.y,
+      ) < 68;
+
+    if (depotCollision) {
+      continue;
+    }
+
+    const box = {
+      x:
+        parcel.x - parcel.w / 2,
+      y:
+        parcel.y - parcel.h / 2,
+      w: parcel.w,
+      h: parcel.h,
+    };
+
+    const parcelCollision =
+      accepted.some(
+        (candidate) =>
+          boxesOverlap(
+            box,
+            {
+              x:
+                candidate.x
+                - candidate.w / 2,
+              y:
+                candidate.y
+                - candidate.h / 2,
+              w: candidate.w,
+              h: candidate.h,
+            },
+          ),
+      );
+
+    if (parcelCollision) {
+      continue;
+    }
+
+    accepted.push(parcel);
+  }
+
+  return accepted;
+}
+
 function districtDensity(theme) {
   if (theme === 'central') return 3;
   if (theme === 'campus') return 2;
@@ -579,13 +751,76 @@ export function generateCityMasterPlan(
     });
   }
 
+  const validParcels =
+    validateParcels(
+      parcels,
+      roads,
+    );
+
+  const validParcelIds =
+    new Set(
+      validParcels.map(
+        (parcel) => parcel.id,
+      ),
+    );
+
+  const validBlocks =
+    blocks
+      .map(
+        (block) => ({
+          ...block,
+          parcelIds:
+            block.parcelIds.filter(
+              (parcelId) =>
+                validParcelIds.has(
+                  parcelId,
+                ),
+            ),
+        }),
+      )
+      .filter(
+        (block) =>
+          block.parcelIds.length > 0,
+      );
+
+  const validBlockIds =
+    new Set(
+      validBlocks.map(
+        (block) => block.id,
+      ),
+    );
+
+  const validDistricts =
+    districts.map(
+      (district) => ({
+        ...district,
+        parcelIds:
+          district.parcelIds.filter(
+            (parcelId) =>
+              validParcelIds.has(
+                parcelId,
+              ),
+          ),
+        blockIds:
+          district.blockIds.filter(
+            (blockId) =>
+              validBlockIds.has(
+                blockId,
+              ),
+          ),
+      }),
+    );
+
   return {
     seed,
     nodes,
     roads,
-    districts,
-    blocks,
-    parcels,
+    districts:
+      validDistricts,
+    blocks:
+      validBlocks,
+    parcels:
+      validParcels,
   };
 }
 
