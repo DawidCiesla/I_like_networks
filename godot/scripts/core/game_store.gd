@@ -25,6 +25,7 @@ var city: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
+var suppress_persistence := false
 
 func _ready() -> void:
 	reset_state(false)
@@ -42,7 +43,8 @@ func _process(delta: float) -> void:
 	_autosave_timer += delta
 	if _autosave_timer >= 12.0:
 		_autosave_timer = 0.0
-		save_game()
+		if not suppress_persistence:
+			save_game()
 
 func _create_waiting_matrix(max_stops: int) -> Array:
 	var result: Array = []
@@ -854,7 +856,8 @@ func bus_visuals() -> Array[Dictionary]:
 
 func _commit_change() -> void:
 	var city_did_change := CityRuntime.sync_with_transport(self)
-	save_game()
+	if not suppress_persistence:
+		save_game()
 	state_changed.emit()
 	if city_did_change:
 		city_changed.emit()
@@ -863,6 +866,9 @@ func _request_toast(message: String) -> void:
 	toast_requested.emit(message)
 
 func save_game() -> void:
+	if suppress_persistence:
+		return
+
 	var payload := {
 		"version": Data.GAME_VERSION,
 		"money": money,
