@@ -248,6 +248,123 @@ function samplePolyline(
   return sampled;
 }
 
+function pointOnPolylineDistance(
+  points,
+  distanceAlong,
+) {
+  if (!points?.length) {
+    return {
+      x: 0,
+      y: 0,
+      tx: 1,
+      ty: 0,
+    };
+  }
+
+  if (points.length === 1) {
+    return {
+      x: points[0].x,
+      y: points[0].y,
+      tx: 1,
+      ty: 0,
+    };
+  }
+
+  let total = 0;
+
+  const lengths = [];
+
+  for (
+    let index = 0;
+    index < points.length - 1;
+    index += 1
+  ) {
+    const dx =
+      points[index + 1].x
+      - points[index].x;
+
+    const dy =
+      points[index + 1].y
+      - points[index].y;
+
+    const length =
+      Math.hypot(dx, dy);
+
+    lengths.push(length);
+    total += length;
+  }
+
+  if (total <= 1e-9) {
+    return {
+      x: points[0].x,
+      y: points[0].y,
+      tx: 1,
+      ty: 0,
+    };
+  }
+
+  let remaining =
+    (
+      distanceAlong % total
+      + total
+    ) % total;
+
+  for (
+    let index = 0;
+    index < lengths.length;
+    index += 1
+  ) {
+    const length =
+      lengths[index];
+
+    const a =
+      points[index];
+
+    const b =
+      points[index + 1];
+
+    if (
+      remaining <= length
+      || index
+        === lengths.length - 1
+    ) {
+      const t =
+        length <= 1e-9
+          ? 0
+          : remaining / length;
+
+      return {
+        x:
+          a.x
+          + (b.x - a.x) * t,
+        y:
+          a.y
+          + (b.y - a.y) * t,
+        tx:
+          length <= 1e-9
+            ? 1
+            : (b.x - a.x) / length,
+        ty:
+          length <= 1e-9
+            ? 0
+            : (b.y - a.y) / length,
+      };
+    }
+
+    remaining -= length;
+  }
+
+  const last =
+    points.at(-1);
+
+  return {
+    x: last.x,
+    y: last.y,
+    tx: 1,
+    ty: 0,
+  };
+}
+
 function polylinePrefix(
   points,
   progress,
@@ -2690,6 +2807,141 @@ export class ThreeTransportRenderer {
       'line2',
       LINE_2_COLOR,
     );
+
+    const builtRoads =
+      state.city.roads.filter(
+        (road) =>
+          road.status === 'built'
+          && (
+            road.class === 'arterial'
+            || road.class === 'collector'
+          )
+          && road.points.length >= 2,
+      );
+
+    const builtBuildings =
+      state.city.buildings.filter(
+        (building) =>
+          building.status === 'built',
+      ).length;
+
+    const ambientCount =
+      Math.min(
+        18,
+        Math.floor(
+          builtBuildings / 2,
+        ),
+      );
+
+    if (
+      builtRoads.length > 0
+      && ambientCount > 0
+    ) {
+      const carColors = [
+        0xc7c6bc,
+        0x75879a,
+        0xa77963,
+        0x6f8068,
+        0x8f7e9c,
+      ];
+
+      for (
+        let index = 0;
+        index < ambientCount;
+        index += 1
+      ) {
+        const road =
+          builtRoads[
+            (
+              index * 7
+              + state.city.seed
+            ) % builtRoads.length
+          ];
+
+        const speedMetersPerSecond =
+          7
+          + pseudoRandom(
+            state.city.seed,
+            index,
+            road.points.length,
+            21,
+          ) * 5;
+
+        const offset =
+          pseudoRandom(
+            state.city.seed,
+            index,
+            road.points.length,
+            22,
+          ) * 900;
+
+        const point =
+          pointOnPolylineDistance(
+            road.points,
+            state.city.timeSeconds
+              * speedMetersPerSecond
+              + offset,
+          );
+
+        const laneOffset =
+          (
+            index % 2 === 0
+              ? -1
+              : 1
+          ) * 3.2;
+
+        const laneX =
+          point.x
+          - point.ty * laneOffset;
+
+        const laneZ =
+          point.y
+          + point.tx * laneOffset;
+
+        const ground =
+          terrainHeight(
+            state.city.seed,
+            laneX,
+            laneZ,
+          );
+
+        const car =
+          new THREE.Mesh(
+            new THREE.BoxGeometry(
+              4.6,
+              2.1,
+              2.2,
+            ),
+            new THREE.MeshStandardMaterial({
+              color:
+                carColors[
+                  index
+                  % carColors.length
+                ],
+              roughness: 0.62,
+              metalness: 0.08,
+            }),
+          );
+
+        car.position.set(
+          laneX,
+          ground + 2,
+          laneZ,
+        );
+
+        car.rotation.y =
+          -Math.atan2(
+            point.ty,
+            point.tx,
+          );
+
+        car.castShadow = true;
+
+        this.vehicleGroup.add(
+          car,
+        );
+      }
+    }
   }
 
   render(
