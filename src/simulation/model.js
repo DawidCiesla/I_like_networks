@@ -38,30 +38,10 @@ export const ECONOMY = Object.freeze({
 });
 
 export const UPGRADES = Object.freeze({
-  shelter1: {
-    baseCost: 45,
-    costGrowth: 1.6,
-    delta: 30,
-  },
-  catchment1: {
-    baseCost: 70,
-    costGrowth: 1.7,
-    delta: 0.5,
-  },
   depot: {
     baseCost: 160,
     costGrowth: 1.8,
     delta: 2,
-  },
-  shelter2: {
-    baseCost: 60,
-    costGrowth: 1.65,
-    delta: 30,
-  },
-  catchment2: {
-    baseCost: 85,
-    costGrowth: 1.7,
-    delta: 0.5,
   },
 });
 
@@ -1282,15 +1262,6 @@ export function canUnlockLine4(state) {
 function getUpgradeLevel(state, type) {
   if (type === 'depot') {
     return state.depot.level;
-  }
-
-  if (
-    type === 'shelter1'
-    || type === 'catchment1'
-    || type === 'shelter2'
-    || type === 'catchment2'
-  ) {
-    return 0;
   }
 
   throw new Error(
