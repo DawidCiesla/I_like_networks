@@ -21,11 +21,15 @@ Current Godot milestone:
 - map picking,
 - Inspector / HUD,
 - core four-line progression rules,
+- exact per-passenger origin→destination waiting matrices,
+- vehicle dwell / boarding / travel phases,
+- onboard passenger loads,
+- fare credited only when passengers alight at their destination,
+- queue capacity and abandonment,
 - native Godot save file.
 
 Not yet at parity:
 
-- exact per-passenger OD matrix simulation,
 - waiting passengers rendered at stops,
 - boarding / alighting visuals,
 - the full 15-district city generator,
@@ -151,7 +155,7 @@ The current self-test validates:
 The initial Godot port writes:
 
 ```text
-user://save_godot_v1.json
+user://save_godot_v2.json
 ```
 
 This is intentionally separate from the browser localStorage save.
@@ -195,15 +199,19 @@ Done in this milestone:
 
 ### G2 — exact passenger simulation
 
-Next:
+Core model done in this milestone:
 
 - waiting matrix per origin/destination,
 - physical onboard loads,
-- stop dwell phases,
-- boarding / alighting,
+- stop dwell / boarding / travel phases,
 - fare only on destination arrival,
-- abandonment,
-- exact parity tests against the JS model.
+- abandonment / station queue limits.
+
+Still required for full G2 parity:
+
+- visible waiting passenger objects,
+- boarding / alighting visual effects,
+- golden fixture comparison against the JS model for long deterministic runs.
 
 ### G3 — persistent city model
 
