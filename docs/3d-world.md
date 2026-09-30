@@ -354,3 +354,83 @@ Recommended progression:
 6. river / water constraints and bridges,
 7. district-scale procedural expansion beyond the authored Bus Era,
 8. LOD / chunking for a much larger city.
+
+
+## Performance architecture
+
+The first 3D prototype rebuilt the complete road, building and forest scene whenever construction crossed a progress bucket. That caused visible frame-time spikes even when the final scene was not especially large.
+
+The renderer now uses incremental invalidation.
+
+### Roads
+
+Every semantic road has a cached scene object.
+
+Only the road whose visual state changed is regenerated:
+
+```text
+hidden
+→ planned
+→ constructing progress bucket
+→ built
+```
+
+Already built roads remain untouched.
+
+Junction meshes are rebuilt only when the set of fully built roads changes.
+
+### Buildings
+
+Building meshes are created once.
+
+Construction animation changes the Y scale and position of the existing mesh rather than allocating new geometry every frame.
+
+A building changes material / roof structure only when its state changes from constructing to built.
+
+### Nature
+
+Forest noise and tree placement are evaluated once per city seed.
+
+Trees remain in persistent instanced meshes.
+
+When development expands, the renderer only updates instance matrices to hide trees occupied by a road or building. Forest geometry and noise are not regenerated.
+
+Tree shadows are disabled; their large number made the shadow pass disproportionately expensive.
+
+### Shadows
+
+The directional-light shadow map is 1024×1024 and uses PCF filtering.
+
+`shadowMap.autoUpdate` is disabled.
+
+A new shadow map is requested only when a shadow-casting building / facility changes enough to matter. Dynamic buses and ambient cars do not cast shadows.
+
+### Resolution
+
+Rendering resolution is adaptive to viewport area.
+
+Large QHD / 4K canvases render at approximately 1× device-independent pixel resolution and do not request MSAA. Smaller displays can use a modest pixel ratio up to 1.35.
+
+CSS / HUD resolution is unaffected.
+
+### Simulation cadence
+
+Passenger vehicles continue updating with the visual frame loop.
+
+The comparatively expensive city-development layer is fixed to:
+
+```text
+5 updates / second
+```
+
+Its accumulated time is preserved, so construction duration and city growth remain consistent.
+
+HUD DOM writes are limited to 10 Hz.
+
+Autosaves are scheduled during browser idle time and the periodic interval is increased from 2 seconds to about 12 seconds. Player purchases still schedule a save immediately.
+
+### Frame cap
+
+The game performs at most 60 full simulation / render frames per second.
+
+This has no effect on a normal 60 Hz display but prevents a 144 / 165 Hz monitor from forcing the complete WebGL scene to be rendered 144 / 165 times per second.
