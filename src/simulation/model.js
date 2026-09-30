@@ -113,6 +113,7 @@ export const STOP_NAMES = Object.freeze({
 
 const GAME_MINUTES_PER_REAL_SECOND = 0.25;
 const DELIVERY_RATE_WINDOW_MINUTES = 0.5;
+const BOARDING_HOLD_MINUTES = 0.18;
 
 const LINE_CONFIG = Object.freeze({
   line1: {
@@ -974,6 +975,24 @@ function boardAtStop(
   return boarded;
 }
 
+function beginBoarding(
+  state,
+  lineKey,
+  vehicle,
+) {
+  boardAtStop(
+    state,
+    lineKey,
+    vehicle,
+  );
+
+  vehicle.phase = 'boarding';
+  vehicle.phaseDurationMinutes =
+    BOARDING_HOLD_MINUTES;
+  vehicle.phaseMinutesRemaining =
+    BOARDING_HOLD_MINUTES;
+}
+
 function startTravel(
   state,
   lineKey,
@@ -994,12 +1013,6 @@ function startTravel(
   ) {
     vehicle.direction = -1;
   }
-
-  boardAtStop(
-    state,
-    lineKey,
-    vehicle,
-  );
 
   const nextStopIndex =
     vehicle.currentStopIndex
@@ -1099,6 +1112,12 @@ function advanceVehicle(
 
     if (vehicle.phase === 'travel') {
       arriveAtStop(
+        state,
+        lineKey,
+        vehicle,
+      );
+    } else if (vehicle.phase === 'dwell') {
+      beginBoarding(
         state,
         lineKey,
         vehicle,
