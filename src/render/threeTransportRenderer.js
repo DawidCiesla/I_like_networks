@@ -62,6 +62,17 @@ const BUILDING_COLORS = Object.freeze({
   industrial: 0x8d8d82,
 });
 
+const RENDER_PERFORMANCE = Object.freeze({
+  largeViewportPixels: 2_300_000,
+  mediumViewportPixels: 1_350_000,
+  largeViewportPixelRatio: 1,
+  mediumViewportPixelRatio: 1.15,
+  maxPixelRatio: 1.35,
+  shadowMapSize: 1024,
+  terrainSampleStep: 52,
+  roadProgressBuckets: 20,
+});
+
 const clamp = (
   value,
   min,
@@ -889,7 +900,7 @@ export class ThreeTransportRenderer {
       true;
 
     this.renderer.shadowMap.type =
-      THREE.PCFSoftShadowMap;
+      THREE.PCFShadowMap;
 
     this.scene =
       new THREE.Scene();
@@ -994,9 +1005,17 @@ export class ThreeTransportRenderer {
     this.pointerDown = null;
     this.dynamicMeshes =
       new Map();
+    this.roadObjects =
+      new Map();
+    this.buildingObjects =
+      new Map();
+    this.treeData = [];
+    this.treeTrunks = null;
+    this.treeCrowns = null;
+    this.natureOccupancySignature = null;
+    this.junctionSignature = null;
     this.worldSeed = null;
     this.bounds = null;
-    this.citySignature = null;
     this.transportSignature = null;
     this.initialFocusDone = false;
 
@@ -1030,8 +1049,8 @@ export class ThreeTransportRenderer {
     sun.castShadow = true;
 
     sun.shadow.mapSize.set(
-      2048,
-      2048,
+      RENDER_PERFORMANCE.shadowMapSize,
+      RENDER_PERFORMANCE.shadowMapSize,
     );
 
     sun.shadow.camera.near = 50;
@@ -1111,12 +1130,36 @@ export class ThreeTransportRenderer {
     const rect =
       this.canvas.getBoundingClientRect();
 
+    const viewportPixels =
+      Math.max(1, rect.width)
+      * Math.max(1, rect.height);
+
+    const deviceRatio =
+      window.devicePixelRatio
+      || 1;
+
     const dpr =
-      Math.min(
-        window.devicePixelRatio
-          || 1,
-        2,
-      );
+      viewportPixels
+        >= RENDER_PERFORMANCE
+          .largeViewportPixels
+        ? Math.min(
+          deviceRatio,
+          RENDER_PERFORMANCE
+            .largeViewportPixelRatio,
+        )
+        : viewportPixels
+            >= RENDER_PERFORMANCE
+              .mediumViewportPixels
+          ? Math.min(
+            deviceRatio,
+            RENDER_PERFORMANCE
+              .mediumViewportPixelRatio,
+          )
+          : Math.min(
+            deviceRatio,
+            RENDER_PERFORMANCE
+              .maxPixelRatio,
+          );
 
     this.renderer.setPixelRatio(
       dpr,
@@ -1278,7 +1321,17 @@ export class ThreeTransportRenderer {
     );
 
     this.#buildTerrain(state);
-    this.citySignature = null;
+
+    this.roadObjects.clear();
+    this.buildingObjects.clear();
+    this.natureOccupancySignature = null;
+    this.junctionSignature = null;
+
+    clearGroup(
+      this.natureGroup,
+    );
+
+    this.#buildNatureBase(state);
   }
 
   #buildTerrain(state) {
@@ -1304,19 +1357,23 @@ export class ThreeTransportRenderer {
     const widthSegments =
       clamp(
         Math.ceil(
-          width / 34,
+          width
+          / RENDER_PERFORMANCE
+            .terrainSampleStep,
         ),
-        70,
-        150,
+        48,
+        110,
       );
 
     const depthSegments =
       clamp(
         Math.ceil(
-          depth / 34,
+          depth
+          / RENDER_PERFORMANCE
+            .terrainSampleStep,
         ),
-        60,
-        130,
+        42,
+        96,
       );
 
     const geometry =
