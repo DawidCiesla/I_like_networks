@@ -20,6 +20,13 @@ function transportUnlockSatisfied(
 ) {
   if (!unlock) return true;
 
+  if (
+    unlock.requiresDepot
+    && !state.depot.built
+  ) {
+    return false;
+  }
+
   if (unlock.districtId) {
     return Boolean(
       state.city.districts.find(
