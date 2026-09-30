@@ -4,7 +4,7 @@ A passenger-transport incremental / management game prototype inspired by the cl
 
 ## Current development status
 
-**Bus Era — natural early-game progression**
+**Bus Era — 3D living-city foundation**
 
 The current build focuses on making the first minutes of the game feel like a real incremental transport game rather than a systems sandbox.
 
@@ -28,6 +28,20 @@ first stop
 
 Implemented now:
 
+- the default game world is rendered in real-time 3D with Three.js,
+- orbit camera: left-drag rotates, right-drag pans, mouse wheel zooms,
+- deterministic height-field terrain generated from the persistent city seed,
+- terrain contains grassland, meadow, forest and hillside biomes,
+- forests are rendered with instanced low-poly trees,
+- roads conform vertically to the terrain surface,
+- city planning evaluates slope and forest pressure before accepting development,
+- collectors can prefer the easier side of a transport corridor when terrain strongly favors it,
+- steep parcels are rejected and wooded parcels develop more slowly,
+- buildings persist real height in metres and a street-facing orientation,
+- building construction visibly grows upward in 3D,
+- houses receive simple pitched roofs while denser buildings become taller blocks / towers,
+- ambient 3D car traffic grows with the number of completed buildings,
+- buses are physical 3D vehicles moving along the same geometry as their route,
 - one owned stop at fresh start,
 - future stops shown directly on the map,
 - clicking a ghost stop opens its purchase Inspector,
@@ -50,7 +64,7 @@ Implemented now:
 - building lots are validated against all present and future roads, stops, the depot and other parcels,
 - every valid parcel stores persistent street frontage,
 - houses, shops, apartments, campus buildings, industrial areas and later taller central buildings appear progressively,
-- ambient road traffic increases as the city expands,
+- ambient road traffic increases as the city expands and follows built arterials / collectors,
 - map labels and passenger counters stay compact so transport remains readable,
 - junction rendering closes road surfaces into seamless T-junctions and crossroads instead of overlapping strokes,
 - old stops and previously built route segments never move when the line grows,
@@ -75,7 +89,7 @@ Implemented now:
 
 The global BUILD panel is no longer the primary expansion interface. The map is.
 
-See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, [`docs/city-generation-system.md`](docs/city-generation-system.md) for persistent city simulation, and [`docs/road-topology.md`](docs/road-topology.md) for street-graph invariants.
+See [`docs/bus-era.md`](docs/bus-era.md) for the progression contract, [`docs/passenger-flow.md`](docs/passenger-flow.md) for the trip-based passenger economy, [`docs/map-layout.md`](docs/map-layout.md) for route-layout rules, [`docs/living-city.md`](docs/living-city.md) for the visual city layer, [`docs/city-generation-system.md`](docs/city-generation-system.md) for persistent city simulation, [`docs/road-topology.md`](docs/road-topology.md) for street-graph invariants, and [`docs/3d-world.md`](docs/3d-world.md) for the 3D terrain/rendering contract.
 
 ## Planned transport families
 
@@ -106,6 +120,14 @@ Existing lines and stations do not teleport when new content is unlocked.
 ## Run locally
 
 Requires Node.js 20+.
+
+Install dependencies once:
+
+```bash
+npm install
+```
+
+Then start the local server:
 
 ```bash
 npm run dev
