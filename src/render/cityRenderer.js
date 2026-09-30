@@ -1,7 +1,5 @@
 import {
   WORLD,
-  getDepotSpurRoute,
-  getSegmentRoute,
   pointOnRoute,
   routeMetrics,
 } from './transportLayout.js';
@@ -15,14 +13,15 @@ const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, value));
 
 export function getCityStage(state) {
-  if (!state.line1.built) return 0;
-  if (state.line1.stopCount < 3) return 1;
-  if (state.line1.stopCount < 4) return 2;
-  if (state.line1.stopCount < 5) return 3;
-  if (!state.line2.built) return 4;
-  if (state.line2.stopCount < 3) return 5;
-  if (state.line2.stopCount < 4) return 6;
-  return 7;
+  if (!state.city) return 0;
+
+  return Math.max(
+    0,
+    state.city.districts.filter(
+      (district) =>
+        district.status === 'active',
+    ).length - 1,
+  );
 }
 
 function traceRoute(ctx, metrics) {
@@ -46,36 +45,127 @@ function traceRoute(ctx, metrics) {
   }
 }
 
-function drawRoad(
+function roadMetrics(road) {
+  return routeMetrics(
+    road.points,
+  );
+}
+
+function partialRoute(
+  metrics,
+  progress,
+) {
+  const target =
+    metrics.total
+    * clamp(progress, 0, 1);
+
+  const points = [];
+
+  if (metrics.points.length > 0) {
+    points.push({
+      ...metrics.points[0],
+    });
+  }
+
+  for (const segment of metrics.segments) {
+    const segmentEnd =
+      segment.start
+      + segment.length;
+
+    if (segmentEnd <= target) {
+      points.push({
+        ...segment.b,
+      });
+      continue;
+    }
+
+    if (target > segment.start) {
+      const local =
+        (target - segment.start)
+        / segment.length;
+
+      points.push({
+        x:
+          segment.a.x
+          + segment.dx * local,
+        y:
+          segment.a.y
+          + segment.dy * local,
+      });
+    }
+
+    break;
+  }
+
+  return routeMetrics(points);
+}
+
+function roadWidths(road) {
+  if (road.class === 'arterial') {
+    return {
+      sidewalk: 42,
+      edge: 36,
+      surface: 31,
+    };
+  }
+
+  if (road.class === 'service') {
+    return {
+      sidewalk: 19,
+      edge: 16,
+      surface: 12,
+    };
+  }
+
+  return {
+    sidewalk: 23,
+    edge: 19,
+    surface: 15,
+  };
+}
+
+function drawRoadSurface(
   ctx,
   metrics,
-  { local = false } = {},
+  road,
 ) {
-  if (!metrics || metrics.points.length < 2) return;
+  if (
+    !metrics
+    || metrics.points.length < 2
+  ) {
+    return;
+  }
+
+  const widths =
+    roadWidths(road);
 
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
   ctx.strokeStyle = SIDEWALK;
-  ctx.lineWidth = local ? 22 : 42;
+  ctx.lineWidth =
+    widths.sidewalk;
   traceRoute(ctx, metrics);
   ctx.stroke();
 
   ctx.strokeStyle = ROAD_EDGE;
-  ctx.lineWidth = local ? 18 : 36;
+  ctx.lineWidth =
+    widths.edge;
   traceRoute(ctx, metrics);
   ctx.stroke();
 
   ctx.strokeStyle = ROAD_SURFACE;
-  ctx.lineWidth = local ? 14 : 31;
+  ctx.lineWidth =
+    widths.surface;
   traceRoute(ctx, metrics);
   ctx.stroke();
 
-  if (!local) {
+  if (road.class === 'arterial') {
     ctx.setLineDash([9, 13]);
-    ctx.strokeStyle = ROAD_MARKING;
-    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle =
+      ROAD_MARKING;
+    ctx.globalAlpha = 0.45;
     ctx.lineWidth = 1.2;
     traceRoute(ctx, metrics);
     ctx.stroke();
@@ -84,728 +174,308 @@ function drawRoad(
   ctx.restore();
 }
 
-function localRoad(points) {
-  return routeMetrics(points);
-}
-
-function district(
-  key,
-  lineKey,
-  stopIndex,
-  minStage,
-  theme,
-  sites,
-  roads = [],
-) {
-  return {
-    key,
-    lineKey,
-    stopIndex,
-    minStage,
-    theme,
-    sites,
-    roads,
-  };
-}
-
-const DISTRICT_PLANS = Object.freeze([
-  district(
-    'oldTown',
-    'line1',
-    0,
-    0,
-    'residential',
-    [
-      [-92, -72],
-      [-28, -82],
-      [42, -76],
-      [104, -66],
-      [-100, 82],
-      [-36, 92],
-      [40, 88],
-      [108, 76],
-    ],
-    [
-      [[-125, -118], [-125, 118]],
-      [[-125, -118], [105, -118]],
-    ],
-  ),
-  district(
-    'market',
-    'line1',
-    1,
-    1,
-    'mixed',
-    [
-      [-88, -78],
-      [-22, -86],
-      [52, -76],
-      [112, -62],
-      [-92, 86],
-      [-20, 96],
-      [54, 86],
-    ],
-    [
-      [[-115, 122], [118, 122]],
-      [[118, 122], [118, 34]],
-    ],
-  ),
-  district(
-    'park',
-    'line1',
-    2,
-    2,
-    'park',
-    [
-      [-116, 84],
-      [-46, 104],
-      [98, 92],
-    ],
-    [
-      [[-138, 132], [132, 132]],
-    ],
-  ),
-  district(
-    'university',
-    'line1',
-    3,
-    3,
-    'campus',
-    [
-      [-100, -88],
-      [-26, -98],
-      [56, -90],
-      [112, -72],
-      [-104, 88],
-      [10, 102],
-      [96, 82],
-    ],
-    [
-      [[-132, 126], [126, 126]],
-      [[126, 126], [126, 42]],
-    ],
-  ),
-  district(
-    'central',
-    'line1',
-    4,
-    4,
-    'central',
-    [
-      [-116, -98],
-      [-42, -112],
-      [42, -106],
-      [116, -88],
-      [-112, 94],
-      [-34, 108],
-      [48, 104],
-      [122, 90],
-    ],
-    [
-      [[-145, 140], [145, 140]],
-      [[145, 140], [145, -132]],
-      [[-142, -142], [142, -142]],
-    ],
-  ),
-  district(
-    'riverside',
-    'line2',
-    1,
-    5,
-    'riverside',
-    [
-      [-106, -82],
-      [-34, -96],
-      [64, -84],
-      [-104, 86],
-      [-30, 98],
-      [72, 88],
-    ],
-    [
-      [[-132, 128], [126, 128]],
-    ],
-  ),
-  district(
-    'museum',
-    'line2',
-    2,
-    6,
-    'mixed',
-    [
-      [-110, -84],
-      [-34, -100],
-      [54, -90],
-      [112, -72],
-      [-104, 90],
-      [-24, 106],
-      [64, 92],
-    ],
-    [
-      [[-136, 132], [136, 132]],
-      [[136, 132], [136, 42]],
-    ],
-  ),
-  district(
-    'harbor',
-    'line2',
-    3,
-    7,
-    'industrial',
-    [
-      [-112, -86],
-      [-34, -98],
-      [66, -88],
-      [124, -62],
-      [-106, 92],
-      [-12, 104],
-      [92, 86],
-    ],
-    [
-      [[-150, 132], [148, 132]],
-      [[148, 132], [148, -120]],
-    ],
-  ),
-]);
-
-function getStop(plan) {
-  return WORLD[plan.lineKey + 'Stops'][plan.stopIndex];
-}
-
-function isDistrictActive(state, plan) {
-  if (plan.lineKey === 'line1') {
-    return state.line1.stopCount > plan.stopIndex;
-  }
-
-  return (
-    state.line2.built
-    && state.line2.stopCount > plan.stopIndex
-  );
-}
-
-function getActivePlans(state) {
-  return DISTRICT_PLANS.filter(
-    (plan) => isDistrictActive(state, plan),
-  );
-}
-
-function getMainRoads(state) {
-  const roads = [];
-
-  const line1Segments = Math.min(
-    4,
-    state.line1.stopCount,
-  );
-
-  for (
-    let segment = 0;
-    segment < line1Segments;
-    segment += 1
-  ) {
-    roads.push({
-      metrics: getSegmentRoute(
-        'line1',
-        segment,
-        segment + 1,
-      ),
-      local: false,
-    });
-  }
-
-  if (state.line2.built) {
-    const line2Segments = Math.min(
-      3,
-      Math.max(
-        1,
-        state.line2.stopCount - 1,
-      ),
-    );
-
-    for (
-      let segment = 0;
-      segment < line2Segments;
-      segment += 1
-    ) {
-      roads.push({
-        metrics: getSegmentRoute(
-          'line2',
-          segment,
-          segment + 1,
-        ),
-        local: false,
-      });
-    }
-  }
-
-  if (
-    state.line1.stopCount >= 3
-    || state.depot.built
-  ) {
-    roads.push({
-      metrics: getDepotSpurRoute(),
-      local: true,
-    });
-  }
-
-  return roads;
-}
-
-function getSecondaryRoads(state) {
-  const roads = [];
-
-  for (const plan of getActivePlans(state)) {
-    const stop = getStop(plan);
-
-    for (const points of plan.roads) {
-      roads.push({
-        metrics: localRoad(
-          points.map(([dx, dy]) => ({
-            x: stop.x + dx,
-            y: stop.y + dy,
-          })),
-        ),
-        local: true,
-      });
-    }
-  }
-
-  return roads;
-}
-
-function distancePointToSegment(
-  point,
-  a,
-  b,
-) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSquared =
-    dx * dx + dy * dy;
-
-  if (lengthSquared <= 1e-9) {
-    return Math.hypot(
-      point.x - a.x,
-      point.y - a.y,
-    );
-  }
-
-  const t = clamp(
-    (
-      (point.x - a.x) * dx
-      + (point.y - a.y) * dy
-    ) / lengthSquared,
-    0,
-    1,
-  );
-
-  return Math.hypot(
-    point.x - (a.x + dx * t),
-    point.y - (a.y + dy * t),
-  );
-}
-
-function distancePointToRoute(
-  point,
+function drawPlannedRoad(
+  ctx,
   metrics,
 ) {
-  if (!metrics?.segments?.length) {
-    return Number.POSITIVE_INFINITY;
+  if (
+    !metrics
+    || metrics.points.length < 2
+  ) {
+    return;
   }
 
-  let minimum =
-    Number.POSITIVE_INFINITY;
+  ctx.save();
+  ctx.setLineDash([5, 8]);
+  ctx.strokeStyle = '#41443f';
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 2;
+  traceRoute(ctx, metrics);
+  ctx.stroke();
+  ctx.restore();
+}
 
-  for (const segment of metrics.segments) {
-    minimum = Math.min(
-      minimum,
-      distancePointToSegment(
-        point,
-        segment.a,
-        segment.b,
+function drawRoadConstruction(
+  ctx,
+  road,
+) {
+  const metrics =
+    roadMetrics(road);
+
+  drawPlannedRoad(
+    ctx,
+    metrics,
+  );
+
+  const builtMetrics =
+    partialRoute(
+      metrics,
+      road.constructionProgress
+      ?? 0,
+    );
+
+  drawRoadSurface(
+    ctx,
+    builtMetrics,
+    road,
+  );
+
+  const head =
+    pointOnRoute(
+      metrics,
+      metrics.total
+      * clamp(
+        road.constructionProgress
+        ?? 0,
+        0,
+        1,
       ),
     );
-  }
 
-  return minimum;
+  ctx.fillStyle = '#e5aa32';
+  ctx.fillRect(
+    head.x - 5,
+    head.y - 5,
+    10,
+    10,
+  );
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(
+    head.x - 2,
+    head.y - 2,
+    4,
+    4,
+  );
 }
 
-function buildingProfile(
-  theme,
-  stage,
-  index,
-) {
-  if (theme === 'industrial') {
-    return {
-      kind:
-        index % 3 === 0
-          ? 'warehouse'
-          : 'workshop',
-      floors:
-        index % 4 === 0
-          ? 2
-          : 1,
-    };
-  }
-
-  if (theme === 'campus') {
-    return {
-      kind:
-        index % 3 === 0
-          ? 'campus'
-          : 'apartment',
-      floors:
-        stage >= 6 ? 4 : 3,
-    };
-  }
-
-  if (theme === 'central') {
-    if (
-      stage >= 7
-      && index % 3 === 0
-    ) {
-      return {
-        kind: 'tower',
-        floors: 8 + (index % 4),
-      };
-    }
-
-    return {
-      kind:
-        stage >= 5
-          ? 'midrise'
-          : 'apartment',
-      floors:
-        stage >= 5
-          ? 5 + (index % 2)
-          : 3,
-    };
-  }
-
-  if (theme === 'mixed') {
-    if (
-      stage >= 5
-      && index % 4 === 0
-    ) {
-      return {
-        kind: 'midrise',
-        floors: 4,
-      };
-    }
-
-    return {
-      kind:
-        index % 3 === 1
-          ? 'shop'
-          : stage >= 3
-            ? 'apartment'
-            : 'townhouse',
-      floors:
-        stage >= 3
-          ? 2 + (index % 2)
-          : 1,
-    };
-  }
-
-  if (theme === 'riverside') {
-    return {
-      kind:
-        stage >= 6
-        && index % 2 === 0
-          ? 'apartment'
-          : 'townhouse',
-      floors:
-        stage >= 6
-          ? 3
-          : 2,
-    };
-  }
-
-  if (theme === 'park') {
-    return {
-      kind:
-        index === 1
-          ? 'cafe'
-          : 'townhouse',
-      floors: 1,
-    };
-  }
-
-  return {
-    kind:
-      stage >= 4
-      && index % 4 === 0
-        ? 'apartment'
-        : stage >= 2
-          ? 'townhouse'
-          : 'house',
-    floors:
-      stage >= 4
-      && index % 4 === 0
-        ? 3
-        : stage >= 2
-          ? 2
-          : 1,
-  };
-}
-
-function buildingSize(profile) {
+function profileSize(profile) {
   if (profile.kind === 'tower') {
-    return { w: 34, h: 34 };
+    return {
+      w: 34,
+      h: 34,
+    };
   }
 
   if (
     profile.kind === 'midrise'
     || profile.kind === 'apartment'
   ) {
-    return { w: 40, h: 32 };
+    return {
+      w: 40,
+      h: 32,
+    };
   }
 
   if (
     profile.kind === 'warehouse'
     || profile.kind === 'campus'
+    || profile.kind === 'civic'
   ) {
-    return { w: 52, h: 32 };
+    return {
+      w: 52,
+      h: 32,
+    };
   }
 
   if (
     profile.kind === 'shop'
-    || profile.kind === 'cafe'
   ) {
-    return { w: 34, h: 26 };
+    return {
+      w: 34,
+      h: 26,
+    };
   }
 
-  return { w: 30, h: 26 };
+  return {
+    w: 30,
+    h: 26,
+  };
 }
 
-function boxForSite(
-  x,
-  y,
-  profile,
+function drawConstructionSite(
+  ctx,
+  building,
 ) {
   const { w, h } =
-    buildingSize(profile);
+    profileSize(
+      building.profile,
+    );
+
+  const progress =
+    clamp(
+      building.constructionProgress
+      ?? 0,
+      0,
+      1,
+    );
+
+  ctx.save();
+
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#c99b32';
+  ctx.lineWidth = 1.5;
+
+  ctx.strokeRect(
+    building.x - w / 2 - 4,
+    building.y - h / 2 - 4,
+    w + 8,
+    h + 8,
+  );
+
+  ctx.setLineDash([]);
+
+  if (progress < 0.22) {
+    ctx.fillStyle = '#50493a';
+    ctx.fillRect(
+      building.x - w / 2,
+      building.y + h / 2 - 5,
+      w,
+      5,
+    );
+  } else {
+    const frameHeight =
+      Math.max(
+        7,
+        (h + 18)
+        * Math.min(
+          1,
+          (progress - 0.18) / 0.82,
+        ),
+      );
+
+    ctx.strokeStyle = '#8f918c';
+    ctx.lineWidth = 2;
+
+    const left =
+      building.x - w / 2;
+    const top =
+      building.y
+      + h / 2
+      - frameHeight;
+
+    ctx.strokeRect(
+      left,
+      top,
+      w,
+      frameHeight,
+    );
+
+    const columns =
+      Math.max(
+        2,
+        Math.floor(w / 13),
+      );
+
+    for (
+      let index = 1;
+      index < columns;
+      index += 1
+    ) {
+      const x =
+        left
+        + index * w / columns;
+
+      ctx.beginPath();
+      ctx.moveTo(
+        x,
+        top,
+      );
+      ctx.lineTo(
+        x,
+        building.y + h / 2,
+      );
+      ctx.stroke();
+    }
+
+    for (
+      let y =
+        building.y + h / 2 - 8;
+      y > top;
+      y -= 8
+    ) {
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(
+        left + w,
+        y,
+      );
+      ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = '#d9b348';
+  ctx.font =
+    '7px "Lucida Console", monospace';
+  ctx.textAlign = 'center';
+
+  ctx.fillText(
+    `${Math.round(progress * 100)}%`,
+    building.x,
+    building.y + h / 2 + 13,
+  );
+
+  ctx.restore();
+}
+
+function buildingWall(profile) {
+  if (profile.kind === 'warehouse') {
+    return '#70736f';
+  }
+
+  if (profile.kind === 'tower') {
+    return '#a3a9aa';
+  }
+
+  if (
+    profile.kind === 'campus'
+    || profile.kind === 'civic'
+  ) {
+    return '#828d90';
+  }
+
+  if (profile.kind === 'shop') {
+    return '#8e8174';
+  }
+
+  return '#918d82';
+}
+
+function drawBuiltBuilding(
+  ctx,
+  building,
+  cityTime,
+) {
+  const profile =
+    building.profile;
+
+  const { w, h } =
+    profileSize(profile);
 
   const lift =
     Math.max(
       0,
-      profile.floors - 1,
-    ) * 4;
-
-  return {
-    x:
-      x - w / 2 - 4,
-    y:
-      y - h / 2 - lift - 8,
-    w: w + 8,
-    h: h + lift + 12,
-  };
-}
-
-function boxesOverlap(
-  a,
-  b,
-  margin = 8,
-) {
-  return !(
-    a.x + a.w + margin < b.x
-    || b.x + b.w + margin < a.x
-    || a.y + a.h + margin < b.y
-    || b.y + b.h + margin < a.y
-  );
-}
-
-function getStopPoints(state) {
-  const stops = [];
-
-  for (
-    let index = 0;
-    index < state.line1.stopCount;
-    index += 1
-  ) {
-    stops.push(
-      WORLD.line1Stops[index],
-    );
-  }
-
-  if (state.line2.built) {
-    for (
-      let index = 1;
-      index < state.line2.stopCount;
-      index += 1
-    ) {
-      stops.push(
-        WORLD.line2Stops[index],
-      );
-    }
-  }
-
-  return stops;
-}
-
-export function getCityLots(state) {
-  const stage =
-    getCityStage(state);
-
-  const roadRoutes = [
-    ...getMainRoads(state),
-    ...getSecondaryRoads(state),
-  ];
-
-  const stops =
-    getStopPoints(state);
-
-  const accepted = [];
-
-  for (const plan of getActivePlans(state)) {
-    const stop = getStop(plan);
-
-    plan.sites.forEach(
-      ([dx, dy], index) => {
-        if (
-          stage === plan.minStage
-          && index >= 4
-        ) {
-          return;
-        }
-
-        const profile =
-          buildingProfile(
-            plan.theme,
-            stage,
-            index,
-          );
-
-        const x = stop.x + dx;
-        const y = stop.y + dy;
-        const box =
-          boxForSite(
-            x,
-            y,
-            profile,
-          );
-
-        const footprint =
-          buildingSize(profile);
-
-        const footprintRadius =
-          Math.max(
-            footprint.w,
-            footprint.h,
-          ) / 2;
-
-        const roadCollision =
-          roadRoutes.some(
-            ({ metrics, local }) =>
-              distancePointToRoute(
-                { x, y },
-                metrics,
-              )
-              < footprintRadius
-                + (local ? 14 : 25),
-          );
-
-        if (roadCollision) return;
-
-        const stopCollision =
-          stops.some(
-            (candidate) =>
-              Math.hypot(
-                x - candidate.x,
-                y - candidate.y,
-              ) < 58,
-          );
-
-        if (stopCollision) return;
-
-        const depotCollision =
-          (
-            state.line1.stopCount >= 3
-            || state.depot.built
-          )
-          && Math.abs(
-            x - WORLD.depot.x,
-          ) < 90
-          && Math.abs(
-            y - WORLD.depot.y,
-          ) < 72;
-
-        if (depotCollision) return;
-
-        if (
-          accepted.some(
-            (site) =>
-              boxesOverlap(
-                box,
-                site.box,
-              ),
-          )
-        ) {
-          return;
-        }
-
-        accepted.push({
-          key:
-            plan.key + '-' + index,
-          x,
-          y,
-          profile,
-          theme: plan.theme,
-          box,
-        });
-      },
-    );
-  }
-
-  return accepted;
-}
-
-function drawBuilding(
-  ctx,
-  site,
-  stage,
-) {
-  const {
-    x,
-    y,
-    profile,
-  } = site;
-
-  const { w, h } =
-    buildingSize(profile);
-
-  const verticalLift =
-    Math.max(
-      0,
-      profile.floors - 1,
+      (profile.floors ?? 1) - 1,
     ) * 4;
 
   ctx.save();
 
   ctx.fillStyle = '#111';
   ctx.fillRect(
-    x - w / 2 - 3,
-    y - h / 2 - verticalLift - 3,
+    building.x - w / 2 - 3,
+    building.y - h / 2 - lift - 3,
     w + 6,
-    h + verticalLift + 6,
+    h + lift + 6,
   );
 
-  const wall =
-    profile.kind === 'warehouse'
-      ? '#70736f'
-      : profile.kind === 'tower'
-        ? '#a3a9aa'
-        : profile.kind === 'campus'
-          ? '#828d90'
-          : profile.kind === 'shop'
-            || profile.kind === 'cafe'
-            ? '#8e8174'
-            : '#918d82';
+  ctx.fillStyle =
+    buildingWall(profile);
 
-  ctx.fillStyle = wall;
   ctx.fillRect(
-    x - w / 2,
-    y - h / 2 - verticalLift,
+    building.x - w / 2,
+    building.y - h / 2 - lift,
     w,
-    h + verticalLift,
+    h + lift,
   );
 
   if (
@@ -815,31 +485,33 @@ function drawBuilding(
     ctx.fillStyle = '#625c55';
     ctx.beginPath();
     ctx.moveTo(
-      x - w / 2 - 2,
-      y - h / 2 - verticalLift,
+      building.x - w / 2 - 2,
+      building.y - h / 2 - lift,
     );
     ctx.lineTo(
-      x,
-      y - h / 2 - verticalLift - 9,
+      building.x,
+      building.y - h / 2 - lift - 9,
     );
     ctx.lineTo(
-      x + w / 2 + 2,
-      y - h / 2 - verticalLift,
+      building.x + w / 2 + 2,
+      building.y - h / 2 - lift,
     );
     ctx.closePath();
     ctx.fill();
   }
 
-  const rows = clamp(
-    profile.floors,
-    1,
-    8,
-  );
+  const rows =
+    clamp(
+      profile.floors ?? 1,
+      1,
+      8,
+    );
 
-  const columns = Math.max(
-    2,
-    Math.floor(w / 14),
-  );
+  const columns =
+    Math.max(
+      2,
+      Math.floor(w / 14),
+    );
 
   for (
     let row = 0;
@@ -852,29 +524,34 @@ function drawBuilding(
       col += 1
     ) {
       const wx =
-        x - w / 2 + 6
+        building.x - w / 2
+        + 6
         + col * 12;
 
       const wy =
-        y + h / 2 - 13
+        building.y + h / 2
+        - 13
         - row * 8;
 
       if (
         wx + 5
-        >= x + w / 2 - 3
+        >= building.x + w / 2 - 3
       ) {
         continue;
       }
 
-      ctx.fillStyle =
+      const lit =
         (
-          (
-            row * 5
-            + col * 3
-            + site.key.length
-            + stage
-          ) % 5
-        ) < 2
+          row * 5
+          + col * 3
+          + building.id.length
+          + Math.floor(
+            cityTime / 12,
+          )
+        ) % 5 < 2;
+
+      ctx.fillStyle =
+        lit
           ? '#d2c46a'
           : '#30383a';
 
@@ -887,14 +564,11 @@ function drawBuilding(
     }
   }
 
-  if (
-    profile.kind === 'shop'
-    || profile.kind === 'cafe'
-  ) {
+  if (profile.kind === 'shop') {
     ctx.fillStyle = '#30444a';
     ctx.fillRect(
-      x - w / 2 + 4,
-      y + h / 2 - 10,
+      building.x - w / 2 + 4,
+      building.y + h / 2 - 10,
       w - 8,
       6,
     );
@@ -903,8 +577,8 @@ function drawBuilding(
   if (profile.kind === 'tower') {
     ctx.fillStyle = '#c7c8c2';
     ctx.fillRect(
-      x - 2,
-      y - h / 2 - verticalLift - 8,
+      building.x - 2,
+      building.y - h / 2 - lift - 8,
       4,
       8,
     );
@@ -947,7 +621,30 @@ function drawTree(
   );
 }
 
-function drawCityPark(ctx) {
+function drawCityPark(
+  ctx,
+  state,
+) {
+  const district =
+    state.city.districts.find(
+      (candidate) =>
+        candidate.id === 'park',
+    );
+
+  if (
+    !district
+    || district.status
+      !== 'active'
+  ) {
+    return;
+  }
+
+  const age =
+    state.city.timeSeconds
+    - (district.activatedAt ?? 0);
+
+  if (age < 6) return;
+
   const stop =
     WORLD.line1Stops[2];
 
@@ -987,6 +684,34 @@ function drawCityPark(ctx) {
   }
 }
 
+function activeStopPoints(state) {
+  const result = [];
+
+  for (
+    let index = 0;
+    index < state.line1.stopCount;
+    index += 1
+  ) {
+    result.push(
+      WORLD.line1Stops[index],
+    );
+  }
+
+  if (state.line2.built) {
+    for (
+      let index = 1;
+      index < state.line2.stopCount;
+      index += 1
+    ) {
+      result.push(
+        WORLD.line2Stops[index],
+      );
+    }
+  }
+
+  return result;
+}
+
 function drawCrosswalk(
   ctx,
   x,
@@ -995,7 +720,7 @@ function drawCrosswalk(
 ) {
   ctx.save();
   ctx.fillStyle = '#c7c7bf';
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = 0.45;
 
   for (
     let index = -2;
@@ -1024,45 +749,59 @@ function drawCrosswalk(
 
 function drawAmbientCars(
   ctx,
-  roadRoutes,
-  stage,
+  state,
   timeSeconds,
 ) {
-  const primaryRoads =
-    roadRoutes.filter(
-      (road) => !road.local,
+  const roads =
+    state.city.roads.filter(
+      (road) =>
+        road.status === 'built'
+        && road.class === 'arterial',
     );
 
-  if (primaryRoads.length === 0) {
-    return;
-  }
+  if (roads.length === 0) return;
 
-  const carCount = clamp(
-    1 + Math.floor(stage / 2),
-    1,
-    4,
-  );
+  const cityMaturity =
+    state.city.buildings.filter(
+      (building) =>
+        building.status === 'built',
+    ).length;
+
+  const carCount =
+    clamp(
+      1 + Math.floor(
+        cityMaturity / 5,
+      ),
+      1,
+      6,
+    );
 
   for (
     let index = 0;
     index < carCount;
     index += 1
   ) {
-    const route =
-      primaryRoads[
-        index % primaryRoads.length
-      ].metrics;
+    const metrics =
+      roadMetrics(
+        roads[
+          index % roads.length
+        ],
+      );
+
+    if (metrics.total <= 0) {
+      continue;
+    }
 
     const distanceAlong =
       (
         timeSeconds
-          * (17 + index * 3)
-        + index * 91
-      ) % route.total;
+        * (16 + index * 2)
+        + index * 89
+      ) % metrics.total;
 
     const point =
       pointOnRoute(
-        route,
+        metrics,
         distanceAlong,
       );
 
@@ -1111,52 +850,116 @@ function drawAmbientCars(
   }
 }
 
+export function getCityLots(state) {
+  if (!state.city) return [];
+
+  return state.city.parcels.map(
+    (parcel) => ({
+      key: parcel.id,
+      id: parcel.id,
+      districtId:
+        parcel.districtId,
+      x: parcel.x,
+      y: parcel.y,
+      w: parcel.w,
+      h: parcel.h,
+      zone: parcel.zone,
+      status: parcel.status,
+      buildingId:
+        parcel.buildingId,
+      box: {
+        x:
+          parcel.x - parcel.w / 2,
+        y:
+          parcel.y - parcel.h / 2,
+        w: parcel.w,
+        h: parcel.h,
+      },
+    }),
+  );
+}
+
 export function drawCity(
   ctx,
   state,
   timeSeconds,
 ) {
-  const stage =
-    getCityStage(state);
+  if (!state.city) return;
 
-  const mainRoads =
-    getMainRoads(state);
+  for (
+    const road
+    of state.city.roads
+  ) {
+    const district =
+      state.city.districts.find(
+        (candidate) =>
+          candidate.id
+          === road.districtId,
+      );
 
-  const secondaryRoads =
-    getSecondaryRoads(state);
+    if (
+      road.status === 'planned'
+      && district?.status === 'active'
+      && road.source === 'city'
+    ) {
+      drawPlannedRoad(
+        ctx,
+        roadMetrics(road),
+      );
+      continue;
+    }
 
-  for (const road of secondaryRoads) {
-    drawRoad(
-      ctx,
-      road.metrics,
-      { local: true },
-    );
+    if (
+      road.status === 'constructing'
+    ) {
+      drawRoadConstruction(
+        ctx,
+        road,
+      );
+      continue;
+    }
+
+    if (road.status === 'built') {
+      drawRoadSurface(
+        ctx,
+        roadMetrics(road),
+        road,
+      );
+    }
   }
 
-  for (const road of mainRoads) {
-    drawRoad(
-      ctx,
-      road.metrics,
-      { local: road.local },
-    );
+  drawCityPark(
+    ctx,
+    state,
+  );
+
+  for (
+    const building
+    of state.city.buildings
+  ) {
+    if (
+      building.status
+      === 'constructing'
+    ) {
+      drawConstructionSite(
+        ctx,
+        building,
+      );
+    } else if (
+      building.status
+      === 'built'
+    ) {
+      drawBuiltBuilding(
+        ctx,
+        building,
+        state.city.timeSeconds,
+      );
+    }
   }
 
-  if (state.line1.stopCount >= 3) {
-    drawCityPark(ctx);
-  }
-
-  for (const lot of getCityLots(state)) {
-    drawBuilding(
-      ctx,
-      lot,
-      stage,
-    );
-  }
-
-  const stops =
-    getStopPoints(state);
-
-  stops.forEach(
+  activeStopPoints(
+    state,
+  ).forEach(
     (stop, index) => {
       drawCrosswalk(
         ctx,
@@ -1169,8 +972,7 @@ export function drawCity(
 
   drawAmbientCars(
     ctx,
-    mainRoads,
-    stage,
+    state,
     timeSeconds,
   );
 }

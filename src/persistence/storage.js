@@ -2,6 +2,7 @@ import {
   ECONOMY,
   GAME_VERSION,
   createInitialState,
+  ensureCityRuntime,
   ensureLineRuntime,
   initializeLineService,
 } from '../simulation/model.js';
@@ -331,7 +332,10 @@ function parseStored(raw) {
     return parsed;
   }
 
-  if (parsed.version === 6) {
+  if (
+    parsed.version === 7
+    || parsed.version === 6
+  ) {
     return migrateBusEraV6(parsed);
   }
 
@@ -349,6 +353,7 @@ function parseStored(raw) {
 function prepareLoadedState(state) {
   ensureLineRuntime(state, 'line1');
   ensureLineRuntime(state, 'line2');
+  ensureCityRuntime(state);
 
   for (const lineKey of ['line1', 'line2']) {
     state[lineKey].passengerEvents = [];
