@@ -5,6 +5,11 @@ import {
 } from '../render/transportLayout.js';
 
 import {
+  analyzeRoadTerrain,
+  parcelTerrainSuitability,
+} from '../world/terrainModel.js';
+
+import {
   ROAD_TOPOLOGY,
   closestPointOnRoad,
   compileRoadGraph,
@@ -396,6 +401,7 @@ function addRoadCandidate(
   reservations,
   {
     ignoreReservationIds = [],
+    terrainSeed = null,
   } = {},
 ) {
   const parentRoadIds =
@@ -501,6 +507,25 @@ function addRoadCandidate(
       ok: false,
       reason: 'too-short-after-snap',
     };
+  }
+
+  if (
+    Number.isFinite(terrainSeed)
+    && candidate.source === 'city'
+  ) {
+    const terrain =
+      analyzeRoadTerrain(
+        terrainSeed,
+        road.points,
+      );
+
+    if (terrain.blocked) {
+      return {
+        ok: false,
+        reason: 'terrain-too-steep',
+        terrain,
+      };
+    }
   }
 
   const validation =
@@ -769,6 +794,7 @@ function generateDistrictRoads(
   roads,
   reservations,
   spec,
+  seed,
 ) {
   const parentRoad =
     roads.find(
@@ -784,27 +810,51 @@ function generateDistrictRoads(
   const preferredSides = [
     spec.branchSide,
     -spec.branchSide,
-  ];
+  ]
+    .map(
+      (side) => {
+        const proposal =
+          makeCollectorCandidate(
+            spec,
+            parentRoad,
+            side,
+          );
+
+        return {
+          side,
+          proposal,
+          terrain:
+            analyzeRoadTerrain(
+              seed,
+              proposal.road.points,
+            ),
+        };
+      },
+    )
+    .sort(
+      (a, b) =>
+        a.terrain.score
+        - b.terrain.score,
+    );
 
   let collector = null;
   let tangent = null;
 
   for (
-    const side
+    const candidate
     of preferredSides
   ) {
     const proposal =
-      makeCollectorCandidate(
-        spec,
-        parentRoad,
-        side,
-      );
+      candidate.proposal;
 
     const added =
       addRoadCandidate(
         roads,
         proposal.road,
         reservations,
+        {
+          terrainSeed: seed,
+        },
       );
 
     if (added.ok) {
@@ -848,6 +898,9 @@ function generateDistrictRoads(
             index,
           ),
           reservations,
+          {
+            terrainSeed: seed,
+          },
         );
 
       if (left.ok) {
@@ -1379,6 +1432,7 @@ function createParcelCandidates(
 }
 
 function validateParcels(
+  seed,
   candidates,
   roads,
   reservations,
@@ -1502,6 +1556,27 @@ function validateParcels(
     if (parcelConflict) {
       continue;
     }
+
+    const terrain =
+      parcelTerrainSuitability(
+        seed,
+        parcel.x,
+        parcel.y,
+      );
+
+    if (!terrain.buildable) {
+      continue;
+    }
+
+    parcel.terrainSlopeDegrees =
+      terrain.slope;
+
+    parcel.forestPotential =
+      terrain.forest;
+
+    parcel.developmentOrder +=
+      terrain.developmentPenalty
+      * 0.35;
 
     accepted.push(
       parcel,
@@ -1652,6 +1727,7 @@ export function generateCityMasterPlan(
         roads,
         reservations,
         spec,
+        seed,
       );
 
     districts.push(
@@ -1680,6 +1756,7 @@ export function generateCityMasterPlan(
 
   const parcels =
     validateParcels(
+      seed,
       parcelCandidates,
       roads,
       reservations,
