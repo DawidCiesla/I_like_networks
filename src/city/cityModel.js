@@ -2,7 +2,7 @@ import {
   generateCityMasterPlan,
 } from './planGenerator.js';
 
-export const CITY_VERSION = 1;
+export const CITY_VERSION = 2;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
@@ -311,6 +311,47 @@ function activeProjectCount(city) {
   ).length;
 }
 
+function roadDependenciesBuilt(
+  city,
+  road,
+) {
+  const parents =
+    road.parentRoadIds ?? [];
+
+  return parents.every(
+    (parentId) =>
+      city.roads.some(
+        (candidate) =>
+          candidate.id === parentId
+          && candidate.status === 'built',
+      ),
+  );
+}
+
+function projectCanStart(
+  city,
+  project,
+) {
+  if (project.type !== 'road') {
+    return true;
+  }
+
+  const road =
+    city.roads.find(
+      (candidate) =>
+        candidate.id
+        === project.targetId,
+    );
+
+  return Boolean(
+    road
+    && roadDependenciesBuilt(
+      city,
+      road,
+    ),
+  );
+}
+
 function nextProjectId(city) {
   const id =
     `project-${city.nextProjectId}`;
@@ -380,6 +421,14 @@ function scheduleRoadProjects(
 function syncPrimaryRoads(state) {
   for (const road of state.city.roads) {
     if (
+      road.source === 'existing-arterial'
+    ) {
+      road.status = 'built';
+      road.constructionProgress = 1;
+      continue;
+    }
+
+    if (
       road.source
       !== 'transport-corridor'
       && road.source
@@ -392,6 +441,10 @@ function syncPrimaryRoads(state) {
       transportUnlockSatisfied(
         state,
         road.unlock,
+      )
+      && roadDependenciesBuilt(
+        state.city,
+        road,
       )
     ) {
       road.status = 'built';
@@ -444,30 +497,15 @@ function roadSupportForParcel(
   state,
   parcel,
 ) {
-  const district =
-    state.city.districts.find(
-      (candidate) =>
-        candidate.id
-        === parcel.districtId,
-    );
-
-  if (!district) return false;
-
-  const districtRoads =
-    state.city.roads.filter(
-      (road) =>
-        road.districtId
-        === district.id
-        && road.source === 'city',
-    );
-
-  if (districtRoads.length === 0) {
-    return true;
+  if (!parcel.frontageRoadId) {
+    return false;
   }
 
-  return districtRoads.some(
+  return state.city.roads.some(
     (road) =>
-      road.status === 'built',
+      road.id
+        === parcel.frontageRoadId
+      && road.status === 'built',
   );
 }
 
@@ -618,7 +656,11 @@ function startEligibleProjects(city) {
         (project) =>
           project.status === 'queued'
           && project.eligibleAt
-            <= city.timeSeconds,
+            <= city.timeSeconds
+          && projectCanStart(
+            city,
+            project,
+          ),
       )
       .sort(
         (a, b) => {
@@ -866,6 +908,8 @@ export function createInitialCityState(
       masterPlan.blocks,
     parcels:
       masterPlan.parcels,
+    reservations:
+      masterPlan.reservations,
     buildings: [],
     projects: [],
   };
@@ -912,6 +956,13 @@ export function ensureCityRuntime(
       state.city.projects,
     )
       ? state.city.projects
+      : [];
+
+  state.city.reservations =
+    Array.isArray(
+      state.city.reservations,
+    )
+      ? state.city.reservations
       : [];
 
   syncCityWithTransport(state);
