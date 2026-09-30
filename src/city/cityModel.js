@@ -6,6 +6,7 @@ export const CITY_VERSION = 4;
 export const DEFAULT_CITY_SEED = 284731;
 
 const MAX_ACTIVE_PROJECTS = 2;
+const CITY_SIMULATION_STEP_SECONDS = 0.2;
 
 function clamp(value, min, max) {
   return Math.min(
@@ -1053,6 +1054,8 @@ export function createInitialCityState(
     version: CITY_VERSION,
     seed,
     timeSeconds: 0,
+    runtimeAccumulatorSeconds: 0,
+    transportSyncKey: null,
     nextProjectId: 1,
     nodes: masterPlan.nodes,
     graphEdges:
@@ -1073,6 +1076,18 @@ export function createInitialCityState(
   };
 }
 
+function transportSyncKey(
+  state,
+) {
+  return [
+    state.line1?.stopCount ?? 0,
+    state.line1?.built ?? false,
+    state.line2?.stopCount ?? 0,
+    state.line2?.built ?? false,
+    state.depot?.built ?? false,
+  ].join(':');
+}
+
 export function ensureCityRuntime(
   state,
 ) {
@@ -1087,6 +1102,13 @@ export function ensureCityRuntime(
         ?? DEFAULT_CITY_SEED,
       );
   }
+
+  state.city.runtimeAccumulatorSeconds =
+    Number.isFinite(
+      state.city.runtimeAccumulatorSeconds,
+    )
+      ? state.city.runtimeAccumulatorSeconds
+      : 0;
 
   state.city.nextProjectId =
     Number.isFinite(
@@ -1137,7 +1159,16 @@ export function ensureCityRuntime(
       ? state.city.reservations
       : [];
 
-  syncCityWithTransport(state);
+  const currentTransportSyncKey =
+    transportSyncKey(state);
+
+  if (
+    state.city.transportSyncKey
+    !== currentTransportSyncKey
+  ) {
+    syncCityWithTransport(state);
+  }
+
   return state.city;
 }
 
@@ -1148,7 +1179,9 @@ export function syncCityWithTransport(
 
   syncDistrictActivation(state);
   syncPrimaryRoads(state);
-  updateDevelopmentLevels(state);
+
+  state.city.transportSyncKey =
+    transportSyncKey(state);
 }
 
 export function advanceCitySimulation(
@@ -1167,16 +1200,36 @@ export function advanceCitySimulation(
   state.city.timeSeconds +=
     deltaSeconds;
 
-  syncCityWithTransport(state);
-  progressActiveProjects(
-    state.city,
-    deltaSeconds,
-  );
-  queueDevelopmentProjects(state);
-  startEligibleProjects(
-    state.city,
-  );
-  updateDevelopmentLevels(state);
+  state.city.runtimeAccumulatorSeconds +=
+    deltaSeconds;
+
+  let guard = 0;
+
+  while (
+    state.city.runtimeAccumulatorSeconds
+      >= CITY_SIMULATION_STEP_SECONDS
+    && guard < 8
+  ) {
+    guard += 1;
+
+    syncCityWithTransport(state);
+
+    progressActiveProjects(
+      state.city,
+      CITY_SIMULATION_STEP_SECONDS,
+    );
+
+    queueDevelopmentProjects(state);
+
+    startEligibleProjects(
+      state.city,
+    );
+
+    updateDevelopmentLevels(state);
+
+    state.city.runtimeAccumulatorSeconds -=
+      CITY_SIMULATION_STEP_SECONDS;
+  }
 }
 
 export function getCitySummary(state) {

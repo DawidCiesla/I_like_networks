@@ -19,6 +19,7 @@ import {
 
 import {
   CITY_VERSION,
+  advanceCitySimulation,
   createInitialCityState,
   getCitySummary,
 } from '../src/city/cityModel.js';
@@ -55,6 +56,54 @@ function rectanglesOverlap(a, b) {
     || b.y + b.h < a.y
   );
 }
+
+test('city development batches work into a 5 Hz fixed step while keeping real time', () => {
+  const state =
+    createInitialState();
+
+  const startTime =
+    state.city.timeSeconds;
+
+  advanceCitySimulation(
+    state,
+    0.05,
+  );
+
+  assert.ok(
+    Math.abs(
+      state.city.timeSeconds
+      - startTime
+      - 0.05,
+    ) < 1e-9,
+  );
+
+  assert.ok(
+    Math.abs(
+      state.city.runtimeAccumulatorSeconds
+      - 0.05,
+    ) < 1e-9,
+  );
+
+  advanceCitySimulation(
+    state,
+    0.15,
+  );
+
+  assert.ok(
+    state.city.runtimeAccumulatorSeconds
+      < 1e-9,
+  );
+
+  advanceFor(
+    state,
+    30,
+  );
+
+  assert.ok(
+    state.city.timeSeconds
+      >= startTime + 30.2,
+  );
+});
 
 test('same seed creates the same immutable master plan', () => {
   const first =

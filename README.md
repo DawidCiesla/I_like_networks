@@ -29,6 +29,11 @@ first stop
 Implemented now:
 
 - the default game world is rendered in real-time 3D with Three.js,
+- the 3D renderer uses incremental scene updates instead of rebuilding the whole city during construction,
+- large QHD / 4K viewports use a reduced render pixel ratio and skip MSAA,
+- shadow maps update on demand rather than every frame,
+- city-development logic runs at a fixed 5 Hz while vehicle motion remains frame-smooth,
+- the main render loop is capped at 60 FPS, preventing 120–165 Hz displays from multiplying GPU work,
 - orbit camera: left-drag rotates, right-drag pans, mouse wheel zooms,
 - deterministic height-field terrain generated from the persistent city seed,
 - terrain contains grassland, meadow, forest and hillside biomes,
