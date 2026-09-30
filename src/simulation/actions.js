@@ -3,10 +3,12 @@ import {
   UPGRADES,
   canBuildDepot,
   canUnlockLine2,
+  addVehicleToLineState,
   getGarageUsed,
   getNextStopCost,
   getUpgradeCost,
   getVehiclePurchaseCost,
+  initializeLineService,
 } from './model.js';
 
 export function buildNextStop(state, lineKey) {
@@ -51,8 +53,11 @@ export function buildNextStop(state, lineKey) {
     && !line.built
     && line.stopCount >= 2
   ) {
-    line.built = true;
-    line.fleetCount = 1;
+    initializeLineService(
+      state,
+      'line1',
+      1,
+    );
   }
 
   return { ok: true, cost };
@@ -89,9 +94,13 @@ export function buildLine2(state) {
 
   state.money -= ECONOMY.line2BuildCost;
 
-  state.line2.built = true;
   state.line2.stopCount = 2;
-  state.line2.fleetCount = 1;
+
+  initializeLineService(
+    state,
+    'line2',
+    1,
+  );
 
   return { ok: true };
 }
@@ -138,7 +147,11 @@ export function addVehicle(state, lineKey) {
   }
 
   state.money -= cost;
-  line.fleetCount += 1;
+
+  addVehicleToLineState(
+    state,
+    lineKey,
+  );
 
   return { ok: true, cost };
 }
