@@ -13,117 +13,21 @@ import {
   getVehicleOnboardPassengers,
 } from '../simulation/model.js';
 
+import {
+  WORLD,
+  getBuiltRoute,
+  getDepotSpurRoute,
+  getFutureSegmentRoute,
+  getSegmentRoute,
+  getVehiclePoint,
+  pointOnRoute,
+} from './transportLayout.js';
+
 const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, value));
 
 const LINE_1_COLOR = '#0797ec';
 const LINE_2_COLOR = '#f4ca00';
-
-const WORLD = Object.freeze({
-  line1Stops: [
-    { x: -430, y: -80, w: 58, h: 64 },
-    { x: -280, y: -80, w: 58, h: 64 },
-    { x: -130, y: -110, w: 58, h: 64 },
-    { x: 40, y: -70, w: 58, h: 64 },
-    { x: 220, y: -105, w: 66, h: 70 },
-  ],
-  line2Stops: [
-    { x: -130, y: -110, w: 58, h: 64 },
-    { x: -35, y: 85, w: 58, h: 64 },
-    { x: 125, y: 175, w: 58, h: 64 },
-    { x: 310, y: 195, w: 66, h: 70 },
-  ],
-  depot: {
-    x: -115,
-    y: 55,
-    w: 118,
-    h: 86,
-  },
-});
-
-function routeMetrics(points) {
-  const segments = [];
-  let total = 0;
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const a = points[index];
-    const b = points[index + 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const length = Math.hypot(dx, dy);
-
-    segments.push({
-      a,
-      b,
-      dx,
-      dy,
-      length,
-      start: total,
-    });
-
-    total += length;
-  }
-
-  return {
-    points,
-    segments,
-    total,
-  };
-}
-
-function builtRoute(stopRects, stopCount) {
-  return routeMetrics(
-    stopRects
-      .slice(0, Math.max(1, stopCount))
-      .map(({ x, y }) => ({ x, y })),
-  );
-}
-
-function vehiclePoint(vehicle, stopRects) {
-  const current =
-    stopRects[vehicle.currentStopIndex]
-    ?? stopRects[0];
-
-  if (
-    vehicle.phase !== 'travel'
-    || vehicle.nextStopIndex == null
-  ) {
-    return {
-      x: current.x,
-      y: current.y,
-      tx: vehicle.direction >= 0 ? 1 : -1,
-      ty: 0,
-    };
-  }
-
-  const next =
-    stopRects[vehicle.nextStopIndex]
-    ?? current;
-
-  const duration = Math.max(
-    1e-6,
-    vehicle.phaseDurationMinutes ?? 1,
-  );
-
-  const progress = clamp(
-    1
-      - (vehicle.phaseMinutesRemaining ?? 0)
-        / duration,
-    0,
-    1,
-  );
-
-  const dx = next.x - current.x;
-  const dy = next.y - current.y;
-  const length = Math.max(1, Math.hypot(dx, dy));
-
-  return {
-    x: current.x + dx * progress,
-    y: current.y + dy * progress,
-    tx: dx / length,
-    ty: dy / length,
-  };
-}
 
 export class TransportRenderer {
   constructor(canvas, { onSelectionChanged } = {}) {
@@ -439,6 +343,8 @@ export class TransportRenderer {
         LINE_2_COLOR,
         2,
       );
+
+      this.#drawSharedInterchange(ctx);
     } else {
       this.#drawFutureLine2(ctx, state);
     }
@@ -460,8 +366,8 @@ export class TransportRenderer {
   ) {
     const line = state[lineKey];
 
-    const route = builtRoute(
-      stopRects,
+    const route = getBuiltRoute(
+      lineKey,
       line.stopCount,
     );
 
@@ -517,8 +423,8 @@ export class TransportRenderer {
       for (const vehicle of line.vehicles) {
         this.#drawVehicle(
           ctx,
+          lineKey,
           vehicle,
-          stopRects,
           color,
         );
       }
@@ -530,22 +436,14 @@ export class TransportRenderer {
         : ECONOMY.maxLine2Stops;
 
     if (line.stopCount < maxStops) {
-      const current =
-        stopRects[line.stopCount - 1];
-
       const next =
         stopRects[line.stopCount];
 
-      const ghostRoute = routeMetrics([
-        {
-          x: current.x,
-          y: current.y,
-        },
-        {
-          x: next.x,
-          y: next.y,
-        },
-      ]);
+      const ghostRoute =
+        getFutureSegmentRoute(
+          lineKey,
+          line.stopCount,
+        );
 
       this.#drawGhostLine(
         ctx,
@@ -585,19 +483,13 @@ export class TransportRenderer {
   #drawFutureLine2(ctx, state) {
     if (!canUnlockLine2(state)) return;
 
-    const start = WORLD.line2Stops[0];
     const next = WORLD.line2Stops[1];
 
-    const route = routeMetrics([
-      {
-        x: start.x,
-        y: start.y,
-      },
-      {
-        x: next.x,
-        y: next.y,
-      },
-    ]);
+    const route = getSegmentRoute(
+      'line2',
+      0,
+      1,
+    );
 
     this.#drawGhostLine(
       ctx,
@@ -623,20 +515,9 @@ export class TransportRenderer {
   }
 
   #drawDepot(ctx, state) {
-    const anchor =
-      WORLD.line1Stops[2];
-
     if (state.depot.built) {
-      const spur = routeMetrics([
-        {
-          x: anchor.x,
-          y: anchor.y,
-        },
-        {
-          x: WORLD.depot.x,
-          y: WORLD.depot.y - 35,
-        },
-      ]);
+      const spur =
+        getDepotSpurRoute();
 
       this.#drawServiceSpur(
         ctx,
@@ -663,16 +544,8 @@ export class TransportRenderer {
       return;
     }
 
-    const spur = routeMetrics([
-      {
-        x: anchor.x,
-        y: anchor.y,
-      },
-      {
-        x: WORLD.depot.x,
-        y: WORLD.depot.y - 35,
-      },
-    ]);
+    const spur =
+      getDepotSpurRoute();
 
     this.#drawGhostLine(
       ctx,
@@ -695,6 +568,52 @@ export class TransportRenderer {
         h: 100,
       },
     });
+  }
+
+  #drawSharedInterchange(ctx) {
+    const rect = WORLD.line1Stops[2];
+
+    ctx.save();
+
+    ctx.strokeStyle = '#050505';
+    ctx.lineWidth = 8;
+
+    ctx.beginPath();
+    ctx.arc(
+      rect.x,
+      rect.y,
+      30,
+      0,
+      Math.PI * 2,
+    );
+    ctx.stroke();
+
+    ctx.strokeStyle = LINE_1_COLOR;
+    ctx.lineWidth = 4;
+
+    ctx.beginPath();
+    ctx.arc(
+      rect.x,
+      rect.y,
+      26,
+      Math.PI * 0.1,
+      Math.PI * 1.1,
+    );
+    ctx.stroke();
+
+    ctx.strokeStyle = LINE_2_COLOR;
+
+    ctx.beginPath();
+    ctx.arc(
+      rect.x,
+      rect.y,
+      26,
+      Math.PI * 1.1,
+      Math.PI * 2.1,
+    );
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   #traceRoute(ctx, metrics) {
@@ -745,15 +664,44 @@ export class TransportRenderer {
     ctx.stroke();
 
     for (
-      let index = 0;
-      index < metrics.segments.length;
-      index += 1
+      let distance = 8;
+      distance < metrics.total;
+      distance += 15
     ) {
-      const segment = metrics.segments[index];
-      const x =
-        segment.a.x + segment.dx * 0.5;
-      const y =
-        segment.a.y + segment.dy * 0.5;
+      const point =
+        pointOnRoute(
+          metrics,
+          distance,
+        );
+
+      const nx = -point.ty;
+      const ny = point.tx;
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(
+        point.x + nx * 6,
+        point.y + ny * 6,
+      );
+      ctx.lineTo(
+        point.x - nx * 6,
+        point.y - ny * 6,
+      );
+      ctx.stroke();
+    }
+
+    for (
+      let distance = 90;
+      distance < metrics.total;
+      distance += 165
+    ) {
+      const point =
+        pointOnRoute(
+          metrics,
+          distance,
+        );
 
       ctx.fillStyle = '#121212';
       ctx.strokeStyle = color;
@@ -761,9 +709,9 @@ export class TransportRenderer {
 
       ctx.beginPath();
       ctx.arc(
-        x,
-        y,
-        7,
+        point.x,
+        point.y,
+        8,
         0,
         Math.PI * 2,
       );
@@ -777,8 +725,8 @@ export class TransportRenderer {
 
       ctx.fillText(
         String(lineNumber),
-        x,
-        y + 2.5,
+        point.x,
+        point.y + 2.5,
       );
     }
 
@@ -826,14 +774,14 @@ export class TransportRenderer {
 
   #drawVehicle(
     ctx,
+    lineKey,
     vehicle,
-    stopRects,
     color,
   ) {
     const point =
-      vehiclePoint(
+      getVehiclePoint(
+        lineKey,
         vehicle,
-        stopRects,
       );
 
     const angle =
