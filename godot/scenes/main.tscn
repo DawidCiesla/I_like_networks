@@ -1,11 +1,12 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/terrain_renderer.gd" id="2_terrain"]
 [ext_resource type="Script" path="res://scripts/world/vegetation_renderer.gd" id="3_vegetation"]
 [ext_resource type="Script" path="res://scripts/render/network_renderer.gd" id="4_network"]
-[ext_resource type="Script" path="res://scripts/camera/city_camera.gd" id="5_camera"]
-[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="6_hud"]
+[ext_resource type="Script" path="res://scripts/render/city_renderer.gd" id="5_city"]
+[ext_resource type="Script" path="res://scripts/camera/city_camera.gd" id="6_camera"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="7_hud"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
@@ -16,6 +17,9 @@ cast_shadow = 0
 
 [node name="Vegetation" type="Node3D" parent="."]
 script = ExtResource("3_vegetation")
+
+[node name="City" type="Node3D" parent="."]
+script = ExtResource("5_city")
 
 [node name="Network" type="Node3D" parent="."]
 script = ExtResource("4_network")
@@ -34,7 +38,7 @@ light_energy = 0.45
 shadow_enabled = false
 
 [node name="CameraRig" type="Node3D" parent="."]
-script = ExtResource("5_camera")
+script = ExtResource("6_camera")
 
 [node name="Camera3D" type="Camera3D" parent="CameraRig"]
 current = true
@@ -43,7 +47,7 @@ near = 1.0
 far = 9000.0
 
 [node name="HUD" type="CanvasLayer" parent="."]
-script = ExtResource("6_hud")
+script = ExtResource("7_hud")
 
 [node name="Root" type="Control" parent="HUD"]
 layout_mode = 3
