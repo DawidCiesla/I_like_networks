@@ -37,13 +37,13 @@ const DISTRICTS = Object.freeze([
       [[118, 122], [118, 34]],
     ],
     parcels: [
-      [-88, -78, 'mixed'],
-      [-22, -86, 'commercial'],
-      [52, -76, 'mixed'],
-      [112, -62, 'commercial'],
-      [-92, 86, 'residential'],
-      [-20, 96, 'mixed'],
-      [54, 86, 'mixed'],
+      [-102, -112, 'mixed'],
+      [-34, -116, 'commercial'],
+      [48, -112, 'mixed'],
+      [-104, 168, 'residential'],
+      [-28, 168, 'mixed'],
+      [54, 168, 'mixed'],
+      [96, -96, 'commercial'],
     ],
   },
   {
@@ -56,9 +56,10 @@ const DISTRICTS = Object.freeze([
       [[-138, 132], [132, 132]],
     ],
     parcels: [
-      [-116, 84, 'residential'],
-      [-46, 104, 'commercial'],
-      [98, 92, 'residential'],
+      [-122, 196, 'residential'],
+      [-46, 198, 'commercial'],
+      [48, 196, 'residential'],
+      [118, 190, 'residential'],
     ],
   },
   {
@@ -505,7 +506,28 @@ function validateParcels(
       continue;
     }
 
-    accepted.push(parcel);
+    const frontageRoad =
+      roads
+        .map(
+          (road) => ({
+            id: road.id,
+            distance:
+              distancePointToRoad(
+                parcel,
+                road,
+              ),
+          }),
+        )
+        .sort(
+          (a, b) =>
+            a.distance - b.distance,
+        )[0];
+
+    accepted.push({
+      ...parcel,
+      frontageRoadId:
+        frontageRoad?.id ?? null,
+    });
   }
 
   return accepted;
