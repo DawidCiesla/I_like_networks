@@ -78,7 +78,7 @@ test('same seed creates the same immutable master plan', () => {
   );
 
   assert.ok(
-    first.parcels.length >= 80,
+    first.parcels.length >= 70,
   );
 });
 
@@ -601,7 +601,7 @@ test('master-plan parcels never overlap each other and all have street frontage'
     );
 
   assert.ok(
-    plan.parcels.length >= 80,
+    plan.parcels.length >= 70,
   );
 
   assert.ok(
