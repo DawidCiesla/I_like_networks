@@ -1009,6 +1009,8 @@ export class ThreeTransportRenderer {
     this.pointerDown = null;
     this.dynamicMeshes =
       new Map();
+    this.dynamicHeightCache =
+      new Map();
     this.roadObjects =
       new Map();
     this.buildingObjects =
@@ -1316,6 +1318,8 @@ export class ThreeTransportRenderer {
 
     this.worldSeed =
       state.city.seed;
+
+    this.dynamicHeightCache.clear();
 
     this.bounds =
       worldBounds(state);
@@ -2750,7 +2754,7 @@ export class ThreeTransportRenderer {
     base.position.y =
       ground + 2;
 
-    base.castShadow = true;
+    base.castShadow = false;
     group.add(base);
 
     if (ghost) {
@@ -3115,6 +3119,50 @@ export class ThreeTransportRenderer {
     );
   }
 
+  #dynamicGroundHeight(
+    state,
+    x,
+    z,
+  ) {
+    const qx =
+      Math.round(x / 5);
+
+    const qz =
+      Math.round(z / 5);
+
+    const key =
+      `${qx}:${qz}`;
+
+    if (
+      this.dynamicHeightCache.has(key)
+    ) {
+      return this.dynamicHeightCache.get(
+        key,
+      );
+    }
+
+    const height =
+      terrainHeight(
+        state.city.seed,
+        qx * 5,
+        qz * 5,
+      );
+
+    if (
+      this.dynamicHeightCache.size
+      > 6000
+    ) {
+      this.dynamicHeightCache.clear();
+    }
+
+    this.dynamicHeightCache.set(
+      key,
+      height,
+    );
+
+    return height;
+  }
+
   #dynamicVehicleMesh(
     key,
     {
@@ -3150,7 +3198,7 @@ export class ThreeTransportRenderer {
         }),
       );
 
-    mesh.castShadow = true;
+    mesh.castShadow = false;
 
     this.dynamicMeshes.set(
       key,
@@ -3194,8 +3242,8 @@ export class ThreeTransportRenderer {
           );
 
         const ground =
-          terrainHeight(
-            state.city.seed,
+          this.#dynamicGroundHeight(
+            state,
             point.x,
             point.y,
           );
@@ -3227,7 +3275,7 @@ export class ThreeTransportRenderer {
             point.tx ?? 1,
           );
 
-        bus.castShadow = true;
+        bus.castShadow = false;
       }
     };
 
@@ -3332,8 +3380,8 @@ export class ThreeTransportRenderer {
           + point.tx * laneOffset;
 
         const ground =
-          terrainHeight(
-            state.city.seed,
+          this.#dynamicGroundHeight(
+            state,
             laneX,
             laneZ,
           );
@@ -3367,7 +3415,7 @@ export class ThreeTransportRenderer {
             point.tx,
           );
 
-        car.castShadow = true;
+        car.castShadow = false;
       }
     }
   }
