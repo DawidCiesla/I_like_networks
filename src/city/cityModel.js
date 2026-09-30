@@ -1055,6 +1055,7 @@ export function createInitialCityState(
     seed,
     timeSeconds: 0,
     runtimeAccumulatorSeconds: 0,
+    transportSyncKey: null,
     nextProjectId: 1,
     nodes: masterPlan.nodes,
     graphEdges:
@@ -1073,6 +1074,18 @@ export function createInitialCityState(
     buildings: [],
     projects: [],
   };
+}
+
+function transportSyncKey(
+  state,
+) {
+  return [
+    state.line1?.stopCount ?? 0,
+    state.line1?.built ?? false,
+    state.line2?.stopCount ?? 0,
+    state.line2?.built ?? false,
+    state.depot?.built ?? false,
+  ].join(':');
 }
 
 export function ensureCityRuntime(
@@ -1146,7 +1159,16 @@ export function ensureCityRuntime(
       ? state.city.reservations
       : [];
 
-  syncCityWithTransport(state);
+  const currentTransportSyncKey =
+    transportSyncKey(state);
+
+  if (
+    state.city.transportSyncKey
+    !== currentTransportSyncKey
+  ) {
+    syncCityWithTransport(state);
+  }
+
   return state.city;
 }
 
@@ -1157,7 +1179,9 @@ export function syncCityWithTransport(
 
   syncDistrictActivation(state);
   syncPrimaryRoads(state);
-  updateDevelopmentLevels(state);
+
+  state.city.transportSyncKey =
+    transportSyncKey(state);
 }
 
 export function advanceCitySimulation(
