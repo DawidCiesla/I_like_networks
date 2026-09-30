@@ -807,35 +807,62 @@ function generateDistrictRoads(
     return [];
   }
 
-  const preferredSides = [
+  const sideCandidates = [
     spec.branchSide,
     -spec.branchSide,
-  ]
-    .map(
-      (side) => {
-        const proposal =
-          makeCollectorCandidate(
-            spec,
-            parentRoad,
-            side,
-          );
-
-        return {
+  ].map(
+    (side) => {
+      const proposal =
+        makeCollectorCandidate(
+          spec,
+          parentRoad,
           side,
-          proposal,
-          terrain:
-            analyzeRoadTerrain(
-              seed,
-              proposal.road.points,
-            ),
-        };
-      },
-    )
-    .sort(
-      (a, b) =>
-        a.terrain.score
-        - b.terrain.score,
+        );
+
+      return {
+        side,
+        proposal,
+        terrain:
+          analyzeRoadTerrain(
+            seed,
+            proposal.road.points,
+          ),
+      };
+    },
+  );
+
+  const preferred =
+    sideCandidates.find(
+      (candidate) =>
+        candidate.side
+        === spec.branchSide,
     );
+
+  const alternate =
+    sideCandidates.find(
+      (candidate) =>
+        candidate.side
+        !== spec.branchSide,
+    );
+
+  const preferredSides =
+    preferred
+    && !preferred.terrain.blocked
+    && (
+      !alternate
+      || alternate.terrain.blocked
+      || preferred.terrain.score
+        <= alternate.terrain.score + 3.5
+    )
+      ? [
+        preferred,
+        alternate,
+      ].filter(Boolean)
+      : [...sideCandidates].sort(
+        (a, b) =>
+          a.terrain.score
+          - b.terrain.score,
+      );
 
   let collector = null;
   let tangent = null;
