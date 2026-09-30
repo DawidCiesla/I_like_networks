@@ -1,7 +1,7 @@
 extends RefCounted
 class_name GameData
 
-const GAME_VERSION := 1
+const GAME_VERSION := 2
 const DEFAULT_CITY_SEED := 284731
 
 const LINE_KEYS := [
@@ -96,6 +96,8 @@ const BUS := {
 }
 
 const GAME_MINUTES_PER_REAL_SECOND := 0.25
+const DELIVERY_RATE_WINDOW_MINUTES := 0.5
+const BOARDING_HOLD_MINUTES := 0.18
 
 static func all_station_ids() -> Array[String]:
 	var result: Array[String] = []
