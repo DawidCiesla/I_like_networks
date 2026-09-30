@@ -1830,7 +1830,7 @@ export class ThreeTransportRenderer {
         continue;
       }
 
-      const radius =
+      const sidewalkRadius =
         Math.max(
           ...builtRoads.map(
             (road) =>
@@ -1842,21 +1842,16 @@ export class ThreeTransportRenderer {
           ),
         );
 
-      const geometry =
-        new THREE.CylinderGeometry(
-          radius,
-          radius,
-          0.7,
-          18,
-        );
-
-      const mesh =
-        new THREE.Mesh(
-          geometry,
-          new THREE.MeshStandardMaterial({
-            color: 0x3b3d3b,
-            roughness: 0.96,
-          }),
+      const roadRadius =
+        Math.max(
+          ...builtRoads.map(
+            (road) =>
+              (
+                ROAD_WIDTHS[
+                  road.class
+                ] ?? 15
+              ) * 0.52,
+          ),
         );
 
       const ground =
@@ -1866,15 +1861,54 @@ export class ThreeTransportRenderer {
           junction.y,
         );
 
-      mesh.position.set(
+      const sidewalk =
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            sidewalkRadius,
+            sidewalkRadius,
+            0.45,
+            20,
+          ),
+          new THREE.MeshStandardMaterial({
+            color: 0x777a74,
+            roughness: 1,
+          }),
+        );
+
+      sidewalk.position.set(
         junction.x,
-        ground + 0.52,
+        ground + 0.34,
         junction.y,
       );
 
-      mesh.receiveShadow = true;
+      sidewalk.receiveShadow = true;
 
-      this.roadGroup.add(mesh);
+      const surface =
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            roadRadius,
+            roadRadius,
+            0.48,
+            20,
+          ),
+          new THREE.MeshStandardMaterial({
+            color: 0x3b3d3b,
+            roughness: 0.96,
+          }),
+        );
+
+      surface.position.set(
+        junction.x,
+        ground + 0.6,
+        junction.y,
+      );
+
+      surface.receiveShadow = true;
+
+      this.roadGroup.add(
+        sidewalk,
+        surface,
+      );
     }
   }
 
