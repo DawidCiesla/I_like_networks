@@ -170,7 +170,7 @@ func _add_ribbon(
 		var normal := Vector2(-direction.y, direction.x)
 
 		for side in [-1.0, 1.0]:
-			var point := points[index] + normal * width * 0.5 * side
+			var point: Vector2 = points[index] + normal * width * 0.5 * side
 			mesh.surface_add_vertex(Vector3(
 				point.x,
 				Terrain.height(GameStore.city_seed, point.x, point.y) + height_offset,
@@ -190,7 +190,7 @@ func _road_points(road: Dictionary) -> Array[Vector2]:
 	return result
 
 func _polyline_prefix(points: Array[Vector2], progress: float) -> Array[Vector2]:
-	var clamped := clamp(progress, 0.0, 1.0)
+	var clamped: float = clampf(progress, 0.0, 1.0)
 	if clamped >= 1.0:
 		return points.duplicate()
 	if clamped <= 0.0 or points.size() < 2:
@@ -203,7 +203,7 @@ func _polyline_prefix(points: Array[Vector2], progress: float) -> Array[Vector2]
 		lengths.append(length)
 		total += length
 
-	var target := total * clamped
+	var target: float = total * clamped
 	var travelled := 0.0
 	var result: Array[Vector2] = [points[0]]
 
@@ -214,7 +214,7 @@ func _polyline_prefix(points: Array[Vector2], progress: float) -> Array[Vector2]
 			travelled += length
 			continue
 
-		var local := 0.0 if length <= 0.000001 else (target - travelled) / length
+		var local: float = 0.0 if length <= 0.000001 else (target - travelled) / length
 		result.append(points[index].lerp(points[index + 1], local))
 		break
 
@@ -311,9 +311,9 @@ func _create_building(building: Dictionary, parcel: Dictionary) -> Dictionary:
 	root.name = str(building["id"])
 	_buildings_root.add_child(root)
 
-	var inset := max(4.0, float(parcel.get("setback", 6.0)))
-	var width := max(14.0, float(parcel.get("w", 38.0)) - inset * 1.4)
-	var depth := max(12.0, float(parcel.get("h", 34.0)) - inset * 1.4)
+	var inset: float = maxf(4.0, float(parcel.get("setback", 6.0)))
+	var width: float = maxf(14.0, float(parcel.get("w", 38.0)) - inset * 1.4)
+	var depth: float = maxf(12.0, float(parcel.get("h", 34.0)) - inset * 1.4)
 	var height := float(building.get("profile", {}).get("heightMeters", 8.0))
 
 	var mesh_instance := MeshInstance3D.new()
@@ -345,7 +345,7 @@ func _create_building(building: Dictionary, parcel: Dictionary) -> Dictionary:
 	}
 
 func _update_building(entry: Dictionary, building: Dictionary) -> void:
-	var progress := 1.0 if str(building.get("status", "")) == "built" else clamp(float(building.get("constructionProgress", 0.0)), 0.04, 1.0)
+	var progress: float = 1.0 if str(building.get("status", "")) == "built" else clampf(float(building.get("constructionProgress", 0.0)), 0.04, 1.0)
 	var mesh_instance: MeshInstance3D = entry["mesh"]
 	var height := float(entry["height"])
 	mesh_instance.scale.y = progress
