@@ -191,8 +191,8 @@ func _update_effects(delta: float) -> void:
 			continue
 
 		effect["age"] = float(effect["age"]) + delta
-		var duration := max(0.01, float(effect["duration"]))
-		var t := clamp(float(effect["age"]) / duration, 0.0, 1.0)
+		var duration: float = maxf(0.01, float(effect["duration"]))
+		var t: float = clampf(float(effect["age"]) / duration, 0.0, 1.0)
 		var eased := 1.0 - pow(1.0 - t, 3.0)
 		var start: Vector3 = effect["start"]
 		var finish: Vector3 = effect["finish"]
@@ -206,7 +206,7 @@ func _update_effects(delta: float) -> void:
 
 func _station_position(station_id: String) -> Vector2:
 	for line_key in Data.LINE_KEYS:
-		var index := Data.STATION_IDS[line_key].find(station_id)
+		var index: int = Data.STATION_IDS[line_key].find(station_id)
 		if index >= 0:
 			return Layout.stop_position(line_key, index)
 	return Vector2.ZERO
