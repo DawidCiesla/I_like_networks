@@ -9,6 +9,7 @@ const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
 const RoadRouter = preload("res://scripts/transport/road_router.gd")
 const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
+const TransitPlanner = preload("res://scripts/transport/transit_planner.gd")
 const BrowserImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 const BuildingFoundation = preload("res://scripts/render/building_foundation.gd")
 const BuildingOrientation = preload("res://scripts/render/building_orientation.gd")
@@ -23,6 +24,7 @@ func _init() -> void:
 	_test_road_geometry()
 	_test_road_router()
 	_test_transit_network_bridge()
+	_test_free_line_workflow()
 	_test_terrain_determinism()
 	_test_building_foundation_sampling()
 	_test_building_frontage_orientation()
@@ -220,6 +222,78 @@ func _test_transit_network_bridge() -> void:
 		120.0
 	)
 	_expect(bool(preview.get("success", false)))
+	store.free()
+
+func _test_free_line_workflow() -> void:
+	var store = StoreScript.new()
+	store.suppress_persistence = true
+	store.reset_state(false)
+	store.money = 10_000.0
+
+	_expect(store.build_next_stop("line1"))
+	_expect(store.build_next_stop("line1"))
+	_expect(int(store.lines["line1"]["stop_count"]) == 3)
+	_expect(store.build_depot())
+	_expect(store.can_begin_free_line())
+
+	var old_town := Layout.stop_position("line1", 0)
+	var first := old_town + Vector2(-300.0, 0.0)
+	var second := old_town + Vector2(-100.0, 0.0)
+	_expect(store.begin_free_line_editor())
+	_expect(store.route_editor_add_point(first))
+	_expect(store.route_editor_add_point(second))
+	_expect(store.route_editor_points().size() == 2)
+	_expect(store.commit_route_editor())
+
+	var custom_ids := TransitNetwork.custom_line_ids(store.transit_network)
+	_expect(custom_ids.size() == 1)
+	if custom_ids.size() != 1:
+		store.free()
+		return
+
+	var line_id := custom_ids[0]
+	var line := store.transit_line(line_id)
+	_expect(str(line.get("source", "")) == "custom")
+	_expect(str(line.get("status", "")) == "active")
+	_expect(TransitNetwork.line_stop_ids(store.transit_network, line_id).size() == 2)
+	_expect(float(line.get("route_length_world", 0.0)) >= 190.0)
+	_expect(int(line.get("fleet_count", 0)) == 1)
+	_expect(line.get("vehicles", []).size() == 1)
+
+	var stop_ids := TransitNetwork.line_stop_ids(store.transit_network, line_id)
+	var first_stop := store.transit_stop(stop_ids[0])
+	_expect(str(first_stop.get("source", "")) == "custom")
+	var catchment := store.custom_stop_catchment(stop_ids[0])
+	_expect(float(catchment.get("demand_ppm", 0.0)) >= 0.35)
+
+	var journey := TransitPlanner.find_journey(
+		store.transit_network,
+		stop_ids[0],
+		stop_ids[1]
+	)
+	_expect(bool(journey.get("success", false)))
+	_expect(journey.get("legs", []).size() >= 1)
+
+	var visual_found := false
+	for visual in store.bus_visuals():
+		if str(visual.get("line_key", "")) == line_id:
+			visual_found = true
+			break
+	_expect(visual_found)
+
+	_expect(store.begin_edit_line_editor(line_id))
+	store.route_editor_select_stop(1)
+	_expect(store.route_editor_move_selected(old_town + Vector2(-80.0, 0.0)))
+	_expect(store.commit_route_editor())
+	line = store.transit_line(line_id)
+	_expect(float(line.get("route_length_world", 0.0)) >= 210.0)
+
+	var score := TransitNetwork.stop_accessibility_score(
+		store.transit_network,
+		TransitNetwork.stop_position(store.transit_network, stop_ids[0]),
+		440.0
+	)
+	_expect(score > 0.0)
 	store.free()
 
 func _test_terrain_determinism() -> void:
