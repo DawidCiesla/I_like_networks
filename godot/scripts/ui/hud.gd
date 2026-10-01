@@ -50,7 +50,7 @@ func _ready() -> void:
 
 	primary_button.pressed.connect(_on_primary_pressed)
 	depot_upgrade_button.pressed.connect(_on_depot_upgrade)
-	close_button.pressed.connect(func(): GameStore.set_selection(""))
+	close_button.pressed.connect(_on_close_pressed)
 	pause_button.pressed.connect(_on_pause_pressed)
 	speed_1_button.pressed.connect(func(): GameStore.set_speed(1))
 	speed_2_button.pressed.connect(func(): GameStore.set_speed(2))
@@ -301,6 +301,12 @@ func _render_progress() -> void:
 		GameStore.garage_used(),
 		int(GameStore.depot.garage_slots),
 	]
+
+func _on_close_pressed() -> void:
+	if GameStore.route_editor_active():
+		GameStore.cancel_route_editor()
+	else:
+		GameStore.set_selection("")
 
 func _on_create_line_pressed() -> void:
 	GameStore.begin_free_line_editor()
