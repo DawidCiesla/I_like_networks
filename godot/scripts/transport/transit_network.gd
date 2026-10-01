@@ -115,7 +115,7 @@ static func _legacy_stop(
 		"edge_id": str(snap.get("edge_id", "")),
 		"edge_t": float(snap.get("t", 0.0)),
 		"road_class": str(snap.get("road_class", "")),
-		"snap_distance": float(snap.get("distance", INF)),
+		"snap_distance": float(snap.get("distance", -1.0)),
 		"level": level,
 		"status": "planned",
 		"served_line_ids": [],
