@@ -255,6 +255,9 @@ func clear_route_editor_hover() -> void:
 	route_editor["preview_route"] = {}
 	route_editor_changed.emit()
 
+func show_route_editor_message(message: String) -> void:
+	_request_toast(message)
+
 func route_editor_select_stop(index: int) -> void:
 	if not route_editor_active():
 		return
