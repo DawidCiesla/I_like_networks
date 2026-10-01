@@ -717,6 +717,37 @@ func transit_journey(from_stop_id: String, to_stop_id: String) -> Dictionary:
 func custom_stop_catchment(stop_id: String) -> Dictionary:
 	return TransitNetwork.catchment_stats(transit_network, city, stop_id)
 
+func custom_stop_upgrade_cost(stop_id: String) -> int:
+	var stop := transit_stop(stop_id)
+	var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+	return roundi(
+		float(Data.STATION_UPGRADE["base_cost"])
+		* pow(float(Data.STATION_UPGRADE["cost_growth"]), level)
+	)
+
+func upgrade_custom_stop(stop_id: String) -> bool:
+	var stops: Dictionary = transit_network.get("stops", {})
+	if not stops.has(stop_id):
+		return false
+	var stop: Dictionary = stops[stop_id]
+	if str(stop.get("source", "")) != "custom":
+		return false
+	var level := int(stop.get("level", 0))
+	if level >= int(Data.STATION_UPGRADE["max_level"]):
+		_request_toast("This stop is already a Hub.")
+		return false
+	var cost := custom_stop_upgrade_cost(stop_id)
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+	money -= float(cost)
+	stop["level"] = level + 1
+	stops[stop_id] = stop
+	transit_network["stops"] = stops
+	_request_toast("%s upgraded." % str(stop.get("name", "Stop")))
+	_commit_change()
+	return true
+
 func next_stop_cost(line_key: String) -> int:
 	var line: Dictionary = lines[line_key]
 	var base_cost: float = 0.0
