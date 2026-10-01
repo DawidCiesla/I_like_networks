@@ -250,6 +250,9 @@ static func _cross(a: Vector2, b: Vector2) -> float:
 	return a.x * b.y - a.y * b.x
 
 static func _to_vec(value) -> Vector2:
-	if value is Vector2:
+	if typeof(value) == TYPE_VECTOR2:
 		return value
-	return Vector2(float(value.get("x", 0.0)), float(value.get("y", 0.0)))
+	return Vector2(
+		float(value.get("x", 0.0)),
+		float(value.get("y", 0.0))
+	)
