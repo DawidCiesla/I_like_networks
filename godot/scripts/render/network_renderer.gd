@@ -501,7 +501,7 @@ func _update_buses() -> void:
 		bus.visible = true
 		bus.position = Vector3(
 			point.x,
-			Terrain.height(GameStore.city_seed, point.x, point.y) + 0.58,
+			TerrainSurface.height(GameStore.city_seed, point.x, point.y) + 0.58,
 			point.y
 		)
 		bus.rotation.y = -atan2(tangent.y, tangent.x)
