@@ -3,7 +3,9 @@ extends Node3D
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 
 var _static_root: Node3D
 var _bus_root: Node3D
@@ -43,6 +45,29 @@ func _visual_signature() -> String:
 		parts.append("%s:%s:%s" % [line_key, line.built, line.stop_count])
 	for station_id in Data.all_station_ids():
 		parts.append("%s:%d" % [station_id, GameStore.station_level(station_id)])
+
+	var network_lines: Dictionary = GameStore.transit_network.get("lines", {})
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var custom_line: Dictionary = network_lines.get(line_id, {})
+		parts.append("%s:%s:%s:%s" % [
+			line_id,
+			custom_line.get("status", ""),
+			custom_line.get("stop_ids", []),
+			custom_line.get("route_length_world", 0.0),
+		])
+	var network_stops: Dictionary = GameStore.transit_network.get("stops", {})
+	for stop_id_value in network_stops.keys():
+		var stop_id := str(stop_id_value)
+		var stop: Dictionary = network_stops[stop_id]
+		if str(stop.get("source", "")) != "custom":
+			continue
+		parts.append("%s:%.2f:%.2f:%d" % [
+			stop_id,
+			float(stop.get("x", 0.0)),
+			float(stop.get("y", 0.0)),
+			int(stop.get("level", 0)),
+		])
+
 	parts.append("depot:%s" % GameStore.depot.built)
 	return "|".join(parts)
 
@@ -86,6 +111,20 @@ func rebuild() -> void:
 		_add_ribbon(future, 3.2, Color(Data.LINE_COLORS[line_key], 0.42), 0.13, true)
 		var station_id: String = Data.STATION_IDS[line_key][1]
 		_add_station(station_id, line_key, 1, true, "future_line:%s" % line_key)
+
+	var network_lines: Dictionary = GameStore.transit_network.get("lines", {})
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var custom_line: Dictionary = network_lines.get(line_id, {})
+		if str(custom_line.get("status", "")) != "active":
+			continue
+		var route := TransitNetwork.line_route_points(GameStore.transit_network, line_id)
+		if route.size() >= 2:
+			_add_ribbon(route, 4.2, _line_color(line_id), 0.145, true)
+		for stop_id in TransitNetwork.line_stop_ids(GameStore.transit_network, line_id):
+			if rendered_stations.has(stop_id):
+				continue
+			_add_free_station(stop_id, line_id)
+			rendered_stations[stop_id] = true
 
 	if bool(GameStore.depot.built) or GameStore.can_build_depot():
 		_add_depot(not bool(GameStore.depot.built))
@@ -174,6 +213,63 @@ func _add_station(
 
 	area.input_event.connect(_on_pick.bind(area))
 	_static_root.add_child(area)
+
+func _add_free_station(stop_id: String, line_id: String) -> void:
+	var stop := GameStore.transit_stop(stop_id)
+	if stop.is_empty():
+		return
+	var point := Vector2(
+		float(stop.get("x", 0.0)),
+		float(stop.get("y", 0.0))
+	)
+	var y := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
+	var level := clampi(int(stop.get("level", 0)), 0, 3)
+	var served: Array = stop.get("served_line_ids", [])
+	var color := _line_color(line_id)
+	if served.size() > 1:
+		color = Color("#e6e5dd")
+
+	var area := Area3D.new()
+	area.name = "FreeStation_%s" % stop_id
+	area.position = Vector3(point.x, y + 2.0, point.y)
+	area.input_ray_pickable = true
+	area.set_meta("selection", "free_stop:%s" % stop_id)
+
+	var shape := CollisionShape3D.new()
+	var cylinder_shape := CylinderShape3D.new()
+	cylinder_shape.radius = 20.0 + float(level) * 7.0
+	cylinder_shape.height = 16.0 + float(level) * 4.0
+	shape.shape = cylinder_shape
+	area.add_child(shape)
+
+	var station_model := MeshInstance3D.new()
+	station_model.name = "StationModel"
+	station_model.mesh = _station_mesh_for_level(level)
+	station_model.set_surface_override_material(0, _station_body_material(color, false))
+	station_model.set_surface_override_material(1, _station_details_material(false))
+	station_model.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	area.add_child(station_model)
+
+	var label := Label3D.new()
+	label.text = str(stop.get("name", stop_id))
+	if served.size() > 1:
+		label.text += "\nINTERCHANGE"
+	label.position.y = 11.0 + float(level) * 0.8
+	label.font_size = 24
+	label.outline_size = 6
+	label.modulate = Color.WHITE
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	area.add_child(label)
+
+	area.input_event.connect(_on_pick.bind(area))
+	_static_root.add_child(area)
+
+func _line_color(line_id: String) -> Color:
+	if Data.LINE_COLORS.has(line_id):
+		return Data.LINE_COLORS[line_id]
+	var line := GameStore.transit_line(line_id)
+	var raw := str(line.get("color", "#58b8ff"))
+	return Color(raw)
 
 func _station_mesh_for_level(level: int) -> ArrayMesh:
 	if _station_mesh_cache.has(level):
@@ -356,10 +452,11 @@ func _create_bus(line_key: String) -> MeshInstance3D:
 
 	var bus := MeshInstance3D.new()
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Data.LINE_COLORS[line_key]
+	var line_color := _line_color(line_key)
+	material.albedo_color = line_color
 	material.roughness = 0.7
 	material.emission_enabled = true
-	material.emission = Data.LINE_COLORS[line_key]
+	material.emission = line_color
 	material.emission_energy_multiplier = 0.08
 	bus.mesh = _bus_model_mesh
 	bus.set_surface_override_material(0, material)
