@@ -172,6 +172,7 @@ func _empty_route_editor() -> Dictionary:
 		"mode": "",
 		"line_id": "",
 		"draft_points": [],
+		"draft_waypoints": [],
 		"selected_index": -1,
 		"hover_point": null,
 		"hover_valid": false,
@@ -194,6 +195,61 @@ func route_editor_points() -> Array[Vector2]:
 				float(raw.get("y", 0.0))
 			))
 	return result
+
+func route_editor_waypoints() -> Array:
+	var stop_count := route_editor_points().size()
+	var segment_count := maxi(0, stop_count - 1)
+	var raw_waypoints = route_editor.get("draft_waypoints", [])
+	var result: Array = []
+	for segment_index in range(segment_count):
+		var segment_points: Array[Vector2] = []
+		if (
+			typeof(raw_waypoints) == TYPE_ARRAY
+			and segment_index < raw_waypoints.size()
+			and typeof(raw_waypoints[segment_index]) == TYPE_ARRAY
+		):
+			for raw_value in raw_waypoints[segment_index]:
+				if raw_value is Vector2:
+					segment_points.append(raw_value)
+				elif typeof(raw_value) == TYPE_DICTIONARY:
+					var raw: Dictionary = raw_value
+					segment_points.append(Vector2(
+						float(raw.get("x", 0.0)),
+						float(raw.get("y", 0.0))
+					))
+		result.append(segment_points)
+	return result
+
+func _set_route_editor_waypoints(waypoints: Array) -> void:
+	var points := route_editor_points()
+	var segment_count := maxi(0, points.size() - 1)
+	var normalized: Array = []
+	for segment_index in range(segment_count):
+		var segment_points: Array[Vector2] = []
+		if segment_index < waypoints.size():
+			for point_value in waypoints[segment_index]:
+				if point_value is Vector2:
+					segment_points.append(point_value)
+				elif typeof(point_value) == TYPE_DICTIONARY:
+					var raw: Dictionary = point_value
+					segment_points.append(Vector2(
+						float(raw.get("x", 0.0)),
+						float(raw.get("y", 0.0))
+					))
+		normalized.append(segment_points)
+	route_editor["draft_waypoints"] = normalized
+
+func _clear_route_editor_waypoints_if_needed() -> void:
+	var waypoints := route_editor_waypoints()
+	var had_waypoints := false
+	for segment_value in waypoints:
+		var segment: Array = segment_value
+		if not segment.is_empty():
+			had_waypoints = true
+			break
+	_set_route_editor_waypoints([])
+	if had_waypoints:
+		_request_toast("Routing waypoints reset after changing stop order.")
 
 func can_begin_free_line() -> bool:
 	return bool(depot.get("built", false)) and _has_free_garage_slot()
@@ -223,7 +279,23 @@ func begin_edit_line_editor(line_id: String) -> bool:
 	for stop_id in TransitNetwork.line_stop_ids(transit_network, line_id):
 		points.append(TransitNetwork.stop_position(transit_network, stop_id))
 	route_editor["draft_points"] = points
-	route_editor["estimated_cost"] = free_line_edit_cost(points)
+	var stored_waypoints := TransitNetwork.segment_waypoints(
+		transit_network,
+		line_id
+	)
+	var editor_waypoints: Array = []
+	for segment_value in stored_waypoints:
+		var segment: Array[Vector2] = []
+		for waypoint_value in segment_value:
+			if typeof(waypoint_value) == TYPE_DICTIONARY:
+				var raw: Dictionary = waypoint_value
+				segment.append(Vector2(
+					float(raw.get("x", 0.0)),
+					float(raw.get("y", 0.0))
+				))
+		editor_waypoints.append(segment)
+	route_editor["draft_waypoints"] = editor_waypoints
+	route_editor["estimated_cost"] = free_line_edit_cost(points, editor_waypoints)
 	set_selection("route_editor")
 	route_editor_changed.emit()
 	state_changed.emit()
@@ -268,6 +340,157 @@ func route_editor_select_stop(index: int) -> void:
 	route_editor_changed.emit()
 	state_changed.emit()
 
+func route_editor_reorder_selected(delta: int) -> bool:
+	if not route_editor_active() or delta == 0:
+		return false
+	var points := route_editor_points()
+	var selected_index := int(route_editor.get("selected_index", -1))
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	var target_index := selected_index + delta
+	if target_index < 0 or target_index >= points.size():
+		return false
+	var temporary := points[selected_index]
+	points[selected_index] = points[target_index]
+	points[target_index] = temporary
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = target_index
+	_clear_route_editor_waypoints_if_needed()
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_add_waypoint(point: Vector2, segment_index: int) -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if segment_index < 0 or segment_index >= points.size() - 1:
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Waypoints must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	var waypoints := route_editor_waypoints()
+	var segment: Array[Vector2] = waypoints[segment_index]
+	for existing in segment:
+		if existing.distance_to(snapped) < 24.0:
+			_request_toast("A routing waypoint is already nearby.")
+			return false
+	segment.append(snapped)
+	waypoints[segment_index] = segment
+	_set_route_editor_waypoints(waypoints)
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_remove_nearest_waypoint(
+	point: Vector2,
+	radius: float = 32.0
+) -> bool:
+	if not route_editor_active():
+		return false
+	var waypoints := route_editor_waypoints()
+	var best_segment := -1
+	var best_index := -1
+	var best_distance := radius
+	for segment_index in range(waypoints.size()):
+		var segment: Array = waypoints[segment_index]
+		for waypoint_index in range(segment.size()):
+			var waypoint: Vector2 = segment[waypoint_index]
+			var distance := waypoint.distance_to(point)
+			if distance < best_distance:
+				best_distance = distance
+				best_segment = segment_index
+				best_index = waypoint_index
+	if best_segment < 0:
+		return false
+	var segment: Array = waypoints[best_segment]
+	segment.remove_at(best_index)
+	waypoints[best_segment] = segment
+	_set_route_editor_waypoints(waypoints)
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func preview_transit_route_via(
+	start_point: Vector2,
+	end_point: Vector2,
+	waypoints: Array
+) -> Dictionary:
+	var controls: Array[Vector2] = [start_point]
+	for waypoint_value in waypoints:
+		if waypoint_value is Vector2:
+			controls.append(waypoint_value)
+		elif typeof(waypoint_value) == TYPE_DICTIONARY:
+			var raw: Dictionary = waypoint_value
+			controls.append(Vector2(
+				float(raw.get("x", 0.0)),
+				float(raw.get("y", 0.0))
+			))
+	controls.append(end_point)
+
+	var combined: Array[Vector2] = []
+	var total := 0.0
+	var road_ids: Array[String] = []
+	for index in range(controls.size() - 1):
+		var route := preview_transit_route(
+			controls[index],
+			controls[index + 1],
+			true,
+			true,
+			115.0
+		)
+		if not bool(route.get("success", false)):
+			return {
+				"success": false,
+				"reason": route.get("reason", "no_path"),
+				"points": [],
+				"length": 0.0,
+				"road_ids": [],
+			}
+		total += float(route.get("length", 0.0))
+		for road_id_value in route.get("road_ids", []):
+			var road_id := str(road_id_value)
+			if not road_ids.has(road_id):
+				road_ids.append(road_id)
+		for point_value in route.get("points", []):
+			if not (point_value is Vector2):
+				continue
+			var route_point: Vector2 = point_value
+			if (
+				not combined.is_empty()
+				and combined.back().distance_to(route_point) <= 0.001
+			):
+				continue
+			combined.append(route_point)
+	return {
+		"success": true,
+		"reason": "",
+		"points": combined,
+		"length": total,
+		"road_ids": road_ids,
+	}
+
+func route_editor_segment_preview(segment_index: int) -> Dictionary:
+	var points := route_editor_points()
+	var waypoints := route_editor_waypoints()
+	if segment_index < 0 or segment_index >= points.size() - 1:
+		return {"success": false, "points": [], "length": 0.0}
+	var segment_waypoints: Array = (
+		waypoints[segment_index]
+		if segment_index < waypoints.size()
+		else []
+	)
+	return preview_transit_route_via(
+		points[segment_index],
+		points[segment_index + 1],
+		segment_waypoints
+	)
+
 func route_editor_add_point(point: Vector2, insert_after: int = -1) -> bool:
 	if not route_editor_active():
 		return false
@@ -290,6 +513,7 @@ func route_editor_add_point(point: Vector2, insert_after: int = -1) -> bool:
 		points.append(snapped)
 	route_editor["draft_points"] = points
 	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
 	route_editor_changed.emit()
 	state_changed.emit()
@@ -331,6 +555,7 @@ func route_editor_remove_selected() -> bool:
 	points.remove_at(selected_index)
 	route_editor["draft_points"] = points
 	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
 	route_editor_changed.emit()
 	state_changed.emit()
@@ -345,29 +570,50 @@ func route_editor_undo_last() -> bool:
 	points.pop_back()
 	route_editor["draft_points"] = points
 	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
 	route_editor_changed.emit()
 	state_changed.emit()
 	return true
 
-func free_line_build_cost(points: Array[Vector2]) -> int:
-	var route_length := _draft_route_length(points)
+func free_line_build_cost(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> int:
+	var route_length := _draft_route_length(points, waypoints)
 	return roundi(
 		float(Data.ECONOMY["free_line_base_cost"])
 		+ float(points.size()) * float(Data.ECONOMY["free_stop_cost"])
 		+ route_length * float(Data.ECONOMY["free_route_cost_per_world_unit"])
 	)
 
-func free_line_edit_cost(points: Array[Vector2]) -> int:
+func free_line_edit_cost(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> int:
 	return roundi(
 		float(Data.ECONOMY["free_line_edit_base_cost"])
-		+ _draft_route_length(points) * float(Data.ECONOMY["free_route_cost_per_world_unit"]) * 0.12
+		+ _draft_route_length(points, waypoints)
+		* float(Data.ECONOMY["free_route_cost_per_world_unit"])
+		* 0.12
 	)
 
-func _draft_route_length(points: Array[Vector2]) -> float:
+func _draft_route_length(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> float:
 	var total := 0.0
 	for index in range(points.size() - 1):
-		var route := preview_transit_route(points[index], points[index + 1], true, true, 115.0)
+		var segment_waypoints: Array = (
+			waypoints[index]
+			if index < waypoints.size()
+			else []
+		)
+		var route := preview_transit_route_via(
+			points[index],
+			points[index + 1],
+			segment_waypoints
+		)
 		if not bool(route.get("success", false)):
 			return 0.0
 		total += float(route.get("length", 0.0))
@@ -375,10 +621,11 @@ func _draft_route_length(points: Array[Vector2]) -> float:
 
 func _update_route_editor_cost() -> void:
 	var points := route_editor_points()
+	var waypoints := route_editor_waypoints()
 	route_editor["estimated_cost"] = (
-		free_line_build_cost(points)
+		free_line_build_cost(points, waypoints)
 		if str(route_editor.get("mode", "")) == "new"
-		else free_line_edit_cost(points)
+		else free_line_edit_cost(points, waypoints)
 	)
 
 func commit_route_editor() -> bool:
@@ -390,10 +637,11 @@ func commit_route_editor() -> bool:
 		return false
 
 	var mode := str(route_editor.get("mode", ""))
+	var waypoints := route_editor_waypoints()
 	var cost := (
-		free_line_build_cost(points)
+		free_line_build_cost(points, waypoints)
 		if mode == "new"
-		else free_line_edit_cost(points)
+		else free_line_edit_cost(points, waypoints)
 	)
 	if money < float(cost):
 		_request_toast("Not enough money.")
@@ -410,7 +658,9 @@ func commit_route_editor() -> bool:
 			transit_network,
 			city,
 			points,
-			color
+			color,
+			"",
+			waypoints
 		)
 		if not bool(created.get("success", false)):
 			_request_toast(_route_editor_failure_message(str(created.get("reason", ""))))
@@ -430,7 +680,8 @@ func commit_route_editor() -> bool:
 		transit_network,
 		city,
 		line_id,
-		points
+		points,
+		waypoints
 	)
 	if not bool(updated.get("success", false)):
 		_request_toast(_route_editor_failure_message(str(updated.get("reason", ""))))
