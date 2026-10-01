@@ -32,6 +32,7 @@ var route_editor: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
+var _custom_catchment_cache: Dictionary = {}
 var suppress_persistence := false
 
 func _ready() -> void:
@@ -88,6 +89,7 @@ func reset_state(emit_signal: bool = true) -> void:
 	city_seed = Data.DEFAULT_CITY_SEED
 	selected = ""
 	route_editor = _empty_route_editor()
+	_custom_catchment_cache.clear()
 
 	lines = {}
 	for line_key in Data.LINE_KEYS:
@@ -914,7 +916,7 @@ func custom_line_demand(line_id: String) -> float:
 		return 0.0
 	var total := 0.0
 	for stop_id in stop_ids:
-		var stats := TransitNetwork.catchment_stats(transit_network, city, stop_id)
+		var stats := _cached_custom_stop_catchment(stop_id)
 		total += float(stats.get("demand_ppm", 0.0))
 	return total
 
@@ -968,7 +970,30 @@ func transit_journey(from_stop_id: String, to_stop_id: String) -> Dictionary:
 	return TransitPlanner.find_journey(transit_network, from_stop_id, to_stop_id)
 
 func custom_stop_catchment(stop_id: String) -> Dictionary:
-	return TransitNetwork.catchment_stats(transit_network, city, stop_id)
+	return _cached_custom_stop_catchment(stop_id).duplicate(true)
+
+func _cached_custom_stop_catchment(stop_id: String) -> Dictionary:
+	var now := float(city.get("time_seconds", 0.0))
+	var cached: Dictionary = _custom_catchment_cache.get(stop_id, {})
+	if (
+		not cached.is_empty()
+		and now - float(cached.get("time_seconds", -INF)) <= 2.0
+	):
+		return cached.get("stats", {})
+
+	var stats := TransitNetwork.catchment_stats(
+		transit_network,
+		city,
+		stop_id
+	)
+	_custom_catchment_cache[stop_id] = {
+		"time_seconds": now,
+		"stats": stats,
+	}
+	return stats
+
+func _invalidate_custom_catchment_cache() -> void:
+	_custom_catchment_cache.clear()
 
 func custom_stop_upgrade_cost(stop_id: String) -> int:
 	var stop := transit_stop(stop_id)
@@ -1371,11 +1396,7 @@ func _custom_generate_passengers(line_id: String, delta_minutes: float) -> void:
 	var matrix: Array = line.get("waiting_by_stop", [])
 	var abandoned := 0.0
 	for origin in range(stop_count):
-		var stats := TransitNetwork.catchment_stats(
-			transit_network,
-			city,
-			stop_ids[origin]
-		)
+		var stats := _cached_custom_stop_catchment(stop_ids[origin])
 		var stop := transit_stop(stop_ids[origin])
 		var interchange_bonus := 1.0 + maxf(
 			0.0,
@@ -2235,6 +2256,7 @@ func bus_visuals() -> Array[Dictionary]:
 	return result
 
 func _commit_change() -> void:
+	_invalidate_custom_catchment_cache()
 	var city_did_change := CityRuntime.sync_with_transport(self)
 	_sync_transit_network_bridge()
 	for line_id in TransitNetwork.custom_line_ids(transit_network):
@@ -2324,6 +2346,7 @@ func _apply_payload(parsed: Dictionary) -> void:
 
 	CityRuntime.sync_with_transport(self)
 	_sync_transit_network_bridge()
+	_invalidate_custom_catchment_cache()
 	for line_id in TransitNetwork.custom_line_ids(transit_network):
 		_ensure_custom_line_runtime(line_id)
 	route_editor = _empty_route_editor()
