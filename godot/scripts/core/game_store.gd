@@ -951,9 +951,37 @@ func _ensure_custom_line_runtime(line_id: String) -> void:
 		line["queue_passengers"] = 0.0
 
 	var vehicles: Array = line["vehicles"]
+	for vehicle_index in range(vehicles.size()):
+		var vehicle: Dictionary = vehicles[vehicle_index]
+		var old_onboard: Array = vehicle.get("onboard_by_destination", [])
+		var next_onboard: Array = []
+		next_onboard.resize(stop_count)
+		next_onboard.fill(0.0)
+		for destination in range(mini(stop_count, old_onboard.size())):
+			next_onboard[destination] = maxf(0.0, float(old_onboard[destination]))
+		vehicle["onboard_by_destination"] = next_onboard
+		var current := clampi(
+			int(vehicle.get("current_stop_index", 0)),
+			0,
+			maxi(0, stop_count - 1)
+		)
+		var next := clampi(
+			int(vehicle.get("next_stop_index", mini(1, stop_count - 1))),
+			0,
+			maxi(0, stop_count - 1)
+		)
+		vehicle["current_stop_index"] = current
+		vehicle["next_stop_index"] = next
+		var onboard_total := 0.0
+		for value in next_onboard:
+			onboard_total += maxf(0.0, float(value))
+		vehicle["onboard_passengers"] = onboard_total
+		vehicles[vehicle_index] = vehicle
+
 	var target_fleet := maxi(0, int(line.get("fleet_count", 0)))
 	if stop_count >= 2 and target_fleet <= 0:
 		target_fleet = 1
+	line["vehicles"] = vehicles
 	line["fleet_count"] = vehicles.size()
 	network_lines[line_id] = line
 	transit_network["lines"] = network_lines
