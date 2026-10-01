@@ -132,6 +132,13 @@ static func route_between_snaps(
 		)
 		edge_lookup[edge_id] = edge
 
+	var start_edge_id := str(start_snap.get("edge_id", ""))
+	var end_edge_id := str(end_snap.get("edge_id", ""))
+	if not edge_lookup.has(start_edge_id):
+		return _failed_route("start_edge_unavailable")
+	if not edge_lookup.has(end_edge_id):
+		return _failed_route("end_edge_unavailable")
+
 	var start_id := "__route_start"
 	var end_id := "__route_end"
 	adjacency[start_id] = []
