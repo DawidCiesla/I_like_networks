@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/terrain_renderer.gd" id="2_terrain"]
@@ -11,6 +11,7 @@
 [ext_resource type="Script" path="res://scripts/render/traffic_renderer.gd" id="9_traffic"]
 [ext_resource type="Script" path="res://scripts/render/roadside_lighting_renderer.gd" id="10_road_lights"]
 [ext_resource type="Theme" path="res://themes/game_ui_theme.tres" id="11_ui_theme"]
+[ext_resource type="Script" path="res://scripts/transport/route_builder.gd" id="12_route_builder"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
@@ -36,6 +37,9 @@ script = ExtResource("8_passengers")
 
 [node name="Traffic" type="Node3D" parent="."]
 script = ExtResource("9_traffic")
+
+[node name="RouteBuilder" type="Node3D" parent="."]
+script = ExtResource("12_route_builder")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-58, -35, 0)

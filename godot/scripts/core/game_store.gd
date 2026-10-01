@@ -4,10 +4,14 @@ signal state_changed
 signal city_changed
 signal selection_changed(selection: String)
 signal toast_requested(message: String)
+signal route_editor_changed
 
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
+const TransitPlanner = preload("res://scripts/transport/transit_planner.gd")
+const RoadRouter = preload("res://scripts/transport/road_router.gd")
 const BrowserSaveImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 
 const SAVE_PATH := "user://save_godot_v2.json"
@@ -23,9 +27,12 @@ var stations: Dictionary = {}
 var depot: Dictionary = {}
 var stats: Dictionary = {}
 var city: Dictionary = {}
+var transit_network: Dictionary = {}
+var route_editor: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
+var _custom_catchment_cache: Dictionary = {}
 var suppress_persistence := false
 
 func _ready() -> void:
@@ -81,6 +88,8 @@ func reset_state(emit_signal: bool = true) -> void:
 	simulation_speed = 1
 	city_seed = Data.DEFAULT_CITY_SEED
 	selected = ""
+	route_editor = _empty_route_editor()
+	_custom_catchment_cache.clear()
 
 	lines = {}
 	for line_key in Data.LINE_KEYS:
@@ -97,6 +106,13 @@ func reset_state(emit_signal: bool = true) -> void:
 	}
 
 	city = CityRuntime.create_initial_city(city_seed)
+	transit_network = {}
+	CityRuntime.sync_with_transport(self)
+	transit_network = TransitNetwork.create_legacy_bridge(
+		city,
+		lines,
+		stations
+	)
 
 	stats = {
 		"lifetime_revenue": 0.0,
@@ -120,6 +136,621 @@ func set_speed(speed: int) -> void:
 func set_selection(value: String) -> void:
 	selected = value
 	selection_changed.emit(selected)
+
+func transit_stop(stop_id: String) -> Dictionary:
+	var stops: Dictionary = transit_network.get("stops", {})
+	return stops.get(stop_id, {}).duplicate(true)
+
+func transit_line(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	return network_lines.get(line_id, {}).duplicate(true)
+
+func snap_transit_point(
+	point: Vector2,
+	built_only: bool = true,
+	max_distance: float = 90.0
+) -> Dictionary:
+	return RoadRouter.snap_to_road(city, point, built_only, max_distance)
+
+func preview_transit_route(
+	start_point: Vector2,
+	end_point: Vector2,
+	built_only: bool = true,
+	prefer_major_roads: bool = true,
+	max_snap_distance: float = 90.0
+) -> Dictionary:
+	return RoadRouter.route_between_points(
+		city,
+		start_point,
+		end_point,
+		built_only,
+		prefer_major_roads,
+		max_snap_distance
+	)
+
+func _empty_route_editor() -> Dictionary:
+	return {
+		"active": false,
+		"mode": "",
+		"line_id": "",
+		"draft_points": [],
+		"draft_stop_ids": [],
+		"draft_waypoints": [],
+		"selected_index": -1,
+		"hover_point": null,
+		"hover_valid": false,
+		"preview_route": {},
+		"estimated_cost": 0,
+	}
+
+func route_editor_active() -> bool:
+	return bool(route_editor.get("active", false))
+
+func route_editor_points() -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	for raw_value in route_editor.get("draft_points", []):
+		if raw_value is Vector2:
+			result.append(raw_value)
+		elif typeof(raw_value) == TYPE_DICTIONARY:
+			var raw: Dictionary = raw_value
+			result.append(Vector2(
+				float(raw.get("x", 0.0)),
+				float(raw.get("y", 0.0))
+			))
+	return result
+
+func route_editor_stop_ids() -> Array[String]:
+	var result: Array[String] = []
+	for value in route_editor.get("draft_stop_ids", []):
+		result.append(str(value))
+	var point_count := route_editor_points().size()
+	while result.size() < point_count:
+		result.append("")
+	if result.size() > point_count:
+		result.resize(point_count)
+	return result
+
+func route_editor_waypoints() -> Array:
+	var stop_count := route_editor_points().size()
+	var segment_count := maxi(0, stop_count - 1)
+	var raw_waypoints = route_editor.get("draft_waypoints", [])
+	var result: Array = []
+	for segment_index in range(segment_count):
+		var segment_points: Array[Vector2] = []
+		if (
+			typeof(raw_waypoints) == TYPE_ARRAY
+			and segment_index < raw_waypoints.size()
+			and typeof(raw_waypoints[segment_index]) == TYPE_ARRAY
+		):
+			for raw_value in raw_waypoints[segment_index]:
+				if raw_value is Vector2:
+					segment_points.append(raw_value)
+				elif typeof(raw_value) == TYPE_DICTIONARY:
+					var raw: Dictionary = raw_value
+					segment_points.append(Vector2(
+						float(raw.get("x", 0.0)),
+						float(raw.get("y", 0.0))
+					))
+		result.append(segment_points)
+	return result
+
+func _set_route_editor_waypoints(waypoints: Array) -> void:
+	var points := route_editor_points()
+	var segment_count := maxi(0, points.size() - 1)
+	var normalized: Array = []
+	for segment_index in range(segment_count):
+		var segment_points: Array[Vector2] = []
+		if segment_index < waypoints.size():
+			for point_value in waypoints[segment_index]:
+				if point_value is Vector2:
+					segment_points.append(point_value)
+				elif typeof(point_value) == TYPE_DICTIONARY:
+					var raw: Dictionary = point_value
+					segment_points.append(Vector2(
+						float(raw.get("x", 0.0)),
+						float(raw.get("y", 0.0))
+					))
+		normalized.append(segment_points)
+	route_editor["draft_waypoints"] = normalized
+
+func _clear_route_editor_waypoints_if_needed() -> void:
+	var waypoints := route_editor_waypoints()
+	var had_waypoints := false
+	for segment_value in waypoints:
+		var segment: Array = segment_value
+		if not segment.is_empty():
+			had_waypoints = true
+			break
+	_set_route_editor_waypoints([])
+	if had_waypoints:
+		_request_toast("Routing waypoints reset after changing stop order.")
+
+func can_begin_free_line() -> bool:
+	return bool(depot.get("built", false)) and _has_free_garage_slot()
+
+func begin_free_line_editor() -> bool:
+	if not can_begin_free_line():
+		_request_toast("Build the depot and keep one garage slot free.")
+		return false
+	route_editor = _empty_route_editor()
+	route_editor["active"] = true
+	route_editor["mode"] = "new"
+	route_editor["estimated_cost"] = free_line_build_cost([])
+	set_selection("route_editor")
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func begin_edit_line_editor(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	route_editor = _empty_route_editor()
+	route_editor["active"] = true
+	route_editor["mode"] = "edit"
+	route_editor["line_id"] = line_id
+	var points: Array[Vector2] = []
+	for stop_id in TransitNetwork.line_stop_ids(transit_network, line_id):
+		points.append(TransitNetwork.stop_position(transit_network, stop_id))
+	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = TransitNetwork.line_stop_ids(
+		transit_network,
+		line_id
+	)
+	var stored_waypoints := TransitNetwork.segment_waypoints(
+		transit_network,
+		line_id
+	)
+	var editor_waypoints: Array = []
+	for segment_value in stored_waypoints:
+		var segment: Array[Vector2] = []
+		for waypoint_value in segment_value:
+			if typeof(waypoint_value) == TYPE_DICTIONARY:
+				var raw: Dictionary = waypoint_value
+				segment.append(Vector2(
+					float(raw.get("x", 0.0)),
+					float(raw.get("y", 0.0))
+				))
+		editor_waypoints.append(segment)
+	route_editor["draft_waypoints"] = editor_waypoints
+	route_editor["estimated_cost"] = free_line_edit_cost(points, editor_waypoints)
+	set_selection("route_editor")
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func cancel_route_editor() -> void:
+	if not route_editor_active():
+		return
+	route_editor = _empty_route_editor()
+	set_selection("")
+	route_editor_changed.emit()
+	state_changed.emit()
+
+func set_route_editor_hover(
+	point: Vector2,
+	valid: bool,
+	preview_route: Dictionary = {}
+) -> void:
+	if not route_editor_active():
+		return
+	route_editor["hover_point"] = point
+	route_editor["hover_valid"] = valid
+	route_editor["preview_route"] = preview_route
+	route_editor_changed.emit()
+
+func clear_route_editor_hover() -> void:
+	if not route_editor_active():
+		return
+	route_editor["hover_point"] = null
+	route_editor["hover_valid"] = false
+	route_editor["preview_route"] = {}
+	route_editor_changed.emit()
+
+func show_route_editor_message(message: String) -> void:
+	_request_toast(message)
+
+func route_editor_select_stop(index: int) -> void:
+	if not route_editor_active():
+		return
+	var points := route_editor_points()
+	route_editor["selected_index"] = index if index >= 0 and index < points.size() else -1
+	route_editor_changed.emit()
+	state_changed.emit()
+
+func route_editor_reorder_selected(delta: int) -> bool:
+	if not route_editor_active() or delta == 0:
+		return false
+	var points := route_editor_points()
+	var selected_index := int(route_editor.get("selected_index", -1))
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	var target_index := selected_index + delta
+	if target_index < 0 or target_index >= points.size():
+		return false
+	var temporary := points[selected_index]
+	points[selected_index] = points[target_index]
+	points[target_index] = temporary
+	var stop_ids := route_editor_stop_ids()
+	var temporary_id := stop_ids[selected_index]
+	stop_ids[selected_index] = stop_ids[target_index]
+	stop_ids[target_index] = temporary_id
+	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
+	route_editor["selected_index"] = target_index
+	_clear_route_editor_waypoints_if_needed()
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_add_waypoint(point: Vector2, segment_index: int) -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if segment_index < 0 or segment_index >= points.size() - 1:
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Waypoints must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	var waypoints := route_editor_waypoints()
+	var segment: Array[Vector2] = waypoints[segment_index]
+	for existing in segment:
+		if existing.distance_to(snapped) < 24.0:
+			_request_toast("A routing waypoint is already nearby.")
+			return false
+	segment.append(snapped)
+	waypoints[segment_index] = segment
+	_set_route_editor_waypoints(waypoints)
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_remove_nearest_waypoint(
+	point: Vector2,
+	radius: float = 32.0
+) -> bool:
+	if not route_editor_active():
+		return false
+	var waypoints := route_editor_waypoints()
+	var best_segment := -1
+	var best_index := -1
+	var best_distance := radius
+	for segment_index in range(waypoints.size()):
+		var segment: Array = waypoints[segment_index]
+		for waypoint_index in range(segment.size()):
+			var waypoint: Vector2 = segment[waypoint_index]
+			var distance := waypoint.distance_to(point)
+			if distance < best_distance:
+				best_distance = distance
+				best_segment = segment_index
+				best_index = waypoint_index
+	if best_segment < 0:
+		return false
+	var segment: Array = waypoints[best_segment]
+	segment.remove_at(best_index)
+	waypoints[best_segment] = segment
+	_set_route_editor_waypoints(waypoints)
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func preview_transit_route_via(
+	start_point: Vector2,
+	end_point: Vector2,
+	waypoints: Array
+) -> Dictionary:
+	var controls: Array[Vector2] = [start_point]
+	for waypoint_value in waypoints:
+		if waypoint_value is Vector2:
+			controls.append(waypoint_value)
+		elif typeof(waypoint_value) == TYPE_DICTIONARY:
+			var raw: Dictionary = waypoint_value
+			controls.append(Vector2(
+				float(raw.get("x", 0.0)),
+				float(raw.get("y", 0.0))
+			))
+	controls.append(end_point)
+
+	var combined: Array[Vector2] = []
+	var total := 0.0
+	var road_ids: Array[String] = []
+	for index in range(controls.size() - 1):
+		var route := preview_transit_route(
+			controls[index],
+			controls[index + 1],
+			true,
+			true,
+			115.0
+		)
+		if not bool(route.get("success", false)):
+			return {
+				"success": false,
+				"reason": route.get("reason", "no_path"),
+				"points": [],
+				"length": 0.0,
+				"road_ids": [],
+			}
+		total += float(route.get("length", 0.0))
+		for road_id_value in route.get("road_ids", []):
+			var road_id := str(road_id_value)
+			if not road_ids.has(road_id):
+				road_ids.append(road_id)
+		for point_value in route.get("points", []):
+			if not (point_value is Vector2):
+				continue
+			var route_point: Vector2 = point_value
+			if (
+				not combined.is_empty()
+				and combined.back().distance_to(route_point) <= 0.001
+			):
+				continue
+			combined.append(route_point)
+	return {
+		"success": true,
+		"reason": "",
+		"points": combined,
+		"length": total,
+		"road_ids": road_ids,
+	}
+
+func route_editor_segment_preview(segment_index: int) -> Dictionary:
+	var points := route_editor_points()
+	var waypoints := route_editor_waypoints()
+	if segment_index < 0 or segment_index >= points.size() - 1:
+		return {"success": false, "points": [], "length": 0.0}
+	var segment_waypoints: Array = (
+		waypoints[segment_index]
+		if segment_index < waypoints.size()
+		else []
+	)
+	return preview_transit_route_via(
+		points[segment_index],
+		points[segment_index + 1],
+		segment_waypoints
+	)
+
+func route_editor_add_point(point: Vector2, insert_after: int = -1) -> bool:
+	if not route_editor_active():
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Stops must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	var points := route_editor_points()
+	if points.size() >= TransitNetwork.MAX_CUSTOM_STOPS:
+		_request_toast("This line already has the maximum number of stops.")
+		return false
+	for existing in points:
+		if existing.distance_to(snapped) < TransitNetwork.MIN_STOP_SPACING:
+			_request_toast("Stops are too close together.")
+			return false
+	var stop_ids := route_editor_stop_ids()
+	if insert_after >= 0 and insert_after < points.size() - 1:
+		points.insert(insert_after + 1, snapped)
+		stop_ids.insert(insert_after + 1, "")
+	else:
+		points.append(snapped)
+		stop_ids.append("")
+	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
+	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_move_selected(point: Vector2) -> bool:
+	if not route_editor_active():
+		return false
+	var selected_index := int(route_editor.get("selected_index", -1))
+	var points := route_editor_points()
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Stops must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	for index in range(points.size()):
+		if index == selected_index:
+			continue
+		if points[index].distance_to(snapped) < TransitNetwork.MIN_STOP_SPACING:
+			_request_toast("Stops are too close together.")
+			return false
+	points[selected_index] = snapped
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = -1
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_remove_selected() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	var selected_index := int(route_editor.get("selected_index", -1))
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	points.remove_at(selected_index)
+	var stop_ids := route_editor_stop_ids()
+	if selected_index < stop_ids.size():
+		stop_ids.remove_at(selected_index)
+	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
+	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_undo_last() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if points.is_empty():
+		return false
+	points.pop_back()
+	var stop_ids := route_editor_stop_ids()
+	if not stop_ids.is_empty():
+		stop_ids.pop_back()
+	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
+	route_editor["selected_index"] = -1
+	_clear_route_editor_waypoints_if_needed()
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func free_line_build_cost(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> int:
+	var route_length := _draft_route_length(points, waypoints)
+	return roundi(
+		float(Data.ECONOMY["free_line_base_cost"])
+		+ float(points.size()) * float(Data.ECONOMY["free_stop_cost"])
+		+ route_length * float(Data.ECONOMY["free_route_cost_per_world_unit"])
+	)
+
+func free_line_edit_cost(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> int:
+	return roundi(
+		float(Data.ECONOMY["free_line_edit_base_cost"])
+		+ _draft_route_length(points, waypoints)
+		* float(Data.ECONOMY["free_route_cost_per_world_unit"])
+		* 0.12
+	)
+
+func _draft_route_length(
+	points: Array[Vector2],
+	waypoints: Array = []
+) -> float:
+	var total := 0.0
+	for index in range(points.size() - 1):
+		var segment_waypoints: Array = (
+			waypoints[index]
+			if index < waypoints.size()
+			else []
+		)
+		var route := preview_transit_route_via(
+			points[index],
+			points[index + 1],
+			segment_waypoints
+		)
+		if not bool(route.get("success", false)):
+			return 0.0
+		total += float(route.get("length", 0.0))
+	return total
+
+func _update_route_editor_cost() -> void:
+	var points := route_editor_points()
+	var waypoints := route_editor_waypoints()
+	route_editor["estimated_cost"] = (
+		free_line_build_cost(points, waypoints)
+		if str(route_editor.get("mode", "")) == "new"
+		else free_line_edit_cost(points, waypoints)
+	)
+
+func commit_route_editor() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if points.size() < 2:
+		_request_toast("A line needs at least two stops.")
+		return false
+
+	var mode := str(route_editor.get("mode", ""))
+	var waypoints := route_editor_waypoints()
+	var cost := (
+		free_line_build_cost(points, waypoints)
+		if mode == "new"
+		else free_line_edit_cost(points, waypoints)
+	)
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+
+	if mode == "new":
+		if not can_begin_free_line():
+			_request_toast("No free garage slot for the starter bus.")
+			return false
+		var serial := int(transit_network.get("next_line_serial", 1))
+		var palette_index := (serial - 1) % Data.FREE_LINE_COLORS.size()
+		var color: Color = Data.FREE_LINE_COLORS[palette_index]
+		var created := TransitNetwork.create_custom_line(
+			transit_network,
+			city,
+			points,
+			color,
+			"",
+			waypoints
+		)
+		if not bool(created.get("success", false)):
+			_request_toast(_route_editor_failure_message(str(created.get("reason", ""))))
+			return false
+		var line_id := str(created.get("line_id", ""))
+		_ensure_custom_line_runtime(line_id)
+		money -= float(cost)
+		_request_toast("New bus line opened.")
+		route_editor = _empty_route_editor()
+		_commit_change()
+		set_selection("free_line:%s" % line_id)
+		route_editor_changed.emit()
+		return true
+
+	var line_id := str(route_editor.get("line_id", ""))
+	var updated := TransitNetwork.update_custom_line_points(
+		transit_network,
+		city,
+		line_id,
+		points,
+		waypoints,
+		route_editor_stop_ids()
+	)
+	if not bool(updated.get("success", false)):
+		_request_toast(_route_editor_failure_message(str(updated.get("reason", ""))))
+		return false
+	_ensure_custom_line_runtime(line_id)
+	money -= float(cost)
+	_request_toast("Line updated.")
+	route_editor = _empty_route_editor()
+	_commit_change()
+	set_selection("free_line:%s" % line_id)
+	route_editor_changed.emit()
+	return true
+
+func _route_editor_failure_message(reason: String) -> String:
+	match reason:
+		"stops_too_close":
+			return "Stops are too close together."
+		"segment_unroutable":
+			return "The road network cannot connect those stops."
+		"stop_not_on_built_road":
+			return "A stop is not on a built road."
+		"too_many_stops":
+			return "Too many stops on one line."
+		_:
+			return "This line cannot be built here."
+
+func _sync_transit_network_bridge() -> void:
+	transit_network = TransitNetwork.ensure_legacy_bridge(
+		transit_network,
+		city,
+		lines,
+		stations
+	)
 
 func station_level(station_id: String) -> int:
 	var station: Dictionary = stations.get(station_id, {"level": 0})
@@ -286,6 +917,9 @@ func garage_used() -> int:
 	var total := 0
 	for line_key in Data.LINE_KEYS:
 		total += int(lines[line_key]["fleet_count"])
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var line := transit_line(line_id)
+		total += int(line.get("fleet_count", 0))
 	return total
 
 func vehicle_purchase_cost() -> int:
@@ -293,11 +927,138 @@ func vehicle_purchase_cost() -> int:
 	for line_key in Data.LINE_KEYS:
 		if bool(lines[line_key]["built"]):
 			built_lines += 1
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var custom_line := transit_line(line_id)
+		if str(custom_line.get("status", "")) == "active":
+			built_lines += 1
 	var purchased: int = maxi(0, garage_used() - built_lines)
 	return roundi(
 		float(Data.ECONOMY["bus_base_cost"])
 		* pow(float(Data.ECONOMY["bus_cost_growth"]), purchased)
 	)
+
+func custom_line_stop_count(line_id: String) -> int:
+	return TransitNetwork.line_stop_ids(transit_network, line_id).size()
+
+func custom_line_route_length_km(line_id: String) -> float:
+	var line := transit_line(line_id)
+	return float(line.get("route_length_world", 0.0)) / float(Data.WORLD_UNITS_PER_KM)
+
+func custom_line_demand(line_id: String) -> float:
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_ids.size() < 2:
+		return 0.0
+	var total := 0.0
+	for stop_id in stop_ids:
+		var stats := _cached_custom_stop_catchment(stop_id)
+		total += float(stats.get("demand_ppm", 0.0))
+	return total
+
+func custom_line_cycle_minutes(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_ids.size() < 2:
+		return 0.0
+	var driving := custom_line_route_length_km(line_id) / float(Data.BUS["speed_kph"]) * 60.0 * 2.0
+	var dwell := 0.0
+	for stop_index in range(stop_ids.size()):
+		var visits := 1 if stop_index == 0 or stop_index == stop_ids.size() - 1 else 2
+		dwell += _custom_stop_dwell_minutes(line_id, stop_index, false) * float(visits)
+	return driving + dwell + float(Data.BUS["turnaround_minutes"])
+
+func custom_line_headway_minutes(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var fleet := int(line.get("fleet_count", 0))
+	if fleet <= 0:
+		return INF
+	return custom_line_cycle_minutes(line_id) / float(fleet)
+
+func custom_line_waiting_passengers(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var total := 0.0
+	for origin in range(mini(matrix.size(), stop_count)):
+		var row: Array = matrix[origin]
+		for destination in range(mini(row.size(), stop_count)):
+			total += maxf(0.0, float(row[destination]))
+	return total
+
+func custom_stop_waiting_passengers(stop_id: String) -> float:
+	var total := 0.0
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+		var index := stop_ids.find(stop_id)
+		if index < 0:
+			continue
+		var line := transit_line(line_id)
+		var matrix: Array = line.get("waiting_by_stop", [])
+		if index >= matrix.size():
+			continue
+		var row: Array = matrix[index]
+		for value in row:
+			total += maxf(0.0, float(value))
+	return total
+
+func transit_journey(from_stop_id: String, to_stop_id: String) -> Dictionary:
+	return TransitPlanner.find_journey(transit_network, from_stop_id, to_stop_id)
+
+func custom_stop_catchment(stop_id: String) -> Dictionary:
+	return _cached_custom_stop_catchment(stop_id).duplicate(true)
+
+func _cached_custom_stop_catchment(stop_id: String) -> Dictionary:
+	var now := float(city.get("time_seconds", 0.0))
+	var cached: Dictionary = _custom_catchment_cache.get(stop_id, {})
+	if (
+		not cached.is_empty()
+		and now - float(cached.get("time_seconds", -INF)) <= 2.0
+	):
+		return cached.get("stats", {})
+
+	var stats := TransitNetwork.catchment_stats(
+		transit_network,
+		city,
+		stop_id
+	)
+	_custom_catchment_cache[stop_id] = {
+		"time_seconds": now,
+		"stats": stats,
+	}
+	return stats
+
+func _invalidate_custom_catchment_cache() -> void:
+	_custom_catchment_cache.clear()
+
+func custom_stop_upgrade_cost(stop_id: String) -> int:
+	var stop := transit_stop(stop_id)
+	var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+	return roundi(
+		float(Data.STATION_UPGRADE["base_cost"])
+		* pow(float(Data.STATION_UPGRADE["cost_growth"]), level)
+	)
+
+func upgrade_custom_stop(stop_id: String) -> bool:
+	var stops: Dictionary = transit_network.get("stops", {})
+	if not stops.has(stop_id):
+		return false
+	var stop: Dictionary = stops[stop_id]
+	if str(stop.get("source", "")) != "custom":
+		return false
+	var level := int(stop.get("level", 0))
+	if level >= int(Data.STATION_UPGRADE["max_level"]):
+		_request_toast("This stop is already a Hub.")
+		return false
+	var cost := custom_stop_upgrade_cost(stop_id)
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+	money -= float(cost)
+	stop["level"] = level + 1
+	stops[stop_id] = stop
+	transit_network["stops"] = stops
+	_request_toast("%s upgraded." % str(stop.get("name", "Stop")))
+	_commit_change()
+	return true
 
 func next_stop_cost(line_key: String) -> int:
 	var line: Dictionary = lines[line_key]
@@ -332,7 +1093,11 @@ func next_stop_cost(line_key: String) -> int:
 	return roundi(base_cost * pow(growth, purchased))
 
 func can_build_depot() -> bool:
-	return not bool(depot["built"]) and int(lines["line1"]["stop_count"]) >= 3
+	return (
+		not bool(depot["built"])
+		and bool(lines["line1"].get("built", false))
+		and int(lines["line1"]["stop_count"]) >= 2
+	)
 
 func _has_free_garage_slot() -> bool:
 	return garage_used() < int(depot["garage_slots"])
@@ -462,6 +1227,567 @@ func _ensure_line_runtime(line_key: String) -> void:
 
 	lines[line_key] = line
 	line["queue_passengers"] = line_waiting_passengers(line_key)
+
+func _ensure_custom_line_runtime(line_id: String) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	if str(line.get("source", "")) != "custom":
+		return
+
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var old_matrix: Array = line.get("waiting_by_stop", [])
+	var matrix := _create_waiting_matrix(stop_count)
+	for row_index in range(mini(stop_count, old_matrix.size())):
+		var source_row: Array = old_matrix[row_index]
+		var target_row: Array = matrix[row_index]
+		for column in range(mini(stop_count, source_row.size())):
+			target_row[column] = maxf(0.0, float(source_row[column]))
+		matrix[row_index] = target_row
+	line["waiting_by_stop"] = matrix
+
+	if not line.has("vehicles"):
+		line["vehicles"] = []
+	if not line.has("next_vehicle_id"):
+		line["next_vehicle_id"] = 1
+	if not line.has("event_serial"):
+		line["event_serial"] = 0
+	if not line.has("passenger_events"):
+		line["passenger_events"] = []
+	if not line.has("last_passenger_event"):
+		line["last_passenger_event"] = null
+	if not line.has("current_abandonment_ppm"):
+		line["current_abandonment_ppm"] = 0.0
+	if not line.has("total_abandoned_passengers"):
+		line["total_abandoned_passengers"] = 0.0
+	if not line.has("last_delivered_ppm"):
+		line["last_delivered_ppm"] = 0.0
+	if not line.has("queue_passengers"):
+		line["queue_passengers"] = 0.0
+
+	var vehicles: Array = line["vehicles"]
+	for vehicle_index in range(vehicles.size()):
+		var vehicle: Dictionary = vehicles[vehicle_index]
+		var old_onboard: Array = vehicle.get("onboard_by_destination", [])
+		var next_onboard: Array = []
+		next_onboard.resize(stop_count)
+		next_onboard.fill(0.0)
+		for destination in range(mini(stop_count, old_onboard.size())):
+			next_onboard[destination] = maxf(0.0, float(old_onboard[destination]))
+		vehicle["onboard_by_destination"] = next_onboard
+		var current := clampi(
+			int(vehicle.get("current_stop_index", 0)),
+			0,
+			maxi(0, stop_count - 1)
+		)
+		var next := clampi(
+			int(vehicle.get("next_stop_index", mini(1, stop_count - 1))),
+			0,
+			maxi(0, stop_count - 1)
+		)
+		vehicle["current_stop_index"] = current
+		vehicle["next_stop_index"] = next
+		var onboard_total := 0.0
+		for value in next_onboard:
+			onboard_total += maxf(0.0, float(value))
+		vehicle["onboard_passengers"] = onboard_total
+		vehicles[vehicle_index] = vehicle
+
+	var target_fleet := maxi(0, int(line.get("fleet_count", 0)))
+	if stop_count >= 2 and target_fleet <= 0:
+		target_fleet = 1
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+	while vehicles.size() < target_fleet:
+		_add_custom_vehicle_to_line(line_id)
+		network_lines = transit_network.get("lines", {})
+		line = network_lines[line_id]
+		vehicles = line.get("vehicles", [])
+	while vehicles.size() > target_fleet and not vehicles.is_empty():
+		vehicles.pop_back()
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _create_custom_vehicle(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var vehicle_id := int(line.get("next_vehicle_id", 1))
+	line["next_vehicle_id"] = vehicle_id + 1
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+	var onboard: Array = []
+	onboard.resize(stop_count)
+	onboard.fill(0.0)
+	var dwell := _custom_stop_dwell_minutes(line_id, 0, true)
+	return {
+		"id": vehicle_id,
+		"current_stop_index": 0,
+		"next_stop_index": mini(1, stop_count - 1),
+		"direction": 1,
+		"phase": "dwell",
+		"phase_minutes_remaining": dwell,
+		"phase_duration_minutes": dwell,
+		"onboard_by_destination": onboard,
+		"onboard_passengers": 0.0,
+	}
+
+func _add_custom_vehicle_to_line(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return {}
+	var line: Dictionary = network_lines[line_id]
+	var vehicle := _create_custom_vehicle(line_id)
+	network_lines = transit_network.get("lines", {})
+	line = network_lines[line_id]
+	var vehicles: Array = line.get("vehicles", [])
+	vehicles.append(vehicle)
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	return vehicle
+
+func add_bus_to_transit_line(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	if not bool(depot.get("built", false)):
+		return false
+	if garage_used() >= int(depot.get("garage_slots", 0)):
+		_request_toast("Garage is full.")
+		return false
+	if int(line.get("fleet_count", 0)) >= int(Data.ECONOMY["max_vehicles_per_line"]):
+		return false
+	var cost := vehicle_purchase_cost()
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+
+	money -= float(cost)
+	_add_custom_vehicle_to_line(line_id)
+	_request_toast("Bus added to %s." % str(line.get("name", "line")))
+	_commit_change()
+	return true
+
+func delete_custom_line(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	if not TransitNetwork.remove_custom_line(transit_network, line_id):
+		return false
+	_request_toast("Line removed.")
+	_commit_change()
+	set_selection("")
+	return true
+
+func _custom_stop_dwell_minutes(
+	line_id: String,
+	stop_index: int,
+	include_turnaround: bool
+) -> float:
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_index < 0 or stop_index >= stop_ids.size():
+		return float(Data.BUS["dwell_minutes"])
+	var stop := transit_stop(stop_ids[stop_index])
+	var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+	var reduction := float(Data.STATION_UPGRADE["dwell_reduction"][level])
+	var result := maxf(0.12, float(Data.BUS["dwell_minutes"]) - reduction)
+	if include_turnaround and (stop_index == 0 or stop_index == stop_ids.size() - 1):
+		result += float(Data.BUS["turnaround_minutes"]) / 2.0
+	return result
+
+func _custom_segment_travel_minutes(
+	line_id: String,
+	from_stop: int,
+	to_stop: int
+) -> float:
+	var line := transit_line(line_id)
+	var segments: Array = line.get("route_segments", [])
+	var segment_index := mini(from_stop, to_stop)
+	if segment_index < 0 or segment_index >= segments.size():
+		return 0.1
+	var segment: Dictionary = segments[segment_index]
+	var length_km := float(segment.get("length_world", 0.0)) / float(Data.WORLD_UNITS_PER_KM)
+	return maxf(0.05, length_km / float(Data.BUS["speed_kph"]) * 60.0)
+
+func _custom_generate_passengers(line_id: String, delta_minutes: float) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines.get(line_id, {})
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	var stop_count := stop_ids.size()
+	if stop_count < 2:
+		return
+
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var abandoned := 0.0
+	for origin in range(stop_count):
+		var stats := _cached_custom_stop_catchment(stop_ids[origin])
+		var stop := transit_stop(stop_ids[origin])
+		var interchange_bonus := 1.0 + maxf(
+			0.0,
+			float(stop.get("served_line_ids", []).size() - 1) * 0.10
+		)
+		var demand := float(stats.get("demand_ppm", 0.0)) * interchange_bonus
+		var per_destination := demand / float(maxi(1, stop_count - 1))
+		var row: Array = matrix[origin]
+		for destination in range(stop_count):
+			if destination == origin:
+				continue
+			row[destination] = float(row[destination]) + per_destination * delta_minutes
+
+		var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+		var capacity := float(Data.STATION_UPGRADE["waiting_capacity"][level])
+		var waiting := 0.0
+		for value in row:
+			waiting += maxf(0.0, float(value))
+		if waiting > capacity:
+			var keep_ratio := capacity / waiting
+			abandoned += waiting - capacity
+			for destination in range(row.size()):
+				row[destination] = float(row[destination]) * keep_ratio
+		matrix[origin] = row
+
+	line["waiting_by_stop"] = matrix
+	line["current_abandonment_ppm"] = (
+		abandoned / delta_minutes if delta_minutes > 0.0 else 0.0
+	)
+	line["total_abandoned_passengers"] = float(
+		line.get("total_abandoned_passengers", 0.0)
+	) + abandoned
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _custom_emit_passenger_event(
+	line_id: String,
+	event_type: String,
+	stop_index: int,
+	vehicle_id: int,
+	count: float,
+	fare: float = 0.0
+) -> void:
+	if count <= 0.0:
+		return
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	line["event_serial"] = int(line.get("event_serial", 0)) + 1
+	var event := {
+		"serial": int(line["event_serial"]),
+		"type": event_type,
+		"stop_index": stop_index,
+		"vehicle_id": vehicle_id,
+		"count": count,
+		"fare": fare,
+	}
+	line["last_passenger_event"] = event
+	var events: Array = line.get("passenger_events", [])
+	events.append(event)
+	while events.size() > 24:
+		events.pop_front()
+	line["passenger_events"] = events
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+func _custom_unload_at_stop(
+	line_id: String,
+	vehicle: Dictionary,
+	stop_index: int
+) -> float:
+	var onboard: Array = vehicle.get("onboard_by_destination", [])
+	if stop_index < 0 or stop_index >= onboard.size():
+		return 0.0
+	var alighting := float(onboard[stop_index])
+	if alighting <= 0.0:
+		return 0.0
+	onboard[stop_index] = 0.0
+	vehicle["onboard_by_destination"] = onboard
+	vehicle["onboard_passengers"] = maxf(
+		0.0,
+		float(vehicle.get("onboard_passengers", 0.0)) - alighting
+	)
+
+	var fare := alighting * float(Data.ECONOMY["fare_per_passenger"])
+	money += fare
+	stats["lifetime_revenue"] = float(stats["lifetime_revenue"]) + fare
+	stats["lifetime_passengers"] = float(stats["lifetime_passengers"]) + alighting
+	stats["last_fare_event_value"] = fare
+	stats["last_fare_event_serial"] = int(stats["last_fare_event_serial"]) + 1
+	stats["last_fare_line"] = line_id
+	stats["last_fare_stop_index"] = stop_index
+
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	line["last_delivered_ppm"] = float(line.get("last_delivered_ppm", 0.0)) + (
+		alighting / float(Data.DELIVERY_RATE_WINDOW_MINUTES)
+	)
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_custom_emit_passenger_event(
+		line_id,
+		"alight",
+		stop_index,
+		int(vehicle.get("id", 0)),
+		alighting,
+		fare
+	)
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_index >= 0 and stop_index < stop_ids.size():
+		_inject_transfer_passengers(stop_ids[stop_index], line_id, alighting)
+	_fare_changed_this_frame = true
+	return alighting
+
+func _inject_transfer_passengers(
+	stop_id: String,
+	from_line_id: String,
+	alighting: float
+) -> void:
+	if alighting <= 0.0:
+		return
+
+	var origin := TransitNetwork.stop_position(transit_network, stop_id)
+	var candidates_by_line: Dictionary = {}
+	var stops: Dictionary = transit_network.get("stops", {})
+	for candidate_stop_id_value in stops.keys():
+		var candidate_stop_id := str(candidate_stop_id_value)
+		var candidate_stop: Dictionary = stops[candidate_stop_id]
+		if str(candidate_stop.get("status", "")) != "built":
+			continue
+		var distance := origin.distance_to(
+			TransitNetwork.stop_position(transit_network, candidate_stop_id)
+		)
+		if distance > TransitNetwork.TRANSFER_WALK_RADIUS:
+			continue
+		for line_id_value in candidate_stop.get("served_line_ids", []):
+			var line_id := str(line_id_value)
+			if line_id == from_line_id:
+				continue
+			if candidates_by_line.has(line_id):
+				var existing: Dictionary = candidates_by_line[line_id]
+				if distance >= float(existing.get("distance", INF)):
+					continue
+			candidates_by_line[line_id] = {
+				"line_id": line_id,
+				"stop_id": candidate_stop_id,
+				"distance": distance,
+			}
+
+	if candidates_by_line.is_empty():
+		return
+
+	var transfer_total := alighting * 0.18
+	var per_line := transfer_total / float(candidates_by_line.size())
+	for candidate_value in candidates_by_line.values():
+		var candidate: Dictionary = candidate_value
+		var target_line_id := str(candidate.get("line_id", ""))
+		var target_stop_id := str(candidate.get("stop_id", ""))
+		if target_line_id in Data.LINE_KEYS:
+			var target_line: Dictionary = lines[target_line_id]
+			if not bool(target_line.get("built", false)):
+				continue
+			var stop_index := Data.STATION_IDS[target_line_id].find(target_stop_id)
+			var stop_count := int(target_line.get("stop_count", 0))
+			if stop_index < 0 or stop_index >= stop_count or stop_count < 2:
+				continue
+			var destination := stop_count - 1 if stop_index < stop_count - 1 else 0
+			if destination == stop_index:
+				continue
+			var matrix: Array = target_line.get("waiting_by_stop", [])
+			if stop_index >= matrix.size():
+				continue
+			var row: Array = matrix[stop_index]
+			if destination >= row.size():
+				continue
+			row[destination] = float(row[destination]) + per_line
+			matrix[stop_index] = row
+			target_line["waiting_by_stop"] = matrix
+			lines[target_line_id] = target_line
+			continue
+
+		var network_lines: Dictionary = transit_network.get("lines", {})
+		if not network_lines.has(target_line_id):
+			continue
+		var target_line: Dictionary = network_lines[target_line_id]
+		if str(target_line.get("source", "")) != "custom":
+			continue
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, target_line_id)
+		var stop_index := stop_ids.find(target_stop_id)
+		if stop_index < 0 or stop_ids.size() < 2:
+			continue
+		var destination := stop_ids.size() - 1 if stop_index < stop_ids.size() - 1 else 0
+		if destination == stop_index:
+			continue
+		var matrix: Array = target_line.get("waiting_by_stop", [])
+		if stop_index >= matrix.size():
+			continue
+		var row: Array = matrix[stop_index]
+		if destination >= row.size():
+			continue
+		row[destination] = float(row[destination]) + per_line
+		matrix[stop_index] = row
+		target_line["waiting_by_stop"] = matrix
+		network_lines[target_line_id] = target_line
+		transit_network["lines"] = network_lines
+		_update_custom_queue(target_line_id)
+
+func _custom_board_at_stop(line_id: String, vehicle: Dictionary) -> float:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	var stop_count := stop_ids.size()
+	var stop_index := int(vehicle.get("current_stop_index", 0))
+	var available := float(Data.BUS["capacity"]) - float(vehicle.get("onboard_passengers", 0.0))
+	if available <= 0.0 or stop_index < 0 or stop_index >= stop_count:
+		return 0.0
+
+	var destinations: Array[int] = []
+	if int(vehicle.get("direction", 1)) > 0:
+		for destination in range(stop_index + 1, stop_count):
+			destinations.append(destination)
+	else:
+		for destination in range(stop_index - 1, -1, -1):
+			destinations.append(destination)
+
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var row: Array = matrix[stop_index]
+	var onboard: Array = vehicle.get("onboard_by_destination", [])
+	var boarded := 0.0
+	for destination in destinations:
+		if available <= 0.0:
+			break
+		var waiting := float(row[destination])
+		if waiting <= 0.0:
+			continue
+		var take := minf(waiting, available)
+		row[destination] = waiting - take
+		onboard[destination] = float(onboard[destination]) + take
+		vehicle["onboard_passengers"] = float(vehicle.get("onboard_passengers", 0.0)) + take
+		boarded += take
+		available -= take
+
+	matrix[stop_index] = row
+	line["waiting_by_stop"] = matrix
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	vehicle["onboard_by_destination"] = onboard
+	_update_custom_queue(line_id)
+	_custom_emit_passenger_event(
+		line_id,
+		"board",
+		stop_index,
+		int(vehicle.get("id", 0)),
+		boarded
+	)
+	return boarded
+
+func _custom_start_travel(line_id: String, vehicle: Dictionary) -> void:
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var current := int(vehicle.get("current_stop_index", 0))
+	var direction := int(vehicle.get("direction", 1))
+	if current == 0 and direction < 0:
+		direction = 1
+	if current == stop_count - 1 and direction > 0:
+		direction = -1
+	vehicle["direction"] = direction
+	var next_stop := current + direction
+	if next_stop < 0 or next_stop >= stop_count:
+		return
+	vehicle["next_stop_index"] = next_stop
+	vehicle["phase"] = "travel"
+	var travel := _custom_segment_travel_minutes(line_id, current, next_stop)
+	vehicle["phase_duration_minutes"] = travel
+	vehicle["phase_minutes_remaining"] = travel
+
+func _custom_arrive(line_id: String, vehicle: Dictionary) -> void:
+	vehicle["current_stop_index"] = int(vehicle.get("next_stop_index", 0))
+	var current := int(vehicle["current_stop_index"])
+	_custom_unload_at_stop(line_id, vehicle, current)
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	if current == 0:
+		vehicle["direction"] = 1
+	elif current == stop_count - 1:
+		vehicle["direction"] = -1
+	vehicle["phase"] = "dwell"
+	var dwell := _custom_stop_dwell_minutes(line_id, current, true)
+	vehicle["phase_duration_minutes"] = dwell
+	vehicle["phase_minutes_remaining"] = dwell
+
+func _custom_begin_boarding(line_id: String, vehicle: Dictionary) -> void:
+	_custom_board_at_stop(line_id, vehicle)
+	vehicle["phase"] = "boarding"
+	vehicle["phase_duration_minutes"] = float(Data.BOARDING_HOLD_MINUTES)
+	vehicle["phase_minutes_remaining"] = float(Data.BOARDING_HOLD_MINUTES)
+
+func _advance_custom_vehicle(
+	line_id: String,
+	vehicle: Dictionary,
+	delta_minutes: float
+) -> void:
+	var remaining := delta_minutes
+	var guard := 0
+	while remaining > 0.0 and guard < 8:
+		guard += 1
+		var phase_remaining := maxf(
+			0.0,
+			float(vehicle.get("phase_minutes_remaining", 0.0))
+		)
+		var step := minf(remaining, phase_remaining)
+		vehicle["phase_minutes_remaining"] = phase_remaining - step
+		remaining -= step
+		if float(vehicle["phase_minutes_remaining"]) > 0.000000001:
+			break
+		match str(vehicle.get("phase", "")):
+			"travel":
+				_custom_arrive(line_id, vehicle)
+			"dwell":
+				_custom_begin_boarding(line_id, vehicle)
+			_:
+				_custom_start_travel(line_id, vehicle)
+		if float(vehicle.get("phase_minutes_remaining", 0.0)) <= 0.0 and remaining <= 0.0:
+			break
+
+func _simulate_custom_line(line_id: String, delta_minutes: float) -> void:
+	_ensure_custom_line_runtime(line_id)
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	if str(line.get("status", "")) != "active":
+		return
+
+	var decay := exp(-delta_minutes / float(Data.DELIVERY_RATE_WINDOW_MINUTES))
+	line["last_delivered_ppm"] = float(line.get("last_delivered_ppm", 0.0)) * decay
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_custom_generate_passengers(line_id, delta_minutes)
+
+	network_lines = transit_network.get("lines", {})
+	line = network_lines[line_id]
+	var vehicles: Array = line.get("vehicles", [])
+	for vehicle in vehicles:
+		_advance_custom_vehicle(line_id, vehicle, delta_minutes)
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _update_custom_queue(line_id: String) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	line["queue_passengers"] = custom_line_waiting_passengers(line_id)
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
 
 func build_next_stop(line_key: String) -> bool:
 	if not lines.has(line_key):
@@ -675,6 +2001,8 @@ func _unload_at_stop(line_key: String, vehicle: Dictionary, stop_index: int) -> 
 	lines[line_key] = line
 
 	_emit_passenger_event(line_key, "alight", stop_index, int(vehicle["id"]), alighting, fare)
+	var transfer_stop_id: String = Data.STATION_IDS[line_key][stop_index]
+	_inject_transfer_passengers(transfer_stop_id, line_key, alighting)
 	_fare_changed_this_frame = true
 	return alighting
 
@@ -824,6 +2152,8 @@ func _advance_simulation(real_delta_seconds: float) -> bool:
 
 	for line_key in Data.LINE_KEYS:
 		_simulate_line(line_key, delta_minutes)
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_simulate_custom_line(line_id, delta_minutes)
 
 	return CityRuntime.advance(self, delta_seconds)
 
@@ -874,10 +2204,97 @@ func bus_visuals() -> Array[Dictionary]:
 				"onboard": float(vehicle["onboard_passengers"]),
 			})
 
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var custom_line := transit_line(line_id)
+		if str(custom_line.get("status", "")) != "active":
+			continue
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+		var segments: Array = custom_line.get("route_segments", [])
+		for vehicle_value in custom_line.get("vehicles", []):
+			var vehicle: Dictionary = vehicle_value
+			var current_stop := int(vehicle.get("current_stop_index", 0))
+			if current_stop < 0 or current_stop >= stop_ids.size():
+				continue
+			var point := TransitNetwork.stop_position(
+				transit_network,
+				stop_ids[current_stop]
+			)
+			var tangent := Vector2.RIGHT
+
+			if str(vehicle.get("phase", "")) == "travel":
+				var next_stop := int(vehicle.get("next_stop_index", current_stop))
+				var segment_index := mini(current_stop, next_stop)
+				if segment_index >= 0 and segment_index < segments.size():
+					var segment: Dictionary = segments[segment_index]
+					var route: Array[Vector2] = []
+					for raw_value in segment.get("points", []):
+						if typeof(raw_value) != TYPE_DICTIONARY:
+							continue
+						var raw: Dictionary = raw_value
+						route.append(Vector2(
+							float(raw.get("x", 0.0)),
+							float(raw.get("y", 0.0))
+						))
+					if current_stop > next_stop:
+						route.reverse()
+					if route.size() >= 2:
+						var duration := maxf(
+							0.000001,
+							float(vehicle.get("phase_duration_minutes", 0.0))
+						)
+						var progress := clampf(
+							1.0 - float(vehicle.get("phase_minutes_remaining", 0.0)) / duration,
+							0.0,
+							1.0
+						)
+						var route_point := Layout.point_on_route(
+							route,
+							Layout.route_length(route) * progress
+						)
+						point = route_point["position"]
+						tangent = route_point["tangent"]
+			else:
+				var candidate_next := current_stop + (
+					1 if int(vehicle.get("direction", 1)) >= 0 else -1
+				)
+				var segment_index := mini(current_stop, candidate_next)
+				if (
+					candidate_next >= 0
+					and candidate_next < stop_ids.size()
+					and segment_index >= 0
+					and segment_index < segments.size()
+				):
+					var segment: Dictionary = segments[segment_index]
+					var route: Array[Vector2] = []
+					for raw_value in segment.get("points", []):
+						if typeof(raw_value) != TYPE_DICTIONARY:
+							continue
+						var raw: Dictionary = raw_value
+						route.append(Vector2(
+							float(raw.get("x", 0.0)),
+							float(raw.get("y", 0.0))
+						))
+					if current_stop > candidate_next:
+						route.reverse()
+					if route.size() >= 2:
+						tangent = (route[1] - route[0]).normalized()
+
+			result.append({
+				"key": "%s:%d" % [line_id, int(vehicle.get("id", 0))],
+				"line_key": line_id,
+				"position": point,
+				"tangent": tangent,
+				"onboard": float(vehicle.get("onboard_passengers", 0.0)),
+			})
+
 	return result
 
 func _commit_change() -> void:
+	_invalidate_custom_catchment_cache()
 	var city_did_change := CityRuntime.sync_with_transport(self)
+	_sync_transit_network_bridge()
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_ensure_custom_line_runtime(line_id)
 	if not suppress_persistence:
 		save_game()
 	state_changed.emit()
@@ -902,6 +2319,7 @@ func save_game() -> void:
 		"depot": depot,
 		"stats": stats,
 		"city": city,
+		"transit_network": transit_network,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -948,6 +2366,7 @@ func _apply_payload(parsed: Dictionary) -> void:
 	depot = parsed.get("depot", depot)
 	stats = parsed.get("stats", stats)
 	city = parsed.get("city", CityRuntime.create_initial_city(city_seed))
+	transit_network = parsed.get("transit_network", {})
 	CityRuntime.ensure_city(self)
 
 	for line_key in Data.LINE_KEYS:
@@ -960,9 +2379,15 @@ func _apply_payload(parsed: Dictionary) -> void:
 			stations[station_id] = {"level": 0}
 
 	CityRuntime.sync_with_transport(self)
+	_sync_transit_network_bridge()
+	_invalidate_custom_catchment_cache()
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_ensure_custom_line_runtime(line_id)
+	route_editor = _empty_route_editor()
 	state_changed.emit()
 	city_changed.emit()
 	selection_changed.emit(selected)
+	route_editor_changed.emit()
 
 func clear_save_and_reset() -> void:
 	if FileAccess.file_exists(SAVE_PATH):

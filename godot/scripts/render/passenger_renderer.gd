@@ -2,7 +2,9 @@ extends Node3D
 
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 
 const MAX_VISIBLE_PER_STATION := 12
 const PASSENGERS_PER_MARKER := 2.5
@@ -26,6 +28,9 @@ func _ready() -> void:
 	for line_key in Data.LINE_KEYS:
 		var line: Dictionary = GameStore.lines[line_key]
 		_last_serial[line_key] = int(line.get("event_serial", 0))
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var line := GameStore.transit_line(line_id)
+		_last_serial[line_id] = int(line.get("event_serial", 0))
 
 	GameStore.state_changed.connect(_sync_crowds)
 	_sync_crowds()
@@ -75,6 +80,59 @@ func _sync_crowds() -> void:
 			transform = transform.rotated(Vector3.UP, angle + PI)
 			crowd.multimesh.set_instance_transform(index, transform)
 
+	_sync_custom_crowds()
+
+func _sync_custom_crowds() -> void:
+	var live_custom: Dictionary = {}
+	var stops: Dictionary = GameStore.transit_network.get("stops", {})
+	for stop_id_value in stops.keys():
+		var stop_id := str(stop_id_value)
+		var stop: Dictionary = stops[stop_id]
+		if str(stop.get("source", "")) != "custom":
+			continue
+		if str(stop.get("status", "")) != "built":
+			continue
+		live_custom[stop_id] = true
+		var waiting := GameStore.custom_stop_waiting_passengers(stop_id)
+		var count := clampi(
+			ceili(waiting / PASSENGERS_PER_MARKER),
+			0,
+			MAX_VISIBLE_PER_STATION
+		)
+		var crowd: MultiMeshInstance3D = _crowds.get(stop_id)
+		if crowd == null:
+			crowd = _create_crowd(stop_id)
+			_crowds[stop_id] = crowd
+			_crowd_root.add_child(crowd)
+		crowd.visible = count > 0
+		if not crowd.visible:
+			continue
+		crowd.multimesh.visible_instance_count = count
+		var point := TransitNetwork.stop_position(GameStore.transit_network, stop_id)
+		var ground := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
+		for index in range(count):
+			var angle := float(index) * 2.3999632 + _station_phase(stop_id)
+			var ring := 15.0 + float(index % 3) * 4.0
+			var local := Vector2(cos(angle), sin(angle)) * ring
+			var transform := Transform3D.IDENTITY
+			transform.origin = Vector3(
+				point.x + local.x,
+				ground + 2.2,
+				point.y + local.y
+			)
+			transform = transform.rotated(Vector3.UP, angle + PI)
+			crowd.multimesh.set_instance_transform(index, transform)
+
+	for crowd_id_value in _crowds.keys():
+		var crowd_id := str(crowd_id_value)
+		if not crowd_id.begins_with("custom-stop-"):
+			continue
+		if live_custom.has(crowd_id):
+			continue
+		var crowd: MultiMeshInstance3D = _crowds[crowd_id]
+		if is_instance_valid(crowd):
+			crowd.visible = false
+
 func _create_crowd(station_id: String) -> MultiMeshInstance3D:
 	var body := CapsuleMesh.new()
 	body.radius = 0.9
@@ -116,6 +174,22 @@ func _poll_passenger_events() -> void:
 			_spawn_event(line_key, event)
 			latest = max(latest, serial)
 		_last_serial[line_key] = latest
+
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var line := GameStore.transit_line(line_id)
+		var latest := int(_last_serial.get(line_id, 0))
+		var current_serial := int(line.get("event_serial", 0))
+		if current_serial < latest:
+			latest = 0
+			_last_serial[line_id] = 0
+		for event_value in line.get("passenger_events", []):
+			var event: Dictionary = event_value
+			var serial := int(event.get("serial", 0))
+			if serial <= latest:
+				continue
+			_spawn_custom_event(line_id, event)
+			latest = maxi(latest, serial)
+		_last_serial[line_id] = latest
 
 func _spawn_event(line_key: String, event: Dictionary) -> void:
 	var stop_index := int(event.get("stop_index", 0))
@@ -174,6 +248,79 @@ func _spawn_event(line_key: String, event: Dictionary) -> void:
 	var finish := station_world if event_type == "board" else outside_world
 	root.global_position = start
 
+	_effects.append({
+		"node": root,
+		"start": start,
+		"finish": finish,
+		"age": 0.0,
+		"duration": 0.65 if event_type == "board" else 0.9,
+	})
+
+func _spawn_custom_event(line_id: String, event: Dictionary) -> void:
+	var stop_index := int(event.get("stop_index", 0))
+	var stop_ids := TransitNetwork.line_stop_ids(GameStore.transit_network, line_id)
+	if stop_index < 0 or stop_index >= stop_ids.size():
+		return
+	var stop_id := stop_ids[stop_index]
+	var point := TransitNetwork.stop_position(GameStore.transit_network, stop_id)
+	var ground := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
+	var event_type := str(event.get("type", ""))
+	var count := float(event.get("count", 0.0))
+	var markers := clampi(ceili(count / 6.0), 1, 5)
+	var seed_angle := float(int(event.get("serial", 0)) % 17) * 0.71
+	var outward := Vector2(cos(seed_angle), sin(seed_angle))
+	var station_world := Vector3(point.x, ground + 2.4, point.y)
+	var outside_world := Vector3(
+		point.x + outward.x * 28.0,
+		ground + 2.4,
+		point.y + outward.y * 28.0
+	)
+
+	var root := Node3D.new()
+	root.name = "PassengerEvent_%s_%d" % [
+		line_id,
+		int(event.get("serial", 0)),
+	]
+	_effects_root.add_child(root)
+	var line := GameStore.transit_line(line_id)
+	var line_color := Color(str(line.get("color", "#58b8ff")))
+
+	for index in range(markers):
+		var marker := MeshInstance3D.new()
+		var sphere := SphereMesh.new()
+		sphere.radius = 1.2
+		sphere.height = 2.4
+		sphere.radial_segments = 6
+		sphere.rings = 4
+		var material := StandardMaterial3D.new()
+		material.albedo_color = line_color
+		material.emission_enabled = true
+		material.emission = line_color
+		material.emission_energy_multiplier = 0.25
+		sphere.material = material
+		marker.mesh = sphere
+		marker.position = Vector3(
+			float(index - markers / 2) * 1.8,
+			sin(float(index)) * 0.8,
+			0.0
+		)
+		marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(marker)
+
+	var fare := float(event.get("fare", 0.0))
+	if event_type == "alight" and fare > 0.0:
+		var label := Label3D.new()
+		label.text = "+$%d" % roundi(fare)
+		label.font_size = 28
+		label.outline_size = 8
+		label.modulate = Color("#ffe36b")
+		label.position.y = 7.0
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		root.add_child(label)
+
+	var start := outside_world if event_type == "board" else station_world
+	var finish := station_world if event_type == "board" else outside_world
+	root.global_position = start
 	_effects.append({
 		"node": root,
 		"start": start,

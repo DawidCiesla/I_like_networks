@@ -18,6 +18,17 @@ const LINE_COLORS := {
 	"line4": Color("#d02be3"),
 }
 
+const FREE_LINE_COLORS := [
+	Color("#ef5b5b"),
+	Color("#18c6a3"),
+	Color("#ff8a34"),
+	Color("#8b72e8"),
+	Color("#42b7e8"),
+	Color("#d967a8"),
+	Color("#a6c93b"),
+	Color("#f0a729"),
+]
+
 const ECONOMY := {
 	"starting_money": 100.0,
 	"fare_per_passenger": 12.0,
@@ -39,6 +50,10 @@ const ECONOMY := {
 	"line4_stop_base_cost": 210.0,
 	"line4_stop_cost_growth": 1.6,
 	"max_vehicles_per_line": 8,
+	"free_line_base_cost": 110.0,
+	"free_stop_cost": 34.0,
+	"free_route_cost_per_world_unit": 0.035,
+	"free_line_edit_base_cost": 18.0,
 }
 
 const STATION_UPGRADE := {
@@ -95,6 +110,7 @@ const BUS := {
 	"turnaround_minutes": 1.0,
 }
 
+const WORLD_UNITS_PER_KM := 1000.0
 const GAME_MINUTES_PER_REAL_SECOND := 0.25
 const DELIVERY_RATE_WINDOW_MINUTES := 0.5
 const BOARDING_HOLD_MINUTES := 0.18

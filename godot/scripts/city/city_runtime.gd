@@ -3,6 +3,7 @@ class_name CityRuntime
 
 const Data = preload("res://scripts/core/game_data.gd")
 const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 
 const CITY_VERSION := 1
 const MAX_ACTIVE_PROJECTS := 2
@@ -58,14 +59,17 @@ static func sync_with_transport(store: Node) -> bool:
 
 	for road in store.city["roads"]:
 		var source := str(road.get("source", ""))
-		if source == "existing-arterial":
+		# Primary streets are city infrastructure, not transit unlocks. Keeping
+		# the arterial/corridor skeleton available lets player-designed routes
+		# reach future districts without buying a scripted bus line first.
+		if source in ["existing-arterial", "transport-corridor"]:
 			if str(road.get("status", "")) != "built":
 				road["status"] = "built"
 				road["constructionProgress"] = 1.0
 				changed = true
 			continue
 
-		if source not in ["transport-corridor", "depot-access"]:
+		if source != "depot-access":
 			continue
 
 		if _transport_unlock_satisfied(store, road.get("unlock", null)) and _road_dependencies_built(store.city, road):
@@ -122,14 +126,26 @@ static func _transport_unlock_satisfied(store: Node, unlock) -> bool:
 
 static func _district_should_be_active(store: Node, district: Dictionary) -> bool:
 	var line_key := str(district.get("lineKey", "line1"))
-	if not store.lines.has(line_key):
-		return false
+	if store.lines.has(line_key):
+		var line: Dictionary = store.lines[line_key]
+		var legacy_active := (
+			(line_key == "line1" or bool(line.get("built", false)))
+			and int(line.get("stop_count", 0)) > int(district.get("stopIndex", 0))
+		)
+		if legacy_active:
+			return true
 
-	var line: Dictionary = store.lines[line_key]
-	if line_key != "line1" and not bool(line.get("built", false)):
-		return false
+	if typeof(store.transit_network) == TYPE_DICTIONARY:
+		var center := _district_center(store.city, district)
+		var accessibility := TransitNetwork.stop_accessibility_score(
+			store.transit_network,
+			center,
+			440.0
+		)
+		if accessibility >= 0.28:
+			return true
 
-	return int(line.get("stop_count", 0)) > int(district.get("stopIndex", 0))
+	return false
 
 static func _activate_blocks(city: Dictionary, district: Dictionary) -> void:
 	for block_id in district.get("blockIds", []):
@@ -147,7 +163,59 @@ static func _district_pressure(store: Node, district: Dictionary) -> float:
 	var fleet_score: float = minf(1.5, float(line.get("fleet_count", 0)) * 0.25)
 	var interchange_bonus := 1.2 if str(district.get("id", "")) == "park" and bool(store.lines["line2"].get("built", false)) else 0.0
 	var central_bonus := 0.8 if str(district.get("theme", "")) == "central" else 0.0
-	return 0.6 + age_score + stop_score + ridership_score + fleet_score + interchange_bonus + central_bonus
+	var accessibility_bonus := 0.0
+	if typeof(store.transit_network) == TYPE_DICTIONARY:
+		var center := _district_center(store.city, district)
+		accessibility_bonus = minf(
+			2.6,
+			TransitNetwork.stop_accessibility_score(
+				store.transit_network,
+				center,
+				440.0
+			) * 0.52
+		)
+	return (
+		0.6
+		+ age_score
+		+ stop_score
+		+ ridership_score
+		+ fleet_score
+		+ interchange_bonus
+		+ central_bonus
+		+ accessibility_bonus
+	)
+
+static func _district_center(city: Dictionary, district: Dictionary) -> Vector2:
+	var parcel_ids: Array = district.get("parcelIds", [])
+	var wanted: Dictionary = {}
+	for parcel_id_value in parcel_ids:
+		wanted[str(parcel_id_value)] = true
+	var total := Vector2.ZERO
+	var count := 0
+	for parcel_value in city.get("parcels", []):
+		var parcel: Dictionary = parcel_value
+		if not wanted.has(str(parcel.get("id", ""))):
+			continue
+		total += Vector2(
+			float(parcel.get("x", 0.0)),
+			float(parcel.get("y", 0.0))
+		)
+		count += 1
+	if count > 0:
+		return total / float(count)
+
+	for road_value in city.get("roads", []):
+		var road: Dictionary = road_value
+		if str(road.get("districtId", "")) != str(district.get("id", "")):
+			continue
+		var points: Array = road.get("points", [])
+		if not points.is_empty():
+			var point: Dictionary = points[0]
+			return Vector2(
+				float(point.get("x", 0.0)),
+				float(point.get("y", 0.0))
+			)
+	return Vector2.ZERO
 
 static func _road_length(road: Dictionary) -> float:
 	var points: Array = road.get("points", [])

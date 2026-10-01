@@ -33,8 +33,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			distance = min(max_distance, distance * (1.0 + zoom_speed))
 			_update_camera()
 			get_viewport().set_input_as_handled()
-		elif event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_drag_button = event.button_index if event.pressed else 0
+		elif event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+			if GameStore.route_editor_active():
+				_drag_button = 0
+			else:
+				_drag_button = event.button_index if event.pressed else 0
 
 	elif event is InputEventMouseMotion and _drag_button != 0:
 		if _drag_button == MOUSE_BUTTON_LEFT:
