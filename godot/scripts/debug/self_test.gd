@@ -4,6 +4,8 @@ const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
 const StoreScript = preload("res://scripts/core/game_store.gd")
+const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
+const BrowserImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 
 func _init() -> void:
 	_test_shared_interchanges()
@@ -11,7 +13,9 @@ func _init() -> void:
 	_test_terrain_determinism()
 	_test_arrival_fare_simulation()
 	_test_master_plan_fixture()
+	_test_native_plan_generation()
 	_test_city_growth_runtime()
+	_test_browser_save_import()
 	print("GODOT PORT SELF-TEST: PASS")
 	quit(0)
 
@@ -143,3 +147,85 @@ func _test_city_growth_runtime() -> void:
 		assert(is_finite(float(building["rotationRadians"])))
 
 	store.free()
+
+
+func _test_native_plan_generation() -> void:
+	for seed in [1, 42, Data.DEFAULT_CITY_SEED, 654321, 999999]:
+		var plan := PlanGenerator.generate(seed)
+		assert(int(plan["seed"]) == seed)
+		assert(plan["districts"].size() == 15)
+		assert(plan["roads"].size() >= 60)
+		assert(plan["parcels"].size() >= 60)
+		assert(plan["nodes"].size() > 0)
+		assert(plan["graphEdges"].size() >= plan["roads"].size())
+		assert(plan["junctions"].size() > 10)
+		assert(plan["reservations"].size() >= 2)
+
+		for district in plan["districts"]:
+			assert(district["roadIds"].size() >= 3)
+			assert(district["parcelIds"].size() >= 4)
+
+func _test_browser_save_import() -> void:
+	var web_line1 := {
+		"built": true,
+		"stopCount": 4,
+		"fleetCount": 2,
+		"demandPerStopPpm": 3.2,
+		"waitingByStop": [
+			[0.0, 2.0, 1.0, 0.5, 0.0],
+			[0.0, 0.0, 0.0, 0.0, 0.0],
+			[0.0, 0.0, 0.0, 0.0, 0.0],
+			[0.0, 0.0, 0.0, 0.0, 0.0],
+			[0.0, 0.0, 0.0, 0.0, 0.0],
+		],
+		"queuePassengers": 3.5,
+		"vehicles": [],
+		"nextVehicleId": 3,
+		"eventSerial": 7,
+		"passengerEvents": [],
+	}
+
+	var web_state := {
+		"source": "self-test",
+		"state": {
+			"version": 12,
+			"money": 4321.0,
+			"elapsedSeconds": 987.0,
+			"simulationSpeed": 2,
+			"line1": web_line1,
+			"line2": {"built": false, "stopCount": 0, "fleetCount": 0},
+			"line3": {"built": false, "stopCount": 0, "fleetCount": 0},
+			"line4": {"built": false, "stopCount": 0, "fleetCount": 0},
+			"stations": {
+				"market-square": {"level": 2},
+			},
+			"depot": {
+				"built": true,
+				"garageSlots": 8,
+				"level": 1,
+			},
+			"stats": {
+				"lifetimeRevenue": 1200.0,
+				"lifetimePassengers": 100.0,
+			},
+			"city": {
+				"seed": Data.DEFAULT_CITY_SEED,
+				"timeSeconds": 33.0,
+				"runtimeAccumulatorSeconds": 0.1,
+				"nextProjectId": 4,
+			},
+		},
+	}
+
+	var converted := BrowserImporter.convert(web_state)
+	assert(not converted.is_empty())
+	assert(int(converted["version"]) == Data.GAME_VERSION)
+	assert(is_equal_approx(float(converted["money"]), 4321.0))
+	assert(int(converted["simulation_speed"]) == 2)
+	assert(int(converted["lines"]["line1"]["stop_count"]) == 4)
+	assert(int(converted["lines"]["line1"]["fleet_count"]) == 2)
+	assert(is_equal_approx(float(converted["lines"]["line1"]["waiting_by_stop"][0][1]), 2.0))
+	assert(int(converted["stations"]["market-square"]["level"]) == 2)
+	assert(int(converted["depot"]["garage_slots"]) == 8)
+	assert(int(converted["city"]["seed"]) == Data.DEFAULT_CITY_SEED)
+	assert(is_equal_approx(float(converted["city"]["time_seconds"]), 33.0))

@@ -1119,3 +1119,41 @@ button:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
     font-size: 8px;
   }
 }
+
+
+.export-save-button {
+  position: absolute;
+  left: 13px;
+  bottom: 58px;
+  z-index: 9;
+  border: 1px solid #666962;
+  border-radius: 3px;
+  background: rgba(20, 21, 20, 0.94);
+  color: #dbdad3;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.export-save-button:hover {
+  background: rgba(38, 40, 37, 0.98);
+  border-color: #8f9388;
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .export-save-button {
+    transform: scale(1.28);
+    transform-origin: left bottom;
+    bottom: 74px;
+  }
+}
+
+@media (min-width: 3200px) and (min-height: 1700px) {
+  .export-save-button {
+    transform: scale(1.5);
+    transform-origin: left bottom;
+    bottom: 86px;
+  }
+}

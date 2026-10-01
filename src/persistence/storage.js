@@ -565,3 +565,49 @@ export function clearSave() {
   localStorage.removeItem(T0_SAVE_KEY);
   localStorage.removeItem(NETWORK_SAVE_KEY);
 }
+
+
+export function exportStateForGodot(state) {
+  const payload = {
+    source: 'i-like-transit-web-v12',
+    exportedAt:
+      new Date().toISOString(),
+    state,
+  };
+
+  const blob =
+    new Blob(
+      [
+        JSON.stringify(
+          payload,
+          null,
+          2,
+        ),
+      ],
+      {
+        type: 'application/json',
+      },
+    );
+
+  const url =
+    URL.createObjectURL(blob);
+
+  const anchor =
+    document.createElement('a');
+
+  anchor.href = url;
+  anchor.download =
+    'i-like-transit-browser-save-v12.json';
+
+  document.body.appendChild(
+    anchor,
+  );
+
+  anchor.click();
+  anchor.remove();
+
+  window.setTimeout(
+    () => URL.revokeObjectURL(url),
+    0,
+  );
+}

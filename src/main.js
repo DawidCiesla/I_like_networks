@@ -18,6 +18,7 @@ import {
 
 import {
   clearSave,
+  exportStateForGodot,
   loadState,
   saveState,
 } from './persistence/storage.js';
@@ -33,7 +34,19 @@ import {
 const canvas =
   document.querySelector('#transport-canvas');
 
+const exportSaveButton =
+  document.querySelector(
+    '#export-save-button',
+  );
+
 let state = loadState();
+
+exportSaveButton?.addEventListener(
+  'click',
+  () => {
+    exportStateForGodot(state);
+  },
+);
 let hud;
 let resetInProgress = false;
 let saveScheduled = false;

@@ -2,42 +2,32 @@ extends RefCounted
 class_name CityRuntime
 
 const Data = preload("res://scripts/core/game_data.gd")
+const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
 
 const CITY_VERSION := 1
-const MASTER_PLAN_PATH := "res://data/master_plan_284731.json"
 const MAX_ACTIVE_PROJECTS := 2
 const STEP_SECONDS := 0.2
 
 static func create_initial_city(seed: int = Data.DEFAULT_CITY_SEED) -> Dictionary:
-	var file := FileAccess.open(MASTER_PLAN_PATH, FileAccess.READ)
-	if file == null:
-		push_error("Missing canonical city fixture: %s" % MASTER_PLAN_PATH)
-		return {}
+	var plan := PlanGenerator.generate(seed)
 
-	var parsed = JSON.parse_string(file.get_as_text())
-	if typeof(parsed) != TYPE_DICTIONARY:
-		push_error("Invalid canonical city fixture.")
-		return {}
-
-	var city := {
+	return {
 		"version": CITY_VERSION,
 		"seed": seed,
 		"time_seconds": 0.0,
 		"runtime_accumulator_seconds": 0.0,
 		"next_project_id": 1,
-		"nodes": parsed.get("nodes", []),
-		"graph_edges": parsed.get("graphEdges", []),
-		"junctions": parsed.get("junctions", []),
-		"roads": parsed.get("roads", []),
-		"districts": parsed.get("districts", []),
-		"blocks": parsed.get("blocks", []),
-		"parcels": parsed.get("parcels", []),
-		"reservations": parsed.get("reservations", []),
+		"nodes": plan.get("nodes", []),
+		"graph_edges": plan.get("graphEdges", []),
+		"junctions": plan.get("junctions", []),
+		"roads": plan.get("roads", []),
+		"districts": plan.get("districts", []),
+		"blocks": plan.get("blocks", []),
+		"parcels": plan.get("parcels", []),
+		"reservations": plan.get("reservations", []),
 		"buildings": [],
 		"projects": [],
 	}
-
-	return city
 
 static func ensure_city(store: Node) -> void:
 	if typeof(store.city) != TYPE_DICTIONARY or int(store.city.get("version", 0)) != CITY_VERSION:

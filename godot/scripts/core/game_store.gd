@@ -8,6 +8,7 @@ signal toast_requested(message: String)
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const BrowserSaveImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 
 const SAVE_PATH := "user://save_godot_v2.json"
 
@@ -901,6 +902,22 @@ func load_game() -> void:
 	if int(parsed.get("version", 0)) != Data.GAME_VERSION:
 		return
 
+	_apply_payload(parsed)
+
+func import_browser_save(path: String) -> bool:
+	var payload := BrowserSaveImporter.import_file(path)
+	if payload.is_empty():
+		_request_toast("Browser save import failed.")
+		return false
+
+	_apply_payload(payload)
+	if not suppress_persistence:
+		save_game()
+
+	_request_toast("Browser save imported into Godot.")
+	return true
+
+func _apply_payload(parsed: Dictionary) -> void:
 	money = float(parsed.get("money", money))
 	elapsed_seconds = float(parsed.get("elapsed_seconds", 0.0))
 	simulation_speed = int(parsed.get("simulation_speed", 1))
@@ -924,6 +941,7 @@ func load_game() -> void:
 	CityRuntime.sync_with_transport(self)
 	state_changed.emit()
 	city_changed.emit()
+	selection_changed.emit(selected)
 
 func clear_save_and_reset() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
