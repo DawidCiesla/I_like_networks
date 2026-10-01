@@ -80,8 +80,24 @@ static func create_ribbon_mesh(
 		append_triangle_above_terrain(mesh, seed, right[index], left[index + 1], right[index + 1], height_offset)
 
 	if rounded_caps:
-		_append_round_cap(mesh, seed, points.front(), half_width, height_offset)
-		_append_round_cap(mesh, seed, points.back(), half_width, height_offset)
+		var start_outward := (points.front() - points[1]).normalized()
+		var end_outward := (points.back() - points[points.size() - 2]).normalized()
+		_append_endpoint_cap(
+			mesh,
+			seed,
+			points.front(),
+			start_outward,
+			half_width,
+			height_offset
+		)
+		_append_endpoint_cap(
+			mesh,
+			seed,
+			points.back(),
+			end_outward,
+			half_width,
+			height_offset
+		)
 
 	mesh.surface_end()
 	return mesh
@@ -135,7 +151,10 @@ static func junction_polygon(center: Vector2, arms: Array) -> PackedVector2Array
 		var normal := Vector2(-direction.y, direction.x)
 		var half_width := width * 0.5
 		max_half_width = maxf(max_half_width, half_width)
-		var extension := maxf(half_width * 1.35, half_width + 2.0)
+		# The road ribbons already overlap through the node. The patch only has
+		# to close the inside corner, so keep it compact instead of building a
+		# large diamond around every crossing.
+		var extension := maxf(3.0, half_width * 0.72)
 
 		candidates.append(center + direction * extension + normal * half_width)
 		candidates.append(center + direction * extension - normal * half_width)
@@ -143,14 +162,15 @@ static func junction_polygon(center: Vector2, arms: Array) -> PackedVector2Array
 	if candidates.size() < 3:
 		return PackedVector2Array()
 
-	# Give very acute T/Y junctions enough material around the common center so
-	# the convex envelope cannot leave a pinhole between the incoming ribbons.
+	# Round the centre of the junction slightly. This keeps T/Y junctions
+	# closed while avoiding the oversized diamond-like patches from V2.
 	if max_half_width > EPSILON:
-		var center_pad := max_half_width * 0.32
-		candidates.append(center + Vector2(center_pad, 0.0))
-		candidates.append(center + Vector2(-center_pad, 0.0))
-		candidates.append(center + Vector2(0.0, center_pad))
-		candidates.append(center + Vector2(0.0, -center_pad))
+		var center_pad := max_half_width * 0.42
+		for index in range(8):
+			var angle := TAU * float(index) / 8.0
+			candidates.append(
+				center + Vector2(cos(angle), sin(angle)) * center_pad
+			)
 
 	var hull := Geometry2D.convex_hull(candidates)
 	if hull.size() >= 2 and hull[0].distance_to(hull[hull.size() - 1]) <= EPSILON:
@@ -194,20 +214,50 @@ static func _join_offset(
 	)
 	return miter * length
 
-static func _append_round_cap(
+static func endpoint_cap_points(
+	center: Vector2,
+	outward: Vector2,
+	radius: float,
+	segments: int = 10
+) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	if radius <= EPSILON:
+		return result
+
+	var safe_outward := outward.normalized()
+	if safe_outward.length_squared() <= EPSILON:
+		safe_outward = Vector2.RIGHT
+	var normal := Vector2(-safe_outward.y, safe_outward.x)
+	var safe_segments := maxi(4, segments)
+
+	result.append(center + normal * radius)
+	for index in range(1, safe_segments):
+		var angle := PI * float(index) / float(safe_segments)
+		var offset := normal * cos(angle) + safe_outward * sin(angle)
+		result.append(center + offset * radius)
+	result.append(center - normal * radius)
+	return result
+
+static func _append_endpoint_cap(
 	mesh: ImmediateMesh,
 	seed: int,
 	center: Vector2,
+	outward: Vector2,
 	radius: float,
 	height_offset: float
 ) -> void:
-	const SEGMENTS := 12
-	for index in range(SEGMENTS):
-		var angle_a := TAU * float(index) / float(SEGMENTS)
-		var angle_b := TAU * float(index + 1) / float(SEGMENTS)
-		var point_a := center + Vector2(cos(angle_a), sin(angle_a)) * radius
-		var point_b := center + Vector2(cos(angle_b), sin(angle_b)) * radius
-		append_triangle_above_terrain(mesh, seed, center, point_a, point_b, height_offset)
+	var arc := endpoint_cap_points(center, outward, radius)
+	if arc.size() < 2:
+		return
+	for index in range(arc.size() - 1):
+		append_triangle_above_terrain(
+			mesh,
+			seed,
+			center,
+			arc[index],
+			arc[index + 1],
+			height_offset
+		)
 
 static func append_triangle_above_terrain(
 	mesh: ImmediateMesh,
