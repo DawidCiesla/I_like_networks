@@ -274,6 +274,31 @@ func _test_free_line_workflow() -> void:
 	_expect(bool(journey.get("success", false)))
 	_expect(journey.get("legs", []).size() >= 1)
 
+	_expect(store.begin_free_line_editor())
+	_expect(store.route_editor_add_point(second))
+	_expect(store.route_editor_add_point(old_town))
+	_expect(store.commit_route_editor())
+	custom_ids = TransitNetwork.custom_line_ids(store.transit_network)
+	_expect(custom_ids.size() == 2)
+	if custom_ids.size() == 2:
+		var second_line_id := custom_ids[1]
+		var second_stop_ids := TransitNetwork.line_stop_ids(
+			store.transit_network,
+			second_line_id
+		)
+		_expect(second_stop_ids.size() == 2)
+		if second_stop_ids.size() == 2:
+			_expect(second_stop_ids[0] == stop_ids[1])
+			var transfer_journey := TransitPlanner.find_journey(
+				store.transit_network,
+				stop_ids[0],
+				second_stop_ids[1]
+			)
+			_expect(bool(transfer_journey.get("success", false)))
+			_expect(int(transfer_journey.get("transfers", 0)) >= 1)
+			store._inject_transfer_passengers(stop_ids[1], line_id, 10.0)
+			_expect(store.custom_line_waiting_passengers(second_line_id) > 0.0)
+
 	var visual_found := false
 	for visual in store.bus_visuals():
 		if str(visual.get("line_key", "")) == line_id:
