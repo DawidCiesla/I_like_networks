@@ -1907,9 +1907,13 @@ func _apply_payload(parsed: Dictionary) -> void:
 
 	CityRuntime.sync_with_transport(self)
 	_sync_transit_network_bridge()
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_ensure_custom_line_runtime(line_id)
+	route_editor = _empty_route_editor()
 	state_changed.emit()
 	city_changed.emit()
 	selection_changed.emit(selected)
+	route_editor_changed.emit()
 
 func clear_save_and_reset() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
