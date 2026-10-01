@@ -96,6 +96,17 @@ func _test_road_geometry() -> void:
 				) + 0.05
 			))
 
+	var cap := RoadGeometry.endpoint_cap_points(
+		Vector2.ZERO,
+		Vector2.LEFT,
+		8.0,
+		10
+	)
+	_expect(cap.size() == 11)
+	for cap_point in cap:
+		_expect(cap_point.x <= 0.001)
+		_expect(cap_point.length() <= 8.001)
+
 	var arms := [
 		{"direction": Vector2.RIGHT, "width": 20.0},
 		{"direction": Vector2.LEFT, "width": 20.0},
