@@ -625,6 +625,9 @@ func garage_used() -> int:
 	var total := 0
 	for line_key in Data.LINE_KEYS:
 		total += int(lines[line_key]["fleet_count"])
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var line := transit_line(line_id)
+		total += int(line.get("fleet_count", 0))
 	return total
 
 func vehicle_purchase_cost() -> int:
@@ -632,11 +635,84 @@ func vehicle_purchase_cost() -> int:
 	for line_key in Data.LINE_KEYS:
 		if bool(lines[line_key]["built"]):
 			built_lines += 1
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var custom_line := transit_line(line_id)
+		if str(custom_line.get("status", "")) == "active":
+			built_lines += 1
 	var purchased: int = maxi(0, garage_used() - built_lines)
 	return roundi(
 		float(Data.ECONOMY["bus_base_cost"])
 		* pow(float(Data.ECONOMY["bus_cost_growth"]), purchased)
 	)
+
+func custom_line_stop_count(line_id: String) -> int:
+	return TransitNetwork.line_stop_ids(transit_network, line_id).size()
+
+func custom_line_route_length_km(line_id: String) -> float:
+	var line := transit_line(line_id)
+	return float(line.get("route_length_world", 0.0)) / float(Data.WORLD_UNITS_PER_KM)
+
+func custom_line_demand(line_id: String) -> float:
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_ids.size() < 2:
+		return 0.0
+	var total := 0.0
+	for stop_id in stop_ids:
+		var stats := TransitNetwork.catchment_stats(transit_network, city, stop_id)
+		total += float(stats.get("demand_ppm", 0.0))
+	return total
+
+func custom_line_cycle_minutes(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_ids.size() < 2:
+		return 0.0
+	var driving := custom_line_route_length_km(line_id) / float(Data.BUS["speed_kph"]) * 60.0 * 2.0
+	var dwell := 0.0
+	for stop_index in range(stop_ids.size()):
+		var visits := 1 if stop_index == 0 or stop_index == stop_ids.size() - 1 else 2
+		dwell += _custom_stop_dwell_minutes(line_id, stop_index, false) * float(visits)
+	return driving + dwell + float(Data.BUS["turnaround_minutes"])
+
+func custom_line_headway_minutes(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var fleet := int(line.get("fleet_count", 0))
+	if fleet <= 0:
+		return INF
+	return custom_line_cycle_minutes(line_id) / float(fleet)
+
+func custom_line_waiting_passengers(line_id: String) -> float:
+	var line := transit_line(line_id)
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var total := 0.0
+	for origin in range(mini(matrix.size(), stop_count)):
+		var row: Array = matrix[origin]
+		for destination in range(mini(row.size(), stop_count)):
+			total += maxf(0.0, float(row[destination]))
+	return total
+
+func custom_stop_waiting_passengers(stop_id: String) -> float:
+	var total := 0.0
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+		var index := stop_ids.find(stop_id)
+		if index < 0:
+			continue
+		var line := transit_line(line_id)
+		var matrix: Array = line.get("waiting_by_stop", [])
+		if index >= matrix.size():
+			continue
+		var row: Array = matrix[index]
+		for value in row:
+			total += maxf(0.0, float(value))
+	return total
+
+func transit_journey(from_stop_id: String, to_stop_id: String) -> Dictionary:
+	return TransitPlanner.find_journey(transit_network, from_stop_id, to_stop_id)
+
+func custom_stop_catchment(stop_id: String) -> Dictionary:
+	return TransitNetwork.catchment_stats(transit_network, city, stop_id)
 
 func next_stop_cost(line_key: String) -> int:
 	var line: Dictionary = lines[line_key]
