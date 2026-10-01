@@ -441,6 +441,17 @@ func _render_free_stop(stop_id: String) -> void:
 	_add_stat_row("Demand", "%.1f PAX/MIN" % float(stats.get("demand_ppm", 0.0)))
 	_add_stat_row("Waiting", "%.1f PAX" % GameStore.custom_stop_waiting_passengers(stop_id))
 	_add_stat_row("Overlapping stops", "%d" % int(stats.get("overlap_count", 0)))
+	for line_id_value in served:
+		var line_id := str(line_id_value)
+		var line := GameStore.transit_line(line_id)
+		if str(line.get("source", "")) != "custom":
+			continue
+		var open_line_button := Button.new()
+		open_line_button.text = "OPEN %s" % str(line.get("name", line_id)).to_upper()
+		open_line_button.pressed.connect(
+			GameStore.set_selection.bind("free_line:%s" % line_id)
+		)
+		fleet_box.add_child(open_line_button)
 	var level := int(stop.get("level", 0))
 	_add_stat_row("Level", "%d / %d" % [level, int(Data.STATION_UPGRADE.max_level)])
 	if level < int(Data.STATION_UPGRADE.max_level):
