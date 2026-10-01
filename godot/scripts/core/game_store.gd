@@ -174,6 +174,7 @@ func _empty_route_editor() -> Dictionary:
 		"mode": "",
 		"line_id": "",
 		"draft_points": [],
+		"draft_stop_ids": [],
 		"draft_waypoints": [],
 		"selected_index": -1,
 		"hover_point": null,
@@ -196,6 +197,17 @@ func route_editor_points() -> Array[Vector2]:
 				float(raw.get("x", 0.0)),
 				float(raw.get("y", 0.0))
 			))
+	return result
+
+func route_editor_stop_ids() -> Array[String]:
+	var result: Array[String] = []
+	for value in route_editor.get("draft_stop_ids", []):
+		result.append(str(value))
+	var point_count := route_editor_points().size()
+	while result.size() < point_count:
+		result.append("")
+	if result.size() > point_count:
+		result.resize(point_count)
 	return result
 
 func route_editor_waypoints() -> Array:
@@ -281,6 +293,10 @@ func begin_edit_line_editor(line_id: String) -> bool:
 	for stop_id in TransitNetwork.line_stop_ids(transit_network, line_id):
 		points.append(TransitNetwork.stop_position(transit_network, stop_id))
 	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = TransitNetwork.line_stop_ids(
+		transit_network,
+		line_id
+	)
 	var stored_waypoints := TransitNetwork.segment_waypoints(
 		transit_network,
 		line_id
@@ -355,7 +371,12 @@ func route_editor_reorder_selected(delta: int) -> bool:
 	var temporary := points[selected_index]
 	points[selected_index] = points[target_index]
 	points[target_index] = temporary
+	var stop_ids := route_editor_stop_ids()
+	var temporary_id := stop_ids[selected_index]
+	stop_ids[selected_index] = stop_ids[target_index]
+	stop_ids[target_index] = temporary_id
 	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
 	route_editor["selected_index"] = target_index
 	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
@@ -509,11 +530,15 @@ func route_editor_add_point(point: Vector2, insert_after: int = -1) -> bool:
 		if existing.distance_to(snapped) < TransitNetwork.MIN_STOP_SPACING:
 			_request_toast("Stops are too close together.")
 			return false
+	var stop_ids := route_editor_stop_ids()
 	if insert_after >= 0 and insert_after < points.size() - 1:
 		points.insert(insert_after + 1, snapped)
+		stop_ids.insert(insert_after + 1, "")
 	else:
 		points.append(snapped)
+		stop_ids.append("")
 	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
 	route_editor["selected_index"] = -1
 	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
@@ -555,7 +580,11 @@ func route_editor_remove_selected() -> bool:
 	if selected_index < 0 or selected_index >= points.size():
 		return false
 	points.remove_at(selected_index)
+	var stop_ids := route_editor_stop_ids()
+	if selected_index < stop_ids.size():
+		stop_ids.remove_at(selected_index)
 	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
 	route_editor["selected_index"] = -1
 	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
@@ -570,7 +599,11 @@ func route_editor_undo_last() -> bool:
 	if points.is_empty():
 		return false
 	points.pop_back()
+	var stop_ids := route_editor_stop_ids()
+	if not stop_ids.is_empty():
+		stop_ids.pop_back()
 	route_editor["draft_points"] = points
+	route_editor["draft_stop_ids"] = stop_ids
 	route_editor["selected_index"] = -1
 	_clear_route_editor_waypoints_if_needed()
 	_update_route_editor_cost()
@@ -683,7 +716,8 @@ func commit_route_editor() -> bool:
 		city,
 		line_id,
 		points,
-		waypoints
+		waypoints,
+		route_editor_stop_ids()
 	)
 	if not bool(updated.get("success", false)):
 		_request_toast(_route_editor_failure_message(str(updated.get("reason", ""))))
