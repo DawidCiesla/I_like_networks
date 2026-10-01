@@ -3,6 +3,7 @@ extends Node3D
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 
 var _static_root: Node3D
 var _bus_root: Node3D
@@ -56,7 +57,7 @@ func rebuild() -> void:
 		var line: Dictionary = GameStore.lines[line_key]
 		if bool(line.built):
 			var route := Layout.built_route(line_key, int(line.stop_count))
-			_add_ribbon(route, 3.8, Data.LINE_COLORS[line_key], 1.05, true)
+			_add_ribbon(route, 3.8, Data.LINE_COLORS[line_key], 0.13, true)
 
 		for stop_index in range(int(line.stop_count)):
 			var station_id: String = Data.STATION_IDS[line_key][stop_index]
@@ -67,8 +68,8 @@ func rebuild() -> void:
 
 		if int(line.stop_count) > 0 and int(line.stop_count) < int(Data.LINE_CONFIG[line_key].max_stops):
 			var future := Layout.future_segment(line_key, int(line.stop_count))
-			_add_ribbon(future, 14.0, Color(0.35, 0.37, 0.35, 0.38), 0.50, false)
-			_add_ribbon(future, 3.2, Color(Data.LINE_COLORS[line_key], 0.48), 0.88, true)
+			_add_ribbon(future, 14.0, Color(0.35, 0.37, 0.35, 0.38), 0.09, false)
+			_add_ribbon(future, 3.2, Color(Data.LINE_COLORS[line_key], 0.48), 0.13, true)
 			var station_id: String = Data.STATION_IDS[line_key][int(line.stop_count)]
 			_add_station(
 				station_id,
@@ -82,7 +83,7 @@ func rebuild() -> void:
 		if bool(GameStore.lines[line_key].built) or not GameStore.can_unlock_line(line_key):
 			continue
 		var future := Layout.segment_points(line_key, 0)
-		_add_ribbon(future, 3.2, Color(Data.LINE_COLORS[line_key], 0.42), 0.88, true)
+		_add_ribbon(future, 3.2, Color(Data.LINE_COLORS[line_key], 0.42), 0.13, true)
 		var station_id: String = Data.STATION_IDS[line_key][1]
 		_add_station(station_id, line_key, 1, true, "future_line:%s" % line_key)
 
@@ -99,34 +100,20 @@ func _add_ribbon(
 	if points.size() < 2:
 		return
 
-	var mesh := ImmediateMesh.new()
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.9
-	if color.a < 0.99:
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	if emissive:
-		material.emission_enabled = true
-		material.emission = Color(color.r, color.g, color.b)
-		material.emission_energy_multiplier = 0.32
+	var mesh = RoadGeometry.create_ribbon_mesh(
+		GameStore.city_seed,
+		points,
+		width,
+		color,
+		height_offset,
+		RoadGeometry.DEFAULT_SAMPLE_SPACING,
+		true,
+		emissive,
+		0.32
+	)
+	if mesh == null:
+		return
 
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, material)
-
-	for index in range(points.size()):
-		var previous := points[maxi(0, index - 1)]
-		var next := points[mini(points.size() - 1, index + 1)]
-		var direction := (next - previous).normalized()
-		var normal := Vector2(-direction.y, direction.x)
-
-		for side in [-1.0, 1.0]:
-			var point: Vector2 = points[index] + normal * width * 0.5 * side
-			mesh.surface_add_vertex(Vector3(
-				point.x,
-				Terrain.height(GameStore.city_seed, point.x, point.y) + height_offset,
-				point.y
-			))
-
-	mesh.surface_end()
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
