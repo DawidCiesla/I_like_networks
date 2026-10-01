@@ -153,7 +153,8 @@ static func create_custom_line(
 	city: Dictionary,
 	points: Array[Vector2],
 	color: Color,
-	name: String = ""
+	name: String = "",
+	segment_waypoints: Array = []
 ) -> Dictionary:
 	if points.size() < 2:
 		return {"success": false, "reason": "need_two_stops"}
@@ -208,6 +209,10 @@ static func create_custom_line(
 		"route_segments": [],
 		"route_points": [],
 		"route_length_world": 0.0,
+		"segment_waypoints": _normalize_segment_waypoints(
+			segment_waypoints,
+			maxi(0, stop_ids.size() - 1)
+		),
 		"fleet_count": 1,
 		"vehicles": [],
 		"next_vehicle_id": 1,
@@ -234,7 +239,8 @@ static func update_custom_line_points(
 	network: Dictionary,
 	city: Dictionary,
 	line_id: String,
-	points: Array[Vector2]
+	points: Array[Vector2],
+	segment_waypoints: Array = []
 ) -> Dictionary:
 	var lines: Dictionary = network.get("lines", {})
 	if not lines.has(line_id):
@@ -295,6 +301,10 @@ static func update_custom_line_points(
 
 	line["stop_ids"] = next_ids
 	line["planned_stop_ids"] = next_ids.duplicate()
+	line["segment_waypoints"] = _normalize_segment_waypoints(
+		segment_waypoints,
+		maxi(0, next_ids.size() - 1)
+	)
 	lines[line_id] = line
 	network["stops"] = stops
 	network["lines"] = lines
@@ -315,33 +325,67 @@ static func rebuild_custom_line(
 		return {"success": false, "reason": "line_not_found"}
 	var line: Dictionary = lines[line_id]
 	var stop_ids := line_stop_ids(network, line_id)
+	var segment_waypoints: Array = _normalize_segment_waypoints(
+		line.get("segment_waypoints", []),
+		maxi(0, stop_ids.size() - 1)
+	)
+	line["segment_waypoints"] = segment_waypoints
 	var segments: Array = []
 	var combined: Array[Vector2] = []
 	var total := 0.0
 
 	for index in range(stop_ids.size() - 1):
-		var a := stop_position(network, stop_ids[index])
-		var b := stop_position(network, stop_ids[index + 1])
-		var route := RoadRouter.route_between_points(city, a, b, true, true, 115.0)
-		if not bool(route.get("success", false)):
-			return {
-				"success": false,
-				"reason": "segment_unroutable",
-				"segment_index": index,
-			}
+		var controls: Array[Vector2] = [
+			stop_position(network, stop_ids[index])
+		]
+		if index < segment_waypoints.size():
+			for waypoint_value in segment_waypoints[index]:
+				controls.append(_to_vector2(waypoint_value))
+		controls.append(stop_position(network, stop_ids[index + 1]))
+
 		var route_points: Array[Vector2] = []
-		for point_value in route.get("points", []):
-			if point_value is Vector2:
-				route_points.append(point_value)
+		var segment_length := 0.0
+		var road_ids: Array[String] = []
+		for control_index in range(controls.size() - 1):
+			var route := RoadRouter.route_between_points(
+				city,
+				controls[control_index],
+				controls[control_index + 1],
+				true,
+				true,
+				115.0
+			)
+			if not bool(route.get("success", false)):
+				return {
+					"success": false,
+					"reason": "segment_unroutable",
+					"segment_index": index,
+				}
+			segment_length += float(route.get("length", 0.0))
+			for road_id_value in route.get("road_ids", []):
+				var road_id := str(road_id_value)
+				if not road_ids.has(road_id):
+					road_ids.append(road_id)
+			for point_value in route.get("points", []):
+				if not (point_value is Vector2):
+					continue
+				var route_point: Vector2 = point_value
+				if (
+					not route_points.is_empty()
+					and route_points.back().distance_to(route_point) <= 0.001
+				):
+					continue
+				route_points.append(route_point)
+
 		segments.append({
 			"from_stop_id": stop_ids[index],
 			"to_stop_id": stop_ids[index + 1],
 			"success": true,
-			"length_world": float(route.get("length", 0.0)),
-			"road_ids": route.get("road_ids", []).duplicate(),
+			"length_world": segment_length,
+			"road_ids": road_ids,
 			"points": _serialize_points(route_points),
 		})
-		total += float(route.get("length", 0.0))
+		total += segment_length
 		for point_index in range(route_points.size()):
 			if not combined.is_empty() and point_index == 0:
 				if combined.back().distance_to(route_points[point_index]) <= 0.001:
@@ -649,6 +693,47 @@ static func _zone_demand_factor(zone: String) -> float:
 			return 0.82
 		_:
 			return 1.0
+
+static func _normalize_segment_waypoints(
+	waypoints_value,
+	segment_count: int
+) -> Array:
+	var result: Array = []
+	for segment_index in range(segment_count):
+		var segment_result: Array = []
+		if (
+			typeof(waypoints_value) == TYPE_ARRAY
+			and segment_index < waypoints_value.size()
+			and typeof(waypoints_value[segment_index]) == TYPE_ARRAY
+		):
+			for point_value in waypoints_value[segment_index]:
+				var point := _to_vector2(point_value)
+				segment_result.append({"x": point.x, "y": point.y})
+		result.append(segment_result)
+	return result
+
+static func segment_waypoints(
+	network: Dictionary,
+	line_id: String
+) -> Array:
+	var lines: Dictionary = network.get("lines", {})
+	var line: Dictionary = lines.get(line_id, {})
+	var stop_count := line_stop_ids(network, line_id).size()
+	return _normalize_segment_waypoints(
+		line.get("segment_waypoints", []),
+		maxi(0, stop_count - 1)
+	)
+
+static func _to_vector2(value) -> Vector2:
+	if value is Vector2:
+		return value
+	if typeof(value) == TYPE_DICTIONARY:
+		var raw: Dictionary = value
+		return Vector2(
+			float(raw.get("x", 0.0)),
+			float(raw.get("y", 0.0))
+		)
+	return Vector2.ZERO
 
 static func _serialize_points(points_value) -> Array:
 	var result: Array = []
