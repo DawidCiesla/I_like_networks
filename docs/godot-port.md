@@ -4,7 +4,7 @@
 
 The migration is complete for the current Bus Era.
 
-**Godot 4.6 is the primary runtime of I Like Transit.**
+**Godot 4.7 is the primary runtime of I Like Transit.**
 
 The older Three.js/browser implementation remains in the repository only as:
 
@@ -242,7 +242,7 @@ After import the state is immediately saved in the native Godot format.
 
 ## Run
 
-Install Godot 4.6.
+Install Godot 4.7.
 
 From the repository root:
 
