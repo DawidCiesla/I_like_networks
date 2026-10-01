@@ -240,7 +240,8 @@ static func update_custom_line_points(
 	city: Dictionary,
 	line_id: String,
 	points: Array[Vector2],
-	segment_waypoints: Array = []
+	segment_waypoints: Array = [],
+	stop_id_hints: Array = []
 ) -> Dictionary:
 	var lines: Dictionary = network.get("lines", {})
 	if not lines.has(line_id):
@@ -271,22 +272,33 @@ static func update_custom_line_points(
 	for index in range(snaps.size()):
 		var snap: Dictionary = snaps[index]
 		var point: Vector2 = snap["point"]
-		if index < old_stop_ids.size():
-			var stop_id := old_stop_ids[index]
-			var stop: Dictionary = stops.get(stop_id, {})
+		var hinted_id := ""
+		if index < stop_id_hints.size():
+			hinted_id = str(stop_id_hints[index])
+		elif index < old_stop_ids.size():
+			hinted_id = old_stop_ids[index]
+
+		if not hinted_id.is_empty() and stops.has(hinted_id):
+			var stop: Dictionary = stops.get(hinted_id, {})
 			var served: Array = stop.get("served_line_ids", [])
 			var shared_with_other := false
 			for served_line_value in served:
 				if str(served_line_value) != line_id:
 					shared_with_other = true
 					break
-			if (
-				str(stop.get("source", "")) == "custom"
-				and not shared_with_other
-			):
+
+			var existing_position := Vector2(
+				float(stop.get("x", point.x)),
+				float(stop.get("y", point.y))
+			)
+			if shared_with_other or str(stop.get("source", "")) != "custom":
+				if existing_position.distance_to(point) <= 28.0:
+					next_ids.append(hinted_id)
+					continue
+			else:
 				_apply_snap_to_stop(stop, point, snap)
-				stops[stop_id] = stop
-				next_ids.append(stop_id)
+				stops[hinted_id] = stop
+				next_ids.append(hinted_id)
 				continue
 
 		var existing_id := _nearest_active_stop_id(stops, point, 28.0)
