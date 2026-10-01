@@ -198,6 +198,8 @@ func _render_line_legend() -> void:
 		var item: HBoxContainer = _custom_legend_item_by_line.get(line_id)
 		if item == null:
 			item = LineLegendItemScene.instantiate()
+			item.mouse_filter = Control.MOUSE_FILTER_STOP
+			item.gui_input.connect(_on_custom_legend_gui_input.bind(line_id))
 			legend_rows.add_child(item)
 			_custom_legend_item_by_line[line_id] = item
 		var line := GameStore.transit_line(line_id)
@@ -228,6 +230,14 @@ func _render_create_line_button() -> void:
 		or not GameStore.can_begin_free_line()
 	)
 	_create_line_button.text = "CREATE LINE" if not GameStore.route_editor_active() else "EDITING LINE"
+
+func _on_custom_legend_gui_input(event: InputEvent, line_id: String) -> void:
+	if (
+		event is InputEventMouseButton
+		and event.button_index == MOUSE_BUTTON_LEFT
+		and event.pressed
+	):
+		GameStore.set_selection("free_line:%s" % line_id)
 
 func _built_line_count() -> int:
 	var result := 0
