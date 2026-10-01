@@ -150,13 +150,13 @@ func _point_on_polyline(points: Array[Vector2], distance_along: float) -> Dictio
 	if points.size() == 1:
 		return {"position": points[0], "tangent": Vector2.RIGHT}
 
-	var remaining := max(0.0, distance_along)
+	var remaining: float = maxf(0.0, distance_along)
 	for index in range(points.size() - 1):
 		var a := points[index]
 		var b := points[index + 1]
 		var length := a.distance_to(b)
 		if remaining <= length or index == points.size() - 2:
-			var t := 0.0 if length <= 0.000001 else remaining / length
+			var t: float = 0.0 if length <= 0.000001 else remaining / length
 			return {
 				"position": a.lerp(b, t),
 				"tangent": (b - a).normalized(),
