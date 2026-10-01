@@ -107,7 +107,7 @@ static func _transport_unlock_satisfied(store: Node, unlock) -> bool:
 		return false
 
 	if unlock.has("districtId"):
-		var district := _find_by_id(store.city["districts"], str(unlock["districtId"]))
+		var district: Variant = _find_by_id(store.city["districts"], str(unlock["districtId"]))
 		return district != null and str(district.get("status", "")) == "active"
 
 	var line_key := str(unlock.get("lineKey", ""))
@@ -133,18 +133,18 @@ static func _district_should_be_active(store: Node, district: Dictionary) -> boo
 
 static func _activate_blocks(city: Dictionary, district: Dictionary) -> void:
 	for block_id in district.get("blockIds", []):
-		var block := _find_by_id(city["blocks"], str(block_id))
+		var block: Variant = _find_by_id(city["blocks"], str(block_id))
 		if block != null:
 			block["status"] = "active"
 
 static func _district_pressure(store: Node, district: Dictionary) -> float:
 	var line_key := str(district.get("lineKey", "line1"))
 	var line: Dictionary = store.lines.get(line_key, store.lines["line1"])
-	var age := max(0.0, float(store.city["time_seconds"]) - float(district.get("activatedAt", 0.0)))
-	var age_score := min(3.5, age / 40.0)
-	var stop_score := max(0, int(line.get("stop_count", 0)) - 1) * 0.35
-	var ridership_score := min(2.5, float(line.get("last_delivered_ppm", 0.0)) / 8.0)
-	var fleet_score := min(1.5, float(line.get("fleet_count", 0)) * 0.25)
+	var age: float = maxf(0.0, float(store.city["time_seconds"]) - float(district.get("activatedAt", 0.0)))
+	var age_score: float = minf(3.5, age / 40.0)
+	var stop_score: float = float(maxi(0, int(line.get("stop_count", 0)) - 1)) * 0.35
+	var ridership_score: float = minf(2.5, float(line.get("last_delivered_ppm", 0.0)) / 8.0)
+	var fleet_score: float = minf(1.5, float(line.get("fleet_count", 0)) * 0.25)
 	var interchange_bonus := 1.2 if str(district.get("id", "")) == "park" and bool(store.lines["line2"].get("built", false)) else 0.0
 	var central_bonus := 0.8 if str(district.get("theme", "")) == "central" else 0.0
 	return 0.6 + age_score + stop_score + ridership_score + fleet_score + interchange_bonus + central_bonus
@@ -172,7 +172,7 @@ static func _road_project_duration(road: Dictionary) -> float:
 
 static func _road_dependencies_built(city: Dictionary, road: Dictionary) -> bool:
 	for parent_id in road.get("parentRoadIds", []):
-		var parent := _find_by_id(city["roads"], str(parent_id))
+		var parent: Variant = _find_by_id(city["roads"], str(parent_id))
 		if parent == null or str(parent.get("status", "")) != "built":
 			return false
 	return true
@@ -236,7 +236,7 @@ static func _maybe_queue_building(store: Node, district: Dictionary) -> bool:
 			return false
 
 	var pressure := _district_pressure(store, district)
-	var age := max(0.0, float(store.city["time_seconds"]) - float(district.get("activatedAt", 0.0)))
+	var age: float = maxf(0.0, float(store.city["time_seconds"]) - float(district.get("activatedAt", 0.0)))
 	var parcels: Array = []
 
 	for parcel in store.city["parcels"]:
@@ -281,7 +281,7 @@ static func _parcel_has_road_support(city: Dictionary, parcel: Dictionary) -> bo
 	var frontage := str(parcel.get("frontageRoadId", ""))
 	if frontage.is_empty():
 		return false
-	var road := _find_by_id(city["roads"], frontage)
+	var road: Variant = _find_by_id(city["roads"], frontage)
 	return road != null and str(road.get("status", "")) == "built"
 
 static func _building_profile(district: Dictionary, parcel: Dictionary, pressure: float) -> Dictionary:
@@ -363,7 +363,7 @@ static func _active_project_count(city: Dictionary) -> int:
 static func _project_can_start(city: Dictionary, project: Dictionary) -> bool:
 	if str(project.get("type", "")) != "road":
 		return true
-	var road := _find_by_id(city["roads"], str(project.get("targetId", "")))
+	var road: Variant = _find_by_id(city["roads"], str(project.get("targetId", "")))
 	return road != null and _road_dependencies_built(city, road)
 
 static func _start_eligible_projects(city: Dictionary) -> bool:
@@ -399,11 +399,11 @@ static func _start_eligible_projects(city: Dictionary) -> bool:
 		changed = true
 
 		if str(project["type"]) == "road":
-			var road := _find_by_id(city["roads"], str(project["targetId"]))
+			var road: Variant = _find_by_id(city["roads"], str(project["targetId"]))
 			if road != null:
 				road["status"] = "constructing"
 		else:
-			var parcel := _find_by_id(city["parcels"], str(project["targetId"]))
+			var parcel: Variant = _find_by_id(city["parcels"], str(project["targetId"]))
 			if parcel != null:
 				var building_id := "building-%s" % str(parcel["id"])
 				parcel["buildingId"] = building_id
@@ -432,7 +432,7 @@ static func _progress_active_projects(city: Dictionary, delta_seconds: float) ->
 		if str(project.get("status", "")) != "active":
 			continue
 
-		var progress := clamp(
+		var progress: float = clampf(
 			float(project.get("progress", 0.0))
 			+ delta_seconds / max(0.01, float(project.get("duration", 1.0))),
 			0.0,
@@ -442,11 +442,11 @@ static func _progress_active_projects(city: Dictionary, delta_seconds: float) ->
 		changed = true
 
 		if str(project["type"]) == "road":
-			var road := _find_by_id(city["roads"], str(project["targetId"]))
+			var road: Variant = _find_by_id(city["roads"], str(project["targetId"]))
 			if road != null:
 				road["constructionProgress"] = progress
 		else:
-			var building := _find_building_by_parcel(city, str(project["targetId"]))
+			var building: Variant = _find_building_by_parcel(city, str(project["targetId"]))
 			if building != null:
 				building["constructionProgress"] = progress
 
@@ -461,17 +461,17 @@ static func _finish_project(city: Dictionary, project: Dictionary) -> void:
 	project["completedAt"] = float(city["time_seconds"])
 
 	if str(project["type"]) == "road":
-		var road := _find_by_id(city["roads"], str(project["targetId"]))
+		var road: Variant = _find_by_id(city["roads"], str(project["targetId"]))
 		if road != null:
 			road["status"] = "built"
 			road["constructionProgress"] = 1.0
 		return
 
-	var parcel := _find_by_id(city["parcels"], str(project["targetId"]))
+	var parcel: Variant = _find_by_id(city["parcels"], str(project["targetId"]))
 	if parcel != null:
 		parcel["status"] = "built"
 
-	var building := _find_building_by_parcel(city, str(project["targetId"]))
+	var building: Variant = _find_building_by_parcel(city, str(project["targetId"]))
 	if building != null:
 		building["status"] = "built"
 		building["constructionProgress"] = 1.0
@@ -491,7 +491,7 @@ static func _update_development_levels(store: Node) -> void:
 		district["developmentLevel"] = float(built) / float(parcel_ids.size())
 
 static func _parcel_frontage_angle(city: Dictionary, parcel: Dictionary) -> float:
-	var road := _find_by_id(city["roads"], str(parcel.get("frontageRoadId", "")))
+	var road: Variant = _find_by_id(city["roads"], str(parcel.get("frontageRoadId", "")))
 	if road == null:
 		return 0.0
 
@@ -512,8 +512,8 @@ static func _parcel_frontage_angle(city: Dictionary, parcel: Dictionary) -> floa
 		var length_sq := ab.length_squared()
 		if length_sq <= 0.000000001:
 			continue
-		var t := clamp((parcel_point - a).dot(ab) / length_sq, 0.0, 1.0)
-		var projected := a + ab * t
+		var t: float = clampf((parcel_point - a).dot(ab) / length_sq, 0.0, 1.0)
+		var projected: Vector2 = a + ab * t
 		var distance := parcel_point.distance_to(projected)
 		if distance < best_distance:
 			best_distance = distance
