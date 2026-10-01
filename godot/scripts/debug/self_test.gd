@@ -3,6 +3,7 @@ extends SceneTree
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const StoreScript = preload("res://scripts/core/game_store.gd")
 const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
 const BrowserImporter = preload("res://scripts/persistence/browser_save_importer.gd")
@@ -78,6 +79,22 @@ func _test_road_geometry() -> void:
 	_expect(ribbon != null)
 	if ribbon != null:
 		_expect(ribbon.get_surface_count() == 1)
+		var arrays := ribbon.surface_get_arrays(0)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		_expect(vertices.size() >= 3)
+		if vertices.size() >= 3:
+			var first_2d := Vector2(vertices[0].x, vertices[0].z)
+			var second_2d := Vector2(vertices[1].x, vertices[1].z)
+			var third_2d := Vector2(vertices[2].x, vertices[2].z)
+			_expect((second_2d - first_2d).cross(third_2d - first_2d) > 0.0)
+			_expect(is_equal_approx(
+				vertices[0].y,
+				TerrainSurface.height(
+					Data.DEFAULT_CITY_SEED,
+					vertices[0].x,
+					vertices[0].z
+				) + 0.05
+			))
 
 	var arms := [
 		{"direction": Vector2.RIGHT, "width": 20.0},
