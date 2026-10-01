@@ -1,6 +1,7 @@
 extends Node3D
 
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 const BuildingAssets = preload("res://scripts/render/building_asset_library.gd")
 const BuildingFoundation = preload("res://scripts/render/building_foundation.gd")
 const BuildingOrientation = preload("res://scripts/render/building_orientation.gd")
@@ -21,6 +22,11 @@ const SIDEWALK_WIDTH := {
 	"local": 23.0,
 	"service": 19.0,
 }
+
+const SIDEWALK_SURFACE_HEIGHT := 0.045
+const ROAD_SURFACE_HEIGHT := 0.065
+const CURB_SURFACE_HEIGHT := 0.082
+const MARKING_SURFACE_HEIGHT := 0.095
 
 const BUILDING_COLORS := {
 	"residential": Color("#b5a98e"),
@@ -148,7 +154,13 @@ func _create_road_node(road: Dictionary, signature: String) -> Node3D:
 		points = _polyline_prefix(points, float(bucket) / 20.0)
 
 	if signature == "planned:true":
-		_add_ribbon(root, points, 3.0, Color(0.55, 0.57, 0.54, 0.30), 0.50)
+		_add_ribbon(
+			root,
+			points,
+			3.0,
+			Color(0.55, 0.57, 0.54, 0.30),
+			MARKING_SURFACE_HEIGHT
+		)
 		return root
 
 	var road_class := str(road.get("class", "local"))
@@ -157,14 +169,14 @@ func _create_road_node(road: Dictionary, signature: String) -> Node3D:
 		points,
 		float(SIDEWALK_WIDTH.get(road_class, 23.0)),
 		Color("#777a74"),
-		0.34
+		SIDEWALK_SURFACE_HEIGHT
 	)
 	_add_ribbon(
 		root,
 		points,
 		float(ROAD_WIDTH.get(road_class, 15.0)),
 		Color("#3b3d3b"),
-		0.58
+		ROAD_SURFACE_HEIGHT
 	)
 	return root
 
@@ -178,28 +190,17 @@ func _add_ribbon(
 	if points.size() < 2:
 		return
 
-	var mesh := ImmediateMesh.new()
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.96
-	if color.a < 0.99:
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, material)
-	for index in range(points.size()):
-		var previous := points[maxi(0, index - 1)]
-		var next := points[mini(points.size() - 1, index + 1)]
-		var direction := (next - previous).normalized()
-		var normal := Vector2(-direction.y, direction.x)
-
-		for side in [-1.0, 1.0]:
-			var point: Vector2 = points[index] + normal * width * 0.5 * side
-			mesh.surface_add_vertex(Vector3(
-				point.x,
-				Terrain.height(GameStore.city_seed, point.x, point.y) + height_offset,
-				point.y
-			))
-	mesh.surface_end()
+	var mesh = RoadGeometry.create_ribbon_mesh(
+		GameStore.city_seed,
+		points,
+		width,
+		color,
+		height_offset,
+		RoadGeometry.DEFAULT_SAMPLE_SPACING,
+		true
+	)
+	if mesh == null:
+		return
 
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
@@ -239,6 +240,7 @@ func _rebuild_road_markings() -> void:
 				var signature := _road_signature(road)
 				var bucket := int(signature.get_slice(":", 1))
 				points = _polyline_prefix(points, float(bucket) / 20.0)
+			points = RoadGeometry.resample_polyline(points)
 			if points.size() < 2:
 				continue
 			road_details.append({"road": road, "points": points})
@@ -370,17 +372,17 @@ func _curb_paths(
 ) -> Array:
 	var result: Array = []
 	var total_length := _polyline_length(points)
-	if points.size() < 2 or total_length <= endpoint_trim * 2.0 + 1.0:
+	if points.size() < 2 or total_length <= 1.0:
 		return result
 
-	var spans: Array[Vector2] = [Vector2(endpoint_trim, total_length - endpoint_trim)]
+	var spans: Array[Vector2] = [Vector2(0.0, total_length)]
 	for junction_position_value in junction_positions:
 		var junction_position: Vector2 = junction_position_value
 		var projection := _project_point_onto_polyline(junction_position, points)
 		if float(projection["distance_to_path"]) > 1.5:
 			continue
-		var cut_start := maxf(endpoint_trim, float(projection["distance_along"]) - endpoint_trim)
-		var cut_end := minf(total_length - endpoint_trim, float(projection["distance_along"]) + endpoint_trim)
+		var cut_start := maxf(0.0, float(projection["distance_along"]) - endpoint_trim)
+		var cut_end := minf(total_length, float(projection["distance_along"]) + endpoint_trim)
 		var next_spans: Array[Vector2] = []
 		for span in spans:
 			if cut_end <= span.x or cut_start >= span.y:
@@ -467,7 +469,7 @@ func _add_curb_vertex(mesh: ImmediateMesh, point: Vector2) -> void:
 	mesh.surface_set_normal(Vector3.UP)
 	mesh.surface_add_vertex(Vector3(
 		point.x,
-		Terrain.height(GameStore.city_seed, point.x, point.y) + 0.94,
+		Terrain.height(GameStore.city_seed, point.x, point.y) + CURB_SURFACE_HEIGHT,
 		point.y
 	))
 
@@ -506,7 +508,7 @@ func _add_marking_vertex(mesh: ImmediateMesh, point: Vector2) -> void:
 	mesh.surface_set_normal(Vector3.UP)
 	mesh.surface_add_vertex(Vector3(
 		point.x,
-		Terrain.height(GameStore.city_seed, point.x, point.y) + 0.72,
+		Terrain.height(GameStore.city_seed, point.x, point.y) + MARKING_SURFACE_HEIGHT,
 		point.y
 	))
 
@@ -620,36 +622,90 @@ func _sync_junctions() -> void:
 	for child in _junction_root.get_children():
 		child.queue_free()
 
+	var node_lookup: Dictionary = {}
+	for node in GameStore.city.get("nodes", []):
+		node_lookup[str(node["id"])] = Vector2(float(node["x"]), float(node["y"]))
+
+	var edges_by_node: Dictionary = {}
+	for edge in GameStore.city.get("graph_edges", []):
+		var first_id := str(edge.get("a", ""))
+		var second_id := str(edge.get("b", ""))
+		if not edges_by_node.has(first_id):
+			edges_by_node[first_id] = []
+		if not edges_by_node.has(second_id):
+			edges_by_node[second_id] = []
+		edges_by_node[first_id].append({"edge": edge, "neighbor": second_id})
+		edges_by_node[second_id].append({"edge": edge, "neighbor": first_id})
+
 	for junction_data in active_junctions:
 		var junction: Dictionary = junction_data["junction"]
-		var visible_arms: Array = junction_data["roads"]
-		var sidewalk_radius := 0.0
-		var road_radius := 0.0
-		for road in visible_arms:
+		var junction_position := Vector2(float(junction["x"]), float(junction["y"]))
+		var node_id := str(junction.get("nodeId", ""))
+		var visible_roads: Dictionary = {}
+		for road in junction_data["roads"]:
+			visible_roads[str(road["id"])] = road
+
+		var sidewalk_arms: Array = []
+		var road_arms: Array = []
+		for edge_arm in edges_by_node.get(node_id, []):
+			var edge: Dictionary = edge_arm["edge"]
+			var road_id := str(edge.get("roadId", ""))
+			if not visible_roads.has(road_id):
+				continue
+
+			var neighbor_position: Vector2 = node_lookup.get(
+				str(edge_arm["neighbor"]),
+				junction_position
+			)
+			var direction := (neighbor_position - junction_position).normalized()
+			if direction.length_squared() <= 0.000001:
+				continue
+
+			var road: Dictionary = visible_roads[road_id]
 			var road_class := str(road.get("class", "local"))
-			sidewalk_radius = max(sidewalk_radius, float(SIDEWALK_WIDTH.get(road_class, 23.0)) * 0.52)
-			road_radius = max(road_radius, float(ROAD_WIDTH.get(road_class, 15.0)) * 0.52)
+			sidewalk_arms.append({
+				"direction": direction,
+				"width": float(SIDEWALK_WIDTH.get(road_class, 23.0)),
+			})
+			road_arms.append({
+				"direction": direction,
+				"width": float(ROAD_WIDTH.get(road_class, 15.0)),
+			})
 
-		var x := float(junction["x"])
-		var z := float(junction["y"])
-		var ground := Terrain.height(GameStore.city_seed, x, z)
+		if road_arms.size() < 2:
+			continue
 
-		_add_junction_disc(Vector3(x, ground + 0.34, z), sidewalk_radius, 0.45, Color("#777a74"))
-		_add_junction_disc(Vector3(x, ground + 0.60, z), road_radius, 0.48, Color("#3b3d3b"))
+		_add_junction_patch(
+			junction_position,
+			sidewalk_arms,
+			Color("#777a74"),
+			SIDEWALK_SURFACE_HEIGHT
+		)
+		_add_junction_patch(
+			junction_position,
+			road_arms,
+			Color("#3b3d3b"),
+			ROAD_SURFACE_HEIGHT
+		)
 
-func _add_junction_disc(position_value: Vector3, radius: float, height: float, color: Color) -> void:
+func _add_junction_patch(
+	center: Vector2,
+	arms: Array,
+	color: Color,
+	height_offset: float
+) -> void:
+	var mesh = RoadGeometry.create_junction_patch_mesh(
+		GameStore.city_seed,
+		center,
+		arms,
+		color,
+		height_offset
+	)
+	if mesh == null:
+		return
+
 	var mesh_instance := MeshInstance3D.new()
-	var cylinder := CylinderMesh.new()
-	cylinder.top_radius = radius
-	cylinder.bottom_radius = radius
-	cylinder.height = height
-	cylinder.radial_segments = 12
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.96
-	cylinder.material = material
-	mesh_instance.mesh = cylinder
-	mesh_instance.position = position_value
+	mesh_instance.mesh = mesh
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_junction_root.add_child(mesh_instance)
 
