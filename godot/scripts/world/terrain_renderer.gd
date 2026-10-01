@@ -1,10 +1,7 @@
 extends MeshInstance3D
 
 const Terrain = preload("res://scripts/world/terrain_model.gd")
-const Layout = preload("res://scripts/transport/transport_layout.gd")
-
-@export var sample_step := 58.0
-@export var margin := 620.0
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 
 var bounds := Rect2()
 
@@ -16,32 +13,12 @@ func rebuild() -> void:
 	mesh = _build_mesh(bounds)
 
 func _world_bounds() -> Rect2:
-	var min_x := INF
-	var max_x := -INF
-	var min_z := INF
-	var max_z := -INF
-
-	for line_key in ["line1", "line2", "line3", "line4"]:
-		for point in Layout.line_stops(line_key):
-			min_x = min(min_x, point.x)
-			max_x = max(max_x, point.x)
-			min_z = min(min_z, point.y)
-			max_z = max(max_z, point.y)
-
-	var depot := Layout.depot_position()
-	min_x = min(min_x, depot.x)
-	max_x = max(max_x, depot.x)
-	min_z = min(min_z, depot.y)
-	max_z = max(max_z, depot.y)
-
-	return Rect2(
-		Vector2(min_x - margin, min_z - margin),
-		Vector2(max_x - min_x + margin * 2.0, max_z - min_z + margin * 2.0)
-	)
+	return TerrainSurface.world_bounds()
 
 func _build_mesh(rect: Rect2) -> ArrayMesh:
-	var x_steps := maxi(2, ceili(rect.size.x / sample_step))
-	var z_steps := maxi(2, ceili(rect.size.y / sample_step))
+	var steps := TerrainSurface.grid_steps(rect)
+	var x_steps := steps.x
+	var z_steps := steps.y
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 
