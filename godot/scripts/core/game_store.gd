@@ -4,6 +4,7 @@ signal state_changed
 signal city_changed
 signal selection_changed(selection: String)
 signal toast_requested(message: String)
+signal route_editor_changed
 
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
@@ -26,6 +27,7 @@ var depot: Dictionary = {}
 var stats: Dictionary = {}
 var city: Dictionary = {}
 var transit_network: Dictionary = {}
+var route_editor: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
@@ -84,6 +86,7 @@ func reset_state(emit_signal: bool = true) -> void:
 	simulation_speed = 1
 	city_seed = Data.DEFAULT_CITY_SEED
 	selected = ""
+	route_editor = _empty_route_editor()
 
 	lines = {}
 	for line_key in Data.LINE_KEYS:
@@ -159,6 +162,294 @@ func preview_transit_route(
 		prefer_major_roads,
 		max_snap_distance
 	)
+
+func _empty_route_editor() -> Dictionary:
+	return {
+		"active": false,
+		"mode": "",
+		"line_id": "",
+		"draft_points": [],
+		"selected_index": -1,
+		"hover_point": null,
+		"hover_valid": false,
+		"preview_route": {},
+		"estimated_cost": 0,
+	}
+
+func route_editor_active() -> bool:
+	return bool(route_editor.get("active", false))
+
+func route_editor_points() -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	for raw_value in route_editor.get("draft_points", []):
+		if raw_value is Vector2:
+			result.append(raw_value)
+		elif typeof(raw_value) == TYPE_DICTIONARY:
+			var raw: Dictionary = raw_value
+			result.append(Vector2(
+				float(raw.get("x", 0.0)),
+				float(raw.get("y", 0.0))
+			))
+	return result
+
+func can_begin_free_line() -> bool:
+	return bool(depot.get("built", false)) and _has_free_garage_slot()
+
+func begin_free_line_editor() -> bool:
+	if not can_begin_free_line():
+		_request_toast("Build the depot and keep one garage slot free.")
+		return false
+	route_editor = _empty_route_editor()
+	route_editor["active"] = true
+	route_editor["mode"] = "new"
+	route_editor["estimated_cost"] = free_line_build_cost([])
+	set_selection("route_editor")
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func begin_edit_line_editor(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	route_editor = _empty_route_editor()
+	route_editor["active"] = true
+	route_editor["mode"] = "edit"
+	route_editor["line_id"] = line_id
+	var points: Array[Vector2] = []
+	for stop_id in TransitNetwork.line_stop_ids(transit_network, line_id):
+		points.append(TransitNetwork.stop_position(transit_network, stop_id))
+	route_editor["draft_points"] = points
+	route_editor["estimated_cost"] = free_line_edit_cost(points)
+	set_selection("route_editor")
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func cancel_route_editor() -> void:
+	if not route_editor_active():
+		return
+	route_editor = _empty_route_editor()
+	set_selection("")
+	route_editor_changed.emit()
+	state_changed.emit()
+
+func set_route_editor_hover(
+	point: Vector2,
+	valid: bool,
+	preview_route: Dictionary = {}
+) -> void:
+	if not route_editor_active():
+		return
+	route_editor["hover_point"] = point
+	route_editor["hover_valid"] = valid
+	route_editor["preview_route"] = preview_route
+	route_editor_changed.emit()
+
+func clear_route_editor_hover() -> void:
+	if not route_editor_active():
+		return
+	route_editor["hover_point"] = null
+	route_editor["hover_valid"] = false
+	route_editor["preview_route"] = {}
+	route_editor_changed.emit()
+
+func route_editor_select_stop(index: int) -> void:
+	if not route_editor_active():
+		return
+	var points := route_editor_points()
+	route_editor["selected_index"] = index if index >= 0 and index < points.size() else -1
+	route_editor_changed.emit()
+	state_changed.emit()
+
+func route_editor_add_point(point: Vector2, insert_after: int = -1) -> bool:
+	if not route_editor_active():
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Stops must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	var points := route_editor_points()
+	if points.size() >= TransitNetwork.MAX_CUSTOM_STOPS:
+		_request_toast("This line already has the maximum number of stops.")
+		return false
+	for existing in points:
+		if existing.distance_to(snapped) < TransitNetwork.MIN_STOP_SPACING:
+			_request_toast("Stops are too close together.")
+			return false
+	if insert_after >= 0 and insert_after < points.size() - 1:
+		points.insert(insert_after + 1, snapped)
+	else:
+		points.append(snapped)
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = -1
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_move_selected(point: Vector2) -> bool:
+	if not route_editor_active():
+		return false
+	var selected_index := int(route_editor.get("selected_index", -1))
+	var points := route_editor_points()
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	var snap := snap_transit_point(point, true, 110.0)
+	if snap.is_empty():
+		_request_toast("Stops must be placed on a built road.")
+		return false
+	var snapped: Vector2 = snap["point"]
+	for index in range(points.size()):
+		if index == selected_index:
+			continue
+		if points[index].distance_to(snapped) < TransitNetwork.MIN_STOP_SPACING:
+			_request_toast("Stops are too close together.")
+			return false
+	points[selected_index] = snapped
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = -1
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_remove_selected() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	var selected_index := int(route_editor.get("selected_index", -1))
+	if selected_index < 0 or selected_index >= points.size():
+		return false
+	points.remove_at(selected_index)
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = -1
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func route_editor_undo_last() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if points.is_empty():
+		return false
+	points.pop_back()
+	route_editor["draft_points"] = points
+	route_editor["selected_index"] = -1
+	_update_route_editor_cost()
+	route_editor_changed.emit()
+	state_changed.emit()
+	return true
+
+func free_line_build_cost(points: Array[Vector2]) -> int:
+	var route_length := _draft_route_length(points)
+	return roundi(
+		float(Data.ECONOMY["free_line_base_cost"])
+		+ float(points.size()) * float(Data.ECONOMY["free_stop_cost"])
+		+ route_length * float(Data.ECONOMY["free_route_cost_per_world_unit"])
+	)
+
+func free_line_edit_cost(points: Array[Vector2]) -> int:
+	return roundi(
+		float(Data.ECONOMY["free_line_edit_base_cost"])
+		+ _draft_route_length(points) * float(Data.ECONOMY["free_route_cost_per_world_unit"]) * 0.12
+	)
+
+func _draft_route_length(points: Array[Vector2]) -> float:
+	var total := 0.0
+	for index in range(points.size() - 1):
+		var route := preview_transit_route(points[index], points[index + 1], true, true, 115.0)
+		if not bool(route.get("success", false)):
+			return 0.0
+		total += float(route.get("length", 0.0))
+	return total
+
+func _update_route_editor_cost() -> void:
+	var points := route_editor_points()
+	route_editor["estimated_cost"] = (
+		free_line_build_cost(points)
+		if str(route_editor.get("mode", "")) == "new"
+		else free_line_edit_cost(points)
+	)
+
+func commit_route_editor() -> bool:
+	if not route_editor_active():
+		return false
+	var points := route_editor_points()
+	if points.size() < 2:
+		_request_toast("A line needs at least two stops.")
+		return false
+
+	var mode := str(route_editor.get("mode", ""))
+	var cost := (
+		free_line_build_cost(points)
+		if mode == "new"
+		else free_line_edit_cost(points)
+	)
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+
+	if mode == "new":
+		if not can_begin_free_line():
+			_request_toast("No free garage slot for the starter bus.")
+			return false
+		var serial := int(transit_network.get("next_line_serial", 1))
+		var palette_index := (serial - 1) % Data.FREE_LINE_COLORS.size()
+		var color: Color = Data.FREE_LINE_COLORS[palette_index]
+		var created := TransitNetwork.create_custom_line(
+			transit_network,
+			city,
+			points,
+			color
+		)
+		if not bool(created.get("success", false)):
+			_request_toast(_route_editor_failure_message(str(created.get("reason", ""))))
+			return false
+		var line_id := str(created.get("line_id", ""))
+		_ensure_custom_line_runtime(line_id)
+		money -= float(cost)
+		_request_toast("New bus line opened.")
+		route_editor = _empty_route_editor()
+		_commit_change()
+		set_selection("free_line:%s" % line_id)
+		route_editor_changed.emit()
+		return true
+
+	var line_id := str(route_editor.get("line_id", ""))
+	var updated := TransitNetwork.update_custom_line_points(
+		transit_network,
+		city,
+		line_id,
+		points
+	)
+	if not bool(updated.get("success", false)):
+		_request_toast(_route_editor_failure_message(str(updated.get("reason", ""))))
+		return false
+	_ensure_custom_line_runtime(line_id)
+	money -= float(cost)
+	_request_toast("Line updated.")
+	route_editor = _empty_route_editor()
+	_commit_change()
+	set_selection("free_line:%s" % line_id)
+	route_editor_changed.emit()
+	return true
+
+func _route_editor_failure_message(reason: String) -> String:
+	match reason:
+		"stops_too_close":
+			return "Stops are too close together."
+		"segment_unroutable":
+			return "The road network cannot connect those stops."
+		"stop_not_on_built_road":
+			return "A stop is not on a built road."
+		"too_many_stops":
+			return "Too many stops on one line."
+		_:
+			return "This line cannot be built here."
 
 func _sync_transit_network_bridge() -> void:
 	transit_network = TransitNetwork.ensure_legacy_bridge(
