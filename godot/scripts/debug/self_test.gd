@@ -9,12 +9,14 @@ const BrowserImporter = preload("res://scripts/persistence/browser_save_importer
 const BuildingFoundation = preload("res://scripts/render/building_foundation.gd")
 const BuildingOrientation = preload("res://scripts/render/building_orientation.gd")
 const BuildingAssets = preload("res://scripts/render/building_asset_library.gd")
+const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 
 var _self_test_failed := false
 
 func _init() -> void:
 	_test_shared_interchanges()
 	_test_route_geometry()
+	_test_road_geometry()
 	_test_terrain_determinism()
 	_test_building_foundation_sampling()
 	_test_building_frontage_orientation()
@@ -51,6 +53,49 @@ func _test_route_geometry() -> void:
 			var distance := Layout.route_length(points)
 			_expect(distance >= 350.0)
 			_expect(distance <= 1250.0)
+
+func _test_road_geometry() -> void:
+	var straight: Array[Vector2] = [Vector2(0.0, 0.0), Vector2(100.0, 0.0)]
+	var sampled := RoadGeometry.resample_polyline(straight, 8.0)
+	_expect(sampled.size() >= 13)
+	_expect(sampled.front().is_equal_approx(straight.front()))
+	_expect(sampled.back().is_equal_approx(straight.back()))
+
+	var bent: Array[Vector2] = [
+		Vector2(0.0, 0.0),
+		Vector2(50.0, 0.0),
+		Vector2(50.0, 50.0),
+	]
+	var ribbon = RoadGeometry.create_ribbon_mesh(
+		Data.DEFAULT_CITY_SEED,
+		bent,
+		16.0,
+		Color.WHITE,
+		0.05,
+		8.0,
+		true
+	)
+	_expect(ribbon != null)
+	if ribbon != null:
+		_expect(ribbon.get_surface_count() == 1)
+
+	var arms := [
+		{"direction": Vector2.RIGHT, "width": 20.0},
+		{"direction": Vector2.LEFT, "width": 20.0},
+		{"direction": Vector2.DOWN, "width": 14.0},
+	]
+	var polygon := RoadGeometry.junction_polygon(Vector2.ZERO, arms)
+	_expect(polygon.size() >= 4)
+	var patch = RoadGeometry.create_junction_patch_mesh(
+		Data.DEFAULT_CITY_SEED,
+		Vector2.ZERO,
+		arms,
+		Color.WHITE,
+		0.05
+	)
+	_expect(patch != null)
+	if patch != null:
+		_expect(patch.get_surface_count() == 1)
 
 func _test_terrain_determinism() -> void:
 	var samples := [
