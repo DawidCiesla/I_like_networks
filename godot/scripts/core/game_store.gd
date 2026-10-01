@@ -301,14 +301,35 @@ func vehicle_purchase_cost() -> int:
 
 func next_stop_cost(line_key: String) -> int:
 	var line: Dictionary = lines[line_key]
-	var config: Array = {
-		"line1": [Data.ECONOMY["line1_stop_base_cost"], Data.ECONOMY["line1_stop_cost_growth"], 1],
-		"line2": [Data.ECONOMY["line2_stop_base_cost"], Data.ECONOMY["line2_stop_cost_growth"], 2],
-		"line3": [Data.ECONOMY["line3_stop_base_cost"], Data.ECONOMY["line3_stop_cost_growth"], 2],
-		"line4": [Data.ECONOMY["line4_stop_base_cost"], Data.ECONOMY["line4_stop_cost_growth"], 2],
-	}[line_key]
-	var purchased: int = maxi(0, int(line["stop_count"]) - int(config[2]))
-	return roundi(float(config[0]) * pow(float(config[1]), purchased))
+	var base_cost: float = 0.0
+	var growth: float = 1.0
+	var included_stops: int = 1
+
+	match line_key:
+		"line1":
+			base_cost = float(Data.ECONOMY["line1_stop_base_cost"])
+			growth = float(Data.ECONOMY["line1_stop_cost_growth"])
+			included_stops = 1
+		"line2":
+			base_cost = float(Data.ECONOMY["line2_stop_base_cost"])
+			growth = float(Data.ECONOMY["line2_stop_cost_growth"])
+			included_stops = 2
+		"line3":
+			base_cost = float(Data.ECONOMY["line3_stop_base_cost"])
+			growth = float(Data.ECONOMY["line3_stop_cost_growth"])
+			included_stops = 2
+		"line4":
+			base_cost = float(Data.ECONOMY["line4_stop_base_cost"])
+			growth = float(Data.ECONOMY["line4_stop_cost_growth"])
+			included_stops = 2
+		_:
+			return 0
+
+	var purchased: int = maxi(
+		0,
+		int(line["stop_count"]) - included_stops
+	)
+	return roundi(base_cost * pow(growth, purchased))
 
 func can_build_depot() -> bool:
 	return not bool(depot["built"]) and int(lines["line1"]["stop_count"]) >= 3
