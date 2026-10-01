@@ -187,6 +187,15 @@ theme_override_font_sizes/font_size = 19
 text = "Toast"
 horizontal_alignment = 1
 
+[node name="ImportButton" type="Button" parent="HUD/Root"]
+layout_mode = 0
+offset_left = 1278.0
+offset_top = 16.0
+offset_right = 1448.0
+offset_bottom = 58.0
+mouse_filter = 0
+text = "IMPORT WEB SAVE"
+
 [node name="ResetButton" type="Button" parent="HUD/Root"]
 layout_mode = 0
 offset_left = 1458.0
