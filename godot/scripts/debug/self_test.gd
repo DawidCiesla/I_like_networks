@@ -6,6 +6,9 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const StoreScript = preload("res://scripts/core/game_store.gd")
 const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
+const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const RoadRouter = preload("res://scripts/transport/road_router.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 const BrowserImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 const BuildingFoundation = preload("res://scripts/render/building_foundation.gd")
 const BuildingOrientation = preload("res://scripts/render/building_orientation.gd")
@@ -18,6 +21,8 @@ func _init() -> void:
 	_test_shared_interchanges()
 	_test_route_geometry()
 	_test_road_geometry()
+	_test_road_router()
+	_test_transit_network_bridge()
 	_test_terrain_determinism()
 	_test_building_foundation_sampling()
 	_test_building_frontage_orientation()
@@ -124,6 +129,98 @@ func _test_road_geometry() -> void:
 	_expect(patch != null)
 	if patch != null:
 		_expect(patch.get_surface_count() == 1)
+
+func _test_road_router() -> void:
+	var city := CityRuntime.create_initial_city(Data.DEFAULT_CITY_SEED)
+	var old_town := Layout.stop_position("line1", 0)
+	var market := Layout.stop_position("line1", 1)
+
+	var snap := RoadRouter.snap_to_road(
+		city,
+		old_town + Vector2(-20.0, 6.0),
+		false,
+		80.0
+	)
+	_expect(not snap.is_empty())
+	if not snap.is_empty():
+		_expect(float(snap["distance"]) <= 80.0)
+		_expect(not str(snap["edge_id"]).is_empty())
+		_expect(not str(snap["road_id"]).is_empty())
+
+	var route := RoadRouter.route_between_points(
+		city,
+		old_town,
+		market,
+		false,
+		false,
+		120.0
+	)
+	_expect(bool(route.get("success", false)))
+	if bool(route.get("success", false)):
+		var points: Array = route.get("points", [])
+		_expect(points.size() >= 2)
+		_expect(float(route.get("length", 0.0)) > 100.0)
+		var first: Vector2 = points[0]
+		var last: Vector2 = points[points.size() - 1]
+		_expect(first.distance_to(old_town) <= 2.0)
+		_expect(last.distance_to(market) <= 2.0)
+
+	var same_edge_start := old_town + Vector2(-300.0, 0.0)
+	var same_edge_end := old_town + Vector2(-100.0, 0.0)
+	var same_edge_route := RoadRouter.route_between_points(
+		city,
+		same_edge_start,
+		same_edge_end,
+		false,
+		false,
+		10.0
+	)
+	_expect(bool(same_edge_route.get("success", false)))
+	if bool(same_edge_route.get("success", false)):
+		_expect(absf(float(same_edge_route["length"]) - 200.0) <= 1.0)
+
+func _test_transit_network_bridge() -> void:
+	var store = StoreScript.new()
+	store.suppress_persistence = true
+	store.reset_state(false)
+
+	_expect(int(store.transit_network.get("schema_version", 0)) == TransitNetwork.SCHEMA_VERSION)
+	_expect(
+		str(store.transit_network.get("source", ""))
+		== TransitNetwork.SOURCE_LEGACY_BRIDGE
+	)
+	var stops: Dictionary = store.transit_network.get("stops", {})
+	var network_lines: Dictionary = store.transit_network.get("lines", {})
+	_expect(stops.size() == Data.all_station_ids().size())
+	_expect(network_lines.size() == Data.LINE_KEYS.size())
+
+	var line1: Dictionary = network_lines.get("line1", {})
+	_expect(line1.get("stop_ids", []).size() == 1)
+	_expect(line1.get("planned_stop_ids", []).size() == int(Data.LINE_CONFIG.line1.max_stops))
+	var old_town_stop: Dictionary = stops.get("old-town", {})
+	_expect(str(old_town_stop.get("status", "")) == "built")
+	_expect(not str(old_town_stop.get("edge_id", "")).is_empty())
+
+	store.money = 10_000.0
+	_expect(store.build_next_stop("line1"))
+	line1 = store.transit_line("line1")
+	_expect(line1.get("stop_ids", []).size() == 2)
+	_expect(str(line1.get("status", "")) == "active")
+	var segments: Array = line1.get("route_segments", [])
+	_expect(segments.size() == 1)
+	if segments.size() == 1:
+		_expect(bool(segments[0].get("success", false)))
+		_expect(float(segments[0].get("length_world", 0.0)) > 0.0)
+
+	var preview := store.preview_transit_route(
+		Layout.stop_position("line1", 0),
+		Layout.stop_position("line1", 1),
+		true,
+		true,
+		120.0
+	)
+	_expect(bool(preview.get("success", false)))
+	store.free()
 
 func _test_terrain_determinism() -> void:
 	var samples := [
