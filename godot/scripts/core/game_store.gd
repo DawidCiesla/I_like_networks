@@ -10,6 +10,7 @@ const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
 const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
+const TransitPlanner = preload("res://scripts/transport/transit_planner.gd")
 const RoadRouter = preload("res://scripts/transport/road_router.gd")
 const BrowserSaveImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 
