@@ -189,7 +189,9 @@ func _update_effects(delta: float) -> void:
 		var duration := max(0.01, float(effect["duration"]))
 		var t := clamp(float(effect["age"]) / duration, 0.0, 1.0)
 		var eased := 1.0 - pow(1.0 - t, 3.0)
-		node.global_position = Vector3(effect["start"]).lerp(Vector3(effect["finish"]), eased)
+		var start: Vector3 = effect["start"]
+		var finish: Vector3 = effect["finish"]
+		node.global_position = start.lerp(finish, eased)
 		node.global_position.y += sin(t * PI) * 8.0
 		_effects[index] = effect
 
