@@ -878,6 +878,447 @@ func _ensure_line_runtime(line_key: String) -> void:
 	lines[line_key] = line
 	line["queue_passengers"] = line_waiting_passengers(line_key)
 
+func _ensure_custom_line_runtime(line_id: String) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	if str(line.get("source", "")) != "custom":
+		return
+
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var old_matrix: Array = line.get("waiting_by_stop", [])
+	var matrix := _create_waiting_matrix(stop_count)
+	for row_index in range(mini(stop_count, old_matrix.size())):
+		var source_row: Array = old_matrix[row_index]
+		var target_row: Array = matrix[row_index]
+		for column in range(mini(stop_count, source_row.size())):
+			target_row[column] = maxf(0.0, float(source_row[column]))
+		matrix[row_index] = target_row
+	line["waiting_by_stop"] = matrix
+
+	if not line.has("vehicles"):
+		line["vehicles"] = []
+	if not line.has("next_vehicle_id"):
+		line["next_vehicle_id"] = 1
+	if not line.has("event_serial"):
+		line["event_serial"] = 0
+	if not line.has("passenger_events"):
+		line["passenger_events"] = []
+	if not line.has("last_passenger_event"):
+		line["last_passenger_event"] = null
+	if not line.has("current_abandonment_ppm"):
+		line["current_abandonment_ppm"] = 0.0
+	if not line.has("total_abandoned_passengers"):
+		line["total_abandoned_passengers"] = 0.0
+	if not line.has("last_delivered_ppm"):
+		line["last_delivered_ppm"] = 0.0
+	if not line.has("queue_passengers"):
+		line["queue_passengers"] = 0.0
+
+	var vehicles: Array = line["vehicles"]
+	var target_fleet := maxi(0, int(line.get("fleet_count", 0)))
+	if stop_count >= 2 and target_fleet <= 0:
+		target_fleet = 1
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+	while vehicles.size() < target_fleet:
+		_add_custom_vehicle_to_line(line_id)
+		network_lines = transit_network.get("lines", {})
+		line = network_lines[line_id]
+		vehicles = line.get("vehicles", [])
+	while vehicles.size() > target_fleet and not vehicles.is_empty():
+		vehicles.pop_back()
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _create_custom_vehicle(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var vehicle_id := int(line.get("next_vehicle_id", 1))
+	line["next_vehicle_id"] = vehicle_id + 1
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+	var onboard: Array = []
+	onboard.resize(stop_count)
+	onboard.fill(0.0)
+	var dwell := _custom_stop_dwell_minutes(line_id, 0, true)
+	return {
+		"id": vehicle_id,
+		"current_stop_index": 0,
+		"next_stop_index": mini(1, stop_count - 1),
+		"direction": 1,
+		"phase": "dwell",
+		"phase_minutes_remaining": dwell,
+		"phase_duration_minutes": dwell,
+		"onboard_by_destination": onboard,
+		"onboard_passengers": 0.0,
+	}
+
+func _add_custom_vehicle_to_line(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return {}
+	var line: Dictionary = network_lines[line_id]
+	var vehicle := _create_custom_vehicle(line_id)
+	network_lines = transit_network.get("lines", {})
+	line = network_lines[line_id]
+	var vehicles: Array = line.get("vehicles", [])
+	vehicles.append(vehicle)
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	return vehicle
+
+func add_bus_to_transit_line(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	if not bool(depot.get("built", false)):
+		return false
+	if garage_used() >= int(depot.get("garage_slots", 0)):
+		_request_toast("Garage is full.")
+		return false
+	if int(line.get("fleet_count", 0)) >= int(Data.ECONOMY["max_vehicles_per_line"]):
+		return false
+	var cost := vehicle_purchase_cost()
+	if money < float(cost):
+		_request_toast("Not enough money.")
+		return false
+
+	money -= float(cost)
+	_add_custom_vehicle_to_line(line_id)
+	_request_toast("Bus added to %s." % str(line.get("name", "line")))
+	_commit_change()
+	return true
+
+func delete_custom_line(line_id: String) -> bool:
+	var line := transit_line(line_id)
+	if line.is_empty() or str(line.get("source", "")) != "custom":
+		return false
+	if not TransitNetwork.remove_custom_line(transit_network, line_id):
+		return false
+	_request_toast("Line removed.")
+	_commit_change()
+	set_selection("")
+	return true
+
+func _custom_stop_dwell_minutes(
+	line_id: String,
+	stop_index: int,
+	include_turnaround: bool
+) -> float:
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_index < 0 or stop_index >= stop_ids.size():
+		return float(Data.BUS["dwell_minutes"])
+	var stop := transit_stop(stop_ids[stop_index])
+	var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+	var reduction := float(Data.STATION_UPGRADE["dwell_reduction"][level])
+	var result := maxf(0.12, float(Data.BUS["dwell_minutes"]) - reduction)
+	if include_turnaround and (stop_index == 0 or stop_index == stop_ids.size() - 1):
+		result += float(Data.BUS["turnaround_minutes"]) / 2.0
+	return result
+
+func _custom_segment_travel_minutes(
+	line_id: String,
+	from_stop: int,
+	to_stop: int
+) -> float:
+	var line := transit_line(line_id)
+	var segments: Array = line.get("route_segments", [])
+	var segment_index := mini(from_stop, to_stop)
+	if segment_index < 0 or segment_index >= segments.size():
+		return 0.1
+	var segment: Dictionary = segments[segment_index]
+	var length_km := float(segment.get("length_world", 0.0)) / float(Data.WORLD_UNITS_PER_KM)
+	return maxf(0.05, length_km / float(Data.BUS["speed_kph"]) * 60.0)
+
+func _custom_generate_passengers(line_id: String, delta_minutes: float) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines.get(line_id, {})
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	var stop_count := stop_ids.size()
+	if stop_count < 2:
+		return
+
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var abandoned := 0.0
+	for origin in range(stop_count):
+		var stats := TransitNetwork.catchment_stats(
+			transit_network,
+			city,
+			stop_ids[origin]
+		)
+		var stop := transit_stop(stop_ids[origin])
+		var interchange_bonus := 1.0 + maxf(
+			0.0,
+			float(stop.get("served_line_ids", []).size() - 1) * 0.10
+		)
+		var demand := float(stats.get("demand_ppm", 0.0)) * interchange_bonus
+		var per_destination := demand / float(maxi(1, stop_count - 1))
+		var row: Array = matrix[origin]
+		for destination in range(stop_count):
+			if destination == origin:
+				continue
+			row[destination] = float(row[destination]) + per_destination * delta_minutes
+
+		var level := clampi(int(stop.get("level", 0)), 0, int(Data.STATION_UPGRADE["max_level"]))
+		var capacity := float(Data.STATION_UPGRADE["waiting_capacity"][level])
+		var waiting := 0.0
+		for value in row:
+			waiting += maxf(0.0, float(value))
+		if waiting > capacity:
+			var keep_ratio := capacity / waiting
+			abandoned += waiting - capacity
+			for destination in range(row.size()):
+				row[destination] = float(row[destination]) * keep_ratio
+		matrix[origin] = row
+
+	line["waiting_by_stop"] = matrix
+	line["current_abandonment_ppm"] = (
+		abandoned / delta_minutes if delta_minutes > 0.0 else 0.0
+	)
+	line["total_abandoned_passengers"] = float(
+		line.get("total_abandoned_passengers", 0.0)
+	) + abandoned
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _custom_emit_passenger_event(
+	line_id: String,
+	event_type: String,
+	stop_index: int,
+	vehicle_id: int,
+	count: float,
+	fare: float = 0.0
+) -> void:
+	if count <= 0.0:
+		return
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	line["event_serial"] = int(line.get("event_serial", 0)) + 1
+	var event := {
+		"serial": int(line["event_serial"]),
+		"type": event_type,
+		"stop_index": stop_index,
+		"vehicle_id": vehicle_id,
+		"count": count,
+		"fare": fare,
+	}
+	line["last_passenger_event"] = event
+	var events: Array = line.get("passenger_events", [])
+	events.append(event)
+	while events.size() > 24:
+		events.pop_front()
+	line["passenger_events"] = events
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
+func _custom_unload_at_stop(
+	line_id: String,
+	vehicle: Dictionary,
+	stop_index: int
+) -> float:
+	var onboard: Array = vehicle.get("onboard_by_destination", [])
+	if stop_index < 0 or stop_index >= onboard.size():
+		return 0.0
+	var alighting := float(onboard[stop_index])
+	if alighting <= 0.0:
+		return 0.0
+	onboard[stop_index] = 0.0
+	vehicle["onboard_by_destination"] = onboard
+	vehicle["onboard_passengers"] = maxf(
+		0.0,
+		float(vehicle.get("onboard_passengers", 0.0)) - alighting
+	)
+
+	var fare := alighting * float(Data.ECONOMY["fare_per_passenger"])
+	money += fare
+	stats["lifetime_revenue"] = float(stats["lifetime_revenue"]) + fare
+	stats["lifetime_passengers"] = float(stats["lifetime_passengers"]) + alighting
+	stats["last_fare_event_value"] = fare
+	stats["last_fare_event_serial"] = int(stats["last_fare_event_serial"]) + 1
+	stats["last_fare_line"] = line_id
+	stats["last_fare_stop_index"] = stop_index
+
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	line["last_delivered_ppm"] = float(line.get("last_delivered_ppm", 0.0)) + (
+		alighting / float(Data.DELIVERY_RATE_WINDOW_MINUTES)
+	)
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_custom_emit_passenger_event(
+		line_id,
+		"alight",
+		stop_index,
+		int(vehicle.get("id", 0)),
+		alighting,
+		fare
+	)
+	_fare_changed_this_frame = true
+	return alighting
+
+func _custom_board_at_stop(line_id: String, vehicle: Dictionary) -> float:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	var line: Dictionary = network_lines[line_id]
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	var stop_count := stop_ids.size()
+	var stop_index := int(vehicle.get("current_stop_index", 0))
+	var available := float(Data.BUS["capacity"]) - float(vehicle.get("onboard_passengers", 0.0))
+	if available <= 0.0 or stop_index < 0 or stop_index >= stop_count:
+		return 0.0
+
+	var destinations: Array[int] = []
+	if int(vehicle.get("direction", 1)) > 0:
+		for destination in range(stop_index + 1, stop_count):
+			destinations.append(destination)
+	else:
+		for destination in range(stop_index - 1, -1, -1):
+			destinations.append(destination)
+
+	var matrix: Array = line.get("waiting_by_stop", [])
+	var row: Array = matrix[stop_index]
+	var onboard: Array = vehicle.get("onboard_by_destination", [])
+	var boarded := 0.0
+	for destination in destinations:
+		if available <= 0.0:
+			break
+		var waiting := float(row[destination])
+		if waiting <= 0.0:
+			continue
+		var take := minf(waiting, available)
+		row[destination] = waiting - take
+		onboard[destination] = float(onboard[destination]) + take
+		vehicle["onboard_passengers"] = float(vehicle.get("onboard_passengers", 0.0)) + take
+		boarded += take
+		available -= take
+
+	matrix[stop_index] = row
+	line["waiting_by_stop"] = matrix
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	vehicle["onboard_by_destination"] = onboard
+	_update_custom_queue(line_id)
+	_custom_emit_passenger_event(
+		line_id,
+		"board",
+		stop_index,
+		int(vehicle.get("id", 0)),
+		boarded
+	)
+	return boarded
+
+func _custom_start_travel(line_id: String, vehicle: Dictionary) -> void:
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	var current := int(vehicle.get("current_stop_index", 0))
+	var direction := int(vehicle.get("direction", 1))
+	if current == 0 and direction < 0:
+		direction = 1
+	if current == stop_count - 1 and direction > 0:
+		direction = -1
+	vehicle["direction"] = direction
+	var next_stop := current + direction
+	if next_stop < 0 or next_stop >= stop_count:
+		return
+	vehicle["next_stop_index"] = next_stop
+	vehicle["phase"] = "travel"
+	var travel := _custom_segment_travel_minutes(line_id, current, next_stop)
+	vehicle["phase_duration_minutes"] = travel
+	vehicle["phase_minutes_remaining"] = travel
+
+func _custom_arrive(line_id: String, vehicle: Dictionary) -> void:
+	vehicle["current_stop_index"] = int(vehicle.get("next_stop_index", 0))
+	var current := int(vehicle["current_stop_index"])
+	_custom_unload_at_stop(line_id, vehicle, current)
+	var stop_count := TransitNetwork.line_stop_ids(transit_network, line_id).size()
+	if current == 0:
+		vehicle["direction"] = 1
+	elif current == stop_count - 1:
+		vehicle["direction"] = -1
+	vehicle["phase"] = "dwell"
+	var dwell := _custom_stop_dwell_minutes(line_id, current, true)
+	vehicle["phase_duration_minutes"] = dwell
+	vehicle["phase_minutes_remaining"] = dwell
+
+func _custom_begin_boarding(line_id: String, vehicle: Dictionary) -> void:
+	_custom_board_at_stop(line_id, vehicle)
+	vehicle["phase"] = "boarding"
+	vehicle["phase_duration_minutes"] = float(Data.BOARDING_HOLD_MINUTES)
+	vehicle["phase_minutes_remaining"] = float(Data.BOARDING_HOLD_MINUTES)
+
+func _advance_custom_vehicle(
+	line_id: String,
+	vehicle: Dictionary,
+	delta_minutes: float
+) -> void:
+	var remaining := delta_minutes
+	var guard := 0
+	while remaining > 0.0 and guard < 8:
+		guard += 1
+		var phase_remaining := maxf(
+			0.0,
+			float(vehicle.get("phase_minutes_remaining", 0.0))
+		)
+		var step := minf(remaining, phase_remaining)
+		vehicle["phase_minutes_remaining"] = phase_remaining - step
+		remaining -= step
+		if float(vehicle["phase_minutes_remaining"]) > 0.000000001:
+			break
+		match str(vehicle.get("phase", "")):
+			"travel":
+				_custom_arrive(line_id, vehicle)
+			"dwell":
+				_custom_begin_boarding(line_id, vehicle)
+			_:
+				_custom_start_travel(line_id, vehicle)
+		if float(vehicle.get("phase_minutes_remaining", 0.0)) <= 0.0 and remaining <= 0.0:
+			break
+
+func _simulate_custom_line(line_id: String, delta_minutes: float) -> void:
+	_ensure_custom_line_runtime(line_id)
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	if str(line.get("status", "")) != "active":
+		return
+
+	var decay := exp(-delta_minutes / float(Data.DELIVERY_RATE_WINDOW_MINUTES))
+	line["last_delivered_ppm"] = float(line.get("last_delivered_ppm", 0.0)) * decay
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_custom_generate_passengers(line_id, delta_minutes)
+
+	network_lines = transit_network.get("lines", {})
+	line = network_lines[line_id]
+	var vehicles: Array = line.get("vehicles", [])
+	for vehicle in vehicles:
+		_advance_custom_vehicle(line_id, vehicle, delta_minutes)
+	line["vehicles"] = vehicles
+	line["fleet_count"] = vehicles.size()
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+	_update_custom_queue(line_id)
+
+func _update_custom_queue(line_id: String) -> void:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	if not network_lines.has(line_id):
+		return
+	var line: Dictionary = network_lines[line_id]
+	line["queue_passengers"] = custom_line_waiting_passengers(line_id)
+	network_lines[line_id] = line
+	transit_network["lines"] = network_lines
+
 func build_next_stop(line_key: String) -> bool:
 	if not lines.has(line_key):
 		return false
