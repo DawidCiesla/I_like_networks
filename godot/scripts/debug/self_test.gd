@@ -308,9 +308,14 @@ func _test_free_line_workflow() -> void:
 
 	_expect(store.begin_edit_line_editor(line_id))
 	store.route_editor_select_stop(1)
-	_expect(store.route_editor_move_selected(old_town + Vector2(-80.0, 0.0)))
-	store.route_editor_select_stop(1)
 	_expect(store.route_editor_reorder_selected(-1))
+	var reordered_ids := store.route_editor_stop_ids()
+	_expect(reordered_ids.size() == 2)
+	if reordered_ids.size() == 2:
+		_expect(reordered_ids[0] == stop_ids[1])
+		_expect(reordered_ids[1] == stop_ids[0])
+	store.route_editor_select_stop(1)
+	_expect(store.route_editor_move_selected(old_town + Vector2(-340.0, 0.0)))
 	_expect(store.route_editor_waypoints().size() == 1)
 	_expect(store.route_editor_add_waypoint(
 		old_town + Vector2(-200.0, 0.0),
@@ -321,7 +326,15 @@ func _test_free_line_workflow() -> void:
 	_expect(store.route_editor_waypoints()[0].size() == 1)
 	_expect(store.commit_route_editor())
 	line = store.transit_line(line_id)
-	_expect(float(line.get("route_length_world", 0.0)) >= 210.0)
+	_expect(float(line.get("route_length_world", 0.0)) >= 230.0)
+	var final_stop_ids := TransitNetwork.line_stop_ids(
+		store.transit_network,
+		line_id
+	)
+	_expect(final_stop_ids.size() == 2)
+	if final_stop_ids.size() == 2:
+		_expect(final_stop_ids[0] == stop_ids[1])
+		_expect(final_stop_ids[1] == stop_ids[0])
 	var persisted_waypoints := TransitNetwork.segment_waypoints(
 		store.transit_network,
 		line_id
