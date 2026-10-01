@@ -143,7 +143,7 @@ func station_is_built(station_id: String) -> bool:
 		return true
 
 	for line_key in Data.LINE_KEYS:
-		var index := Data.STATION_IDS[line_key].find(station_id)
+		var index: int = Data.STATION_IDS[line_key].find(station_id)
 		if index < 0:
 			continue
 
@@ -162,7 +162,7 @@ func station_served_lines(station_id: String) -> Array[String]:
 		var line: Dictionary = lines[line_key]
 		if not bool(line["built"]):
 			continue
-		var index := Data.STATION_IDS[line_key].find(station_id)
+		var index: int = Data.STATION_IDS[line_key].find(station_id)
 		if index >= 0 and index < int(line["stop_count"]):
 			result.append(line_key)
 	return result
@@ -173,7 +173,7 @@ func station_waiting_passengers(station_id: String) -> float:
 		var line: Dictionary = lines[line_key]
 		if not bool(line["built"]):
 			continue
-		var stop_index := Data.STATION_IDS[line_key].find(station_id)
+		var stop_index: int = Data.STATION_IDS[line_key].find(station_id)
 		if stop_index >= 0 and stop_index < int(line["stop_count"]):
 			total += stop_waiting_passengers(line_key, stop_index)
 	return total
@@ -197,7 +197,7 @@ func line_demand(line_key: String) -> float:
 
 func line_route_length_km(line_key: String) -> float:
 	var line: Dictionary = lines[line_key]
-	var segment_count := max(0, int(line["stop_count"]) - 1)
+	var segment_count: int = maxi(0, int(line["stop_count"]) - 1)
 	var lengths: Array = Data.LINE_CONFIG[line_key]["segment_lengths_km"]
 	var total := 0.0
 	for index in range(segment_count):
@@ -293,7 +293,7 @@ func vehicle_purchase_cost() -> int:
 	for line_key in Data.LINE_KEYS:
 		if bool(lines[line_key]["built"]):
 			built_lines += 1
-	var purchased := max(0, garage_used() - built_lines)
+	var purchased: int = maxi(0, garage_used() - built_lines)
 	return roundi(
 		float(Data.ECONOMY["bus_base_cost"])
 		* pow(float(Data.ECONOMY["bus_cost_growth"]), purchased)
@@ -301,14 +301,35 @@ func vehicle_purchase_cost() -> int:
 
 func next_stop_cost(line_key: String) -> int:
 	var line: Dictionary = lines[line_key]
-	var config := {
-		"line1": [Data.ECONOMY["line1_stop_base_cost"], Data.ECONOMY["line1_stop_cost_growth"], 1],
-		"line2": [Data.ECONOMY["line2_stop_base_cost"], Data.ECONOMY["line2_stop_cost_growth"], 2],
-		"line3": [Data.ECONOMY["line3_stop_base_cost"], Data.ECONOMY["line3_stop_cost_growth"], 2],
-		"line4": [Data.ECONOMY["line4_stop_base_cost"], Data.ECONOMY["line4_stop_cost_growth"], 2],
-	}[line_key]
-	var purchased := max(0, int(line["stop_count"]) - int(config[2]))
-	return roundi(float(config[0]) * pow(float(config[1]), purchased))
+	var base_cost: float = 0.0
+	var growth: float = 1.0
+	var included_stops: int = 1
+
+	match line_key:
+		"line1":
+			base_cost = float(Data.ECONOMY["line1_stop_base_cost"])
+			growth = float(Data.ECONOMY["line1_stop_cost_growth"])
+			included_stops = 1
+		"line2":
+			base_cost = float(Data.ECONOMY["line2_stop_base_cost"])
+			growth = float(Data.ECONOMY["line2_stop_cost_growth"])
+			included_stops = 2
+		"line3":
+			base_cost = float(Data.ECONOMY["line3_stop_base_cost"])
+			growth = float(Data.ECONOMY["line3_stop_cost_growth"])
+			included_stops = 2
+		"line4":
+			base_cost = float(Data.ECONOMY["line4_stop_base_cost"])
+			growth = float(Data.ECONOMY["line4_stop_cost_growth"])
+			included_stops = 2
+		_:
+			return 0
+
+	var purchased: int = maxi(
+		0,
+		int(line["stop_count"]) - included_stops
+	)
+	return roundi(base_cost * pow(growth, purchased))
 
 func can_build_depot() -> bool:
 	return not bool(depot["built"]) and int(lines["line1"]["stop_count"]) >= 3
@@ -685,7 +706,7 @@ func _board_at_stop(line_key: String, vehicle: Dictionary) -> float:
 		if waiting <= 0.0:
 			continue
 
-		var take := min(waiting, available_space)
+		var take: float = minf(waiting, available_space)
 		row[destination] = waiting - take
 		onboard[destination] = float(onboard[destination]) + take
 		vehicle["onboard_passengers"] = float(vehicle["onboard_passengers"]) + take
@@ -749,8 +770,8 @@ func _advance_vehicle(line_key: String, vehicle: Dictionary, delta_minutes: floa
 
 	while remaining > 0.0 and guard < 8:
 		guard += 1
-		var phase_remaining := max(0.0, float(vehicle["phase_minutes_remaining"]))
-		var step := min(remaining, phase_remaining)
+		var phase_remaining: float = maxf(0.0, float(vehicle["phase_minutes_remaining"]))
+		var step: float = minf(remaining, phase_remaining)
 		vehicle["phase_minutes_remaining"] = float(vehicle["phase_minutes_remaining"]) - step
 		remaining -= step
 
@@ -797,8 +818,8 @@ func _advance_simulation(real_delta_seconds: float) -> bool:
 	if real_delta_seconds <= 0.0 or simulation_speed <= 0:
 		return false
 
-	var delta_seconds := min(real_delta_seconds, 0.25) * float(simulation_speed)
-	var delta_minutes := delta_seconds * float(Data.GAME_MINUTES_PER_REAL_SECOND)
+	var delta_seconds: float = minf(real_delta_seconds, 0.25) * float(simulation_speed)
+	var delta_minutes: float = delta_seconds * float(Data.GAME_MINUTES_PER_REAL_SECOND)
 	elapsed_seconds += delta_seconds
 
 	for line_key in Data.LINE_KEYS:
@@ -826,8 +847,8 @@ func bus_visuals() -> Array[Dictionary]:
 				if current_stop > next_stop:
 					route.reverse()
 
-				var duration := max(0.000001, float(vehicle["phase_duration_minutes"]))
-				var progress := clamp(
+				var duration: float = maxf(0.000001, float(vehicle["phase_duration_minutes"]))
+				var progress: float = clampf(
 					1.0 - float(vehicle["phase_minutes_remaining"]) / duration,
 					0.0,
 					1.0

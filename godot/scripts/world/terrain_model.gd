@@ -89,7 +89,7 @@ static func forest_potential(seed: int, x: float, z: float) -> float:
 	var noise := _fbm(seed, x - 311.0, z + 907.0, 610.0, 4, "forest") * 0.5 + 0.5
 	var wet := moisture(seed, x, z)
 	var slope := slope_degrees(seed, x, z)
-	var slope_bonus := min(0.18, slope / 90.0)
+	var slope_bonus: float = minf(0.18, slope / 90.0)
 	return clamp(noise * 0.68 + wet * 0.32 + slope_bonus, 0.0, 1.0)
 
 static func biome(seed: int, x: float, z: float) -> String:

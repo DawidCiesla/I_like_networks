@@ -13,9 +13,9 @@ static func import_file(path: String) -> Dictionary:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return {}
 
-	return convert(parsed)
+	return convert_browser_save(parsed)
 
-static func convert(parsed: Dictionary) -> Dictionary:
+static func convert_browser_save(parsed: Dictionary) -> Dictionary:
 	var source: Dictionary = parsed.get("state", parsed)
 	var web_version := int(source.get("version", 0))
 	if web_version < 6 or web_version > 12:

@@ -4,7 +4,7 @@ A passenger-transport incremental / management game prototype inspired by the cl
 
 ## Current development status
 
-**Bus Era — Godot 4.6 primary runtime**
+**Bus Era — Godot 4.7 primary runtime**
 
 The migration to Godot is complete for the current Bus Era. The native runtime now owns transport simulation, exact passenger flow, procedural city generation, road topology, terrain, buildings, visible passengers, ambient traffic, UI and persistence.
 
@@ -151,7 +151,7 @@ Existing lines and stations do not teleport when new content is unlocked.
 
 ### Primary Godot build
 
-Requires Godot 4.6.
+Requires Godot 4.7.
 
 ```bash
 godot --path godot

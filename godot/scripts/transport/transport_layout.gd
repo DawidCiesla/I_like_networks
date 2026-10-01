@@ -92,7 +92,7 @@ static func _rounded_polyline(points: Array, radius: float = 38.0, steps: int = 
 		var next := spread_points[index + 1]
 		var incoming := previous.distance_to(corner)
 		var outgoing := corner.distance_to(next)
-		var effective_radius := min(radius, min(incoming * 0.38, outgoing * 0.38))
+		var effective_radius: float = minf(radius, minf(incoming * 0.38, outgoing * 0.38))
 		var entry := _point_toward(corner, previous, effective_radius)
 		var exit := _point_toward(corner, next, effective_radius)
 		result.append(entry)
@@ -117,7 +117,7 @@ static func segment_points(line_key: String, segment_index: int) -> Array[Vector
 
 static func built_route(line_key: String, stop_count: int) -> Array[Vector2]:
 	var result: Array[Vector2] = []
-	var segment_count := max(0, stop_count - 1)
+	var segment_count: int = maxi(0, stop_count - 1)
 	if segment_count == 0:
 		if stop_count > 0:
 			result.append(stop_position(line_key, 0))

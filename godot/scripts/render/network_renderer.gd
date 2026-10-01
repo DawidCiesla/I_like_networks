@@ -114,7 +114,7 @@ func _add_ribbon(
 		var normal := Vector2(-direction.y, direction.x)
 
 		for side in [-1.0, 1.0]:
-			var point := points[index] + normal * width * 0.5 * side
+			var point: Vector2 = points[index] + normal * width * 0.5 * side
 			mesh.surface_add_vertex(Vector3(
 				point.x,
 				Terrain.height(GameStore.city_seed, point.x, point.y) + height_offset,
