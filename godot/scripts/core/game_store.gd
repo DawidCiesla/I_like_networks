@@ -783,7 +783,11 @@ func next_stop_cost(line_key: String) -> int:
 	return roundi(base_cost * pow(growth, purchased))
 
 func can_build_depot() -> bool:
-	return not bool(depot["built"]) and int(lines["line1"]["stop_count"]) >= 3
+	return (
+		not bool(depot["built"])
+		and bool(lines["line1"].get("built", false))
+		and int(lines["line1"]["stop_count"]) >= 2
+	)
 
 func _has_free_garage_slot() -> bool:
 	return garage_used() < int(depot["garage_slots"])
