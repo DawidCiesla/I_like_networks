@@ -104,6 +104,8 @@ func reset_state(emit_signal: bool = true) -> void:
 	}
 
 	city = CityRuntime.create_initial_city(city_seed)
+	transit_network = {}
+	CityRuntime.sync_with_transport(self)
 	transit_network = TransitNetwork.create_legacy_bridge(
 		city,
 		lines,
