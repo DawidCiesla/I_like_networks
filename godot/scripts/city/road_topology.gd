@@ -31,8 +31,8 @@ static func closest_point_on_segment(point: Vector2, a: Vector2, b: Vector2) -> 
 			"distance": point.distance_to(a),
 		}
 
-	var t := clamp((point - a).dot(ab) / length_squared, 0.0, 1.0)
-	var projection := a + ab * t
+	var t: float = clampf((point - a).dot(ab) / length_squared, 0.0, 1.0)
+	var projection: Vector2 = a + ab * t
 	return {
 		"point": projection,
 		"t": t,
@@ -105,7 +105,7 @@ static func has_parallel_overlap(candidate: Dictionary, roads: Array, clearance:
 				var c := _to_vec(other_points[second_index])
 				var d := _to_vec(other_points[second_index + 1])
 				var second_direction := (d - c).normalized()
-				var dot := abs(first_direction.dot(second_direction))
+				var dot: float = absf(first_direction.dot(second_direction))
 				if dot < 0.94:
 					continue
 				var minimum := (
