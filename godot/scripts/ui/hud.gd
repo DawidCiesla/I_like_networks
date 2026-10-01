@@ -407,6 +407,7 @@ func _render_route_editor() -> void:
 	_add_stat_row("Minimum spacing", "%d" % roundi(TransitNetwork.MIN_STOP_SPACING))
 	_add_stat_row("Build / edit cost", "$%d" % int(GameStore.route_editor.get("estimated_cost", 0)))
 	_add_stat_row("Controls", "CTRL+LMB VIA · CTRL+RMB REMOVE VIA")
+	_add_stat_row("Navigate", "MMB PAN · WHEEL ZOOM")
 	_add_stat_row("Finish", "ENTER CONFIRM · RMB UNDO · ESC CANCEL")
 
 	if selected >= 0 and selected < points.size():
