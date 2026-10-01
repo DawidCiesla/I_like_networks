@@ -18,6 +18,9 @@ const Data = preload("res://scripts/core/game_data.gd")
 @onready var speed_2_button: Button = $Root/SpeedPanel/Row/Speed2
 @onready var speed_4_button: Button = $Root/SpeedPanel/Row/Speed4
 @onready var reset_button: Button = $Root/ResetButton
+@onready var import_button: Button = $Root/ImportButton
+
+var _import_dialog: FileDialog
 
 var _primary_action := ""
 var _primary_payload := ""
@@ -36,6 +39,15 @@ func _ready() -> void:
 	speed_2_button.pressed.connect(func(): GameStore.set_speed(2))
 	speed_4_button.pressed.connect(func(): GameStore.set_speed(4))
 	reset_button.pressed.connect(_on_reset_pressed)
+	import_button.pressed.connect(_on_import_pressed)
+
+	_import_dialog = FileDialog.new()
+	_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_import_dialog.filters = PackedStringArray(["*.json ; Browser save JSON"])
+	_import_dialog.title = "Import I Like Transit browser save"
+	_import_dialog.file_selected.connect(_on_import_file_selected)
+	add_child(_import_dialog)
 
 	refresh()
 	_on_selection_changed(GameStore.selected)
@@ -265,3 +277,11 @@ func _on_reset_pressed() -> void:
 	GameStore.clear_save_and_reset()
 	GameStore.set_selection("")
 	show_toast("Game reset to the first stop.")
+
+
+func _on_import_pressed() -> void:
+	_import_dialog.popup_centered_ratio(0.72)
+
+func _on_import_file_selected(path: String) -> void:
+	if GameStore.import_browser_save(path):
+		GameStore.set_selection("")
