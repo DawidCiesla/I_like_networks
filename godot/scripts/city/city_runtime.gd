@@ -59,14 +59,17 @@ static func sync_with_transport(store: Node) -> bool:
 
 	for road in store.city["roads"]:
 		var source := str(road.get("source", ""))
-		if source == "existing-arterial":
+		# Primary streets are city infrastructure, not transit unlocks. Keeping
+		# the arterial/corridor skeleton available lets player-designed routes
+		# reach future districts without buying a scripted bus line first.
+		if source in ["existing-arterial", "transport-corridor"]:
 			if str(road.get("status", "")) != "built":
 				road["status"] = "built"
 				road["constructionProgress"] = 1.0
 				changed = true
 			continue
 
-		if source not in ["transport-corridor", "depot-access"]:
+		if source != "depot-access":
 			continue
 
 		if _transport_unlock_satisfied(store, road.get("unlock", null)) and _road_dependencies_built(store.city, road):
@@ -123,14 +126,26 @@ static func _transport_unlock_satisfied(store: Node, unlock) -> bool:
 
 static func _district_should_be_active(store: Node, district: Dictionary) -> bool:
 	var line_key := str(district.get("lineKey", "line1"))
-	if not store.lines.has(line_key):
-		return false
+	if store.lines.has(line_key):
+		var line: Dictionary = store.lines[line_key]
+		var legacy_active := (
+			(line_key == "line1" or bool(line.get("built", false)))
+			and int(line.get("stop_count", 0)) > int(district.get("stopIndex", 0))
+		)
+		if legacy_active:
+			return true
 
-	var line: Dictionary = store.lines[line_key]
-	if line_key != "line1" and not bool(line.get("built", false)):
-		return false
+	if typeof(store.transit_network) == TYPE_DICTIONARY:
+		var center := _district_center(store.city, district)
+		var accessibility := TransitNetwork.stop_accessibility_score(
+			store.transit_network,
+			center,
+			440.0
+		)
+		if accessibility >= 0.28:
+			return true
 
-	return int(line.get("stop_count", 0)) > int(district.get("stopIndex", 0))
+	return false
 
 static func _activate_blocks(city: Dictionary, district: Dictionary) -> void:
 	for block_id in district.get("blockIds", []):
