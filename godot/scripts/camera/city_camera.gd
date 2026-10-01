@@ -34,7 +34,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_camera()
 			get_viewport().set_input_as_handled()
 		elif event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
-			_drag_button = event.button_index if event.pressed else 0
+			if GameStore.route_editor_active() and event.button_index == MOUSE_BUTTON_LEFT:
+				_drag_button = 0
+			else:
+				_drag_button = event.button_index if event.pressed else 0
 
 	elif event is InputEventMouseMotion and _drag_button != 0:
 		if _drag_button == MOUSE_BUTTON_LEFT:
