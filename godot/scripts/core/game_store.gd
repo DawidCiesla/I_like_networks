@@ -1246,24 +1246,48 @@ func _inject_transfer_passengers(
 ) -> void:
 	if alighting <= 0.0:
 		return
-	var stop := transit_stop(stop_id)
-	var served: Array = stop.get("served_line_ids", [])
-	var targets: Array[String] = []
-	for line_id_value in served:
-		var line_id := str(line_id_value)
-		if line_id != from_line_id:
-			targets.append(line_id)
-	if targets.is_empty():
+
+	var origin := TransitNetwork.stop_position(transit_network, stop_id)
+	var candidates_by_line: Dictionary = {}
+	var stops: Dictionary = transit_network.get("stops", {})
+	for candidate_stop_id_value in stops.keys():
+		var candidate_stop_id := str(candidate_stop_id_value)
+		var candidate_stop: Dictionary = stops[candidate_stop_id]
+		if str(candidate_stop.get("status", "")) != "built":
+			continue
+		var distance := origin.distance_to(
+			TransitNetwork.stop_position(transit_network, candidate_stop_id)
+		)
+		if distance > TransitNetwork.TRANSFER_WALK_RADIUS:
+			continue
+		for line_id_value in candidate_stop.get("served_line_ids", []):
+			var line_id := str(line_id_value)
+			if line_id == from_line_id:
+				continue
+			if candidates_by_line.has(line_id):
+				var existing: Dictionary = candidates_by_line[line_id]
+				if distance >= float(existing.get("distance", INF)):
+					continue
+			candidates_by_line[line_id] = {
+				"line_id": line_id,
+				"stop_id": candidate_stop_id,
+				"distance": distance,
+			}
+
+	if candidates_by_line.is_empty():
 		return
 
 	var transfer_total := alighting * 0.18
-	var per_line := transfer_total / float(targets.size())
-	for target_line_id in targets:
+	var per_line := transfer_total / float(candidates_by_line.size())
+	for candidate_value in candidates_by_line.values():
+		var candidate: Dictionary = candidate_value
+		var target_line_id := str(candidate.get("line_id", ""))
+		var target_stop_id := str(candidate.get("stop_id", ""))
 		if target_line_id in Data.LINE_KEYS:
 			var target_line: Dictionary = lines[target_line_id]
 			if not bool(target_line.get("built", false)):
 				continue
-			var stop_index := Data.STATION_IDS[target_line_id].find(stop_id)
+			var stop_index := Data.STATION_IDS[target_line_id].find(target_stop_id)
 			var stop_count := int(target_line.get("stop_count", 0))
 			if stop_index < 0 or stop_index >= stop_count or stop_count < 2:
 				continue
@@ -1289,7 +1313,7 @@ func _inject_transfer_passengers(
 		if str(target_line.get("source", "")) != "custom":
 			continue
 		var stop_ids := TransitNetwork.line_stop_ids(transit_network, target_line_id)
-		var stop_index := stop_ids.find(stop_id)
+		var stop_index := stop_ids.find(target_stop_id)
 		if stop_index < 0 or stop_ids.size() < 2:
 			continue
 		var destination := stop_ids.size() - 1 if stop_index < stop_ids.size() - 1 else 0
