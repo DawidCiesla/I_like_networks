@@ -441,6 +441,14 @@ func _render_free_stop(stop_id: String) -> void:
 	_add_stat_row("Demand", "%.1f PAX/MIN" % float(stats.get("demand_ppm", 0.0)))
 	_add_stat_row("Waiting", "%.1f PAX" % GameStore.custom_stop_waiting_passengers(stop_id))
 	_add_stat_row("Overlapping stops", "%d" % int(stats.get("overlap_count", 0)))
+	var level := int(stop.get("level", 0))
+	_add_stat_row("Level", "%d / %d" % [level, int(Data.STATION_UPGRADE.max_level)])
+	if level < int(Data.STATION_UPGRADE.max_level):
+		primary_button.visible = true
+		primary_button.disabled = GameStore.money < GameStore.custom_stop_upgrade_cost(stop_id)
+		primary_button.text = "UPGRADE STOP  ·  $%d" % GameStore.custom_stop_upgrade_cost(stop_id)
+		_primary_action = "upgrade_free_stop"
+		_primary_payload = stop_id
 
 func _render_station(station_id: String) -> void:
 	var served := GameStore.station_served_lines(station_id)
@@ -582,6 +590,8 @@ func _on_primary_pressed() -> void:
 			GameStore.commit_route_editor()
 		"edit_free_line":
 			GameStore.begin_edit_line_editor(_primary_payload)
+		"upgrade_free_stop":
+			GameStore.upgrade_custom_stop(_primary_payload)
 
 func _buy_bus(line_key: String) -> void:
 	GameStore.add_bus(line_key)
