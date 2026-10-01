@@ -104,6 +104,11 @@ func _poll_passenger_events() -> void:
 	for line_key in Data.LINE_KEYS:
 		var line: Dictionary = GameStore.lines[line_key]
 		var latest := int(_last_serial.get(line_key, 0))
+		var current_serial := int(line.get("event_serial", 0))
+		if current_serial < latest:
+			latest = 0
+			_last_serial[line_key] = 0
+
 		for event in line.get("passenger_events", []):
 			var serial := int(event.get("serial", 0))
 			if serial <= latest:
