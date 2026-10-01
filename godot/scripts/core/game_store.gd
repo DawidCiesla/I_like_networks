@@ -1680,6 +1680,8 @@ func _advance_simulation(real_delta_seconds: float) -> bool:
 
 	for line_key in Data.LINE_KEYS:
 		_simulate_line(line_key, delta_minutes)
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_simulate_custom_line(line_id, delta_minutes)
 
 	return CityRuntime.advance(self, delta_seconds)
 
@@ -1730,11 +1732,96 @@ func bus_visuals() -> Array[Dictionary]:
 				"onboard": float(vehicle["onboard_passengers"]),
 			})
 
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		var custom_line := transit_line(line_id)
+		if str(custom_line.get("status", "")) != "active":
+			continue
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+		var segments: Array = custom_line.get("route_segments", [])
+		for vehicle_value in custom_line.get("vehicles", []):
+			var vehicle: Dictionary = vehicle_value
+			var current_stop := int(vehicle.get("current_stop_index", 0))
+			if current_stop < 0 or current_stop >= stop_ids.size():
+				continue
+			var point := TransitNetwork.stop_position(
+				transit_network,
+				stop_ids[current_stop]
+			)
+			var tangent := Vector2.RIGHT
+
+			if str(vehicle.get("phase", "")) == "travel":
+				var next_stop := int(vehicle.get("next_stop_index", current_stop))
+				var segment_index := mini(current_stop, next_stop)
+				if segment_index >= 0 and segment_index < segments.size():
+					var segment: Dictionary = segments[segment_index]
+					var route: Array[Vector2] = []
+					for raw_value in segment.get("points", []):
+						if typeof(raw_value) != TYPE_DICTIONARY:
+							continue
+						var raw: Dictionary = raw_value
+						route.append(Vector2(
+							float(raw.get("x", 0.0)),
+							float(raw.get("y", 0.0))
+						))
+					if current_stop > next_stop:
+						route.reverse()
+					if route.size() >= 2:
+						var duration := maxf(
+							0.000001,
+							float(vehicle.get("phase_duration_minutes", 0.0))
+						)
+						var progress := clampf(
+							1.0 - float(vehicle.get("phase_minutes_remaining", 0.0)) / duration,
+							0.0,
+							1.0
+						)
+						var route_point := Layout.point_on_route(
+							route,
+							Layout.route_length(route) * progress
+						)
+						point = route_point["position"]
+						tangent = route_point["tangent"]
+			else:
+				var candidate_next := current_stop + (
+					1 if int(vehicle.get("direction", 1)) >= 0 else -1
+				)
+				var segment_index := mini(current_stop, candidate_next)
+				if (
+					candidate_next >= 0
+					and candidate_next < stop_ids.size()
+					and segment_index >= 0
+					and segment_index < segments.size()
+				):
+					var segment: Dictionary = segments[segment_index]
+					var route: Array[Vector2] = []
+					for raw_value in segment.get("points", []):
+						if typeof(raw_value) != TYPE_DICTIONARY:
+							continue
+						var raw: Dictionary = raw_value
+						route.append(Vector2(
+							float(raw.get("x", 0.0)),
+							float(raw.get("y", 0.0))
+						))
+					if current_stop > candidate_next:
+						route.reverse()
+					if route.size() >= 2:
+						tangent = (route[1] - route[0]).normalized()
+
+			result.append({
+				"key": "%s:%d" % [line_id, int(vehicle.get("id", 0))],
+				"line_key": line_id,
+				"position": point,
+				"tangent": tangent,
+				"onboard": float(vehicle.get("onboard_passengers", 0.0)),
+			})
+
 	return result
 
 func _commit_change() -> void:
 	var city_did_change := CityRuntime.sync_with_transport(self)
 	_sync_transit_network_bridge()
+	for line_id in TransitNetwork.custom_line_ids(transit_network):
+		_ensure_custom_line_runtime(line_id)
 	if not suppress_persistence:
 		save_game()
 	state_changed.emit()
