@@ -79,7 +79,7 @@ func _test_road_geometry() -> void:
 	_expect(ribbon != null)
 	if ribbon != null:
 		_expect(ribbon.get_surface_count() == 1)
-		var arrays := ribbon.surface_get_arrays(0)
+		var arrays: Array = ribbon.surface_get_arrays(0)
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		_expect(vertices.size() >= 3)
 		if vertices.size() >= 3:
