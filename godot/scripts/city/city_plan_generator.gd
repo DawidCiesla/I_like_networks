@@ -235,8 +235,8 @@ static func _generate_district(
 	var local_offset := float(spec["halfWidth"]) * 0.58
 	for side in [-1.0, 1.0]:
 		var local_id := "local-%s-%s" % [spec["id"], "left" if side < 0.0 else "right"]
-		var start := stop + outward * float(spec["depth"]) * 0.18 + tangent * local_offset * side
-		var end := stop + outward * float(spec["depth"]) * 0.92 + tangent * local_offset * side
+		var start: Vector2 = stop + outward * float(spec["depth"]) * 0.18 + tangent * local_offset * side
+		var end: Vector2 = stop + outward * float(spec["depth"]) * 0.92 + tangent * local_offset * side
 		var parents: Array = [collector_id]
 		if not cross_ids.is_empty():
 			parents = [cross_ids[0]]
@@ -335,7 +335,7 @@ static func _parcels_along_road(
 			var zone := _zone_for(spec, seed, serial)
 			var size := _footprint(str(spec["id"]), zone, density)
 			var offset := Topology.road_half_width(str(road["class"])) + float(size.y) * 0.55 + 10.0
-			var position := center + normal * offset * side
+			var position: Vector2 = center + normal * offset * side
 			position += direction * ((_unit_random(seed, "%s:parcel-jitter:%d" % [spec["id"], serial]) - 0.5) * 18.0)
 
 			if not _parcel_allowed(seed, position, size, all_roads, reservations):
@@ -453,12 +453,12 @@ static func _parcel_allowed(
 	if _inside_reservation(position, size, reservations):
 		return false
 
-	var radius := max(size.x, size.y) * 0.44
+	var radius: float = maxf(size.x, size.y) * 0.44
 	for road in roads:
 		var closest := Topology.closest_point_on_road(position, road)
 		if closest.is_empty():
 			continue
-		var minimum := radius + Topology.road_half_width(str(road.get("class", "local"))) + 5.0
+		var minimum: float = radius + Topology.road_half_width(str(road.get("class", "local"))) + 5.0
 		if float(closest["distance"]) < minimum and str(road.get("id", "")) != "":
 			var frontage_relax := str(road.get("class", "")) in ["local", "collector"]
 			if not frontage_relax or float(closest["distance"]) < Topology.road_half_width(str(road.get("class", "local"))) + 4.0:
