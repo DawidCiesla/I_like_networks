@@ -481,6 +481,8 @@ func _on_pick(
 	_shape_idx: int,
 	area: Area3D
 ) -> void:
+	if GameStore.route_editor_active():
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		GameStore.set_selection(str(area.get_meta("selection")))
 		get_viewport().set_input_as_handled()
