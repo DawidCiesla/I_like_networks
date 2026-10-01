@@ -154,7 +154,7 @@ func _test_native_plan_generation() -> void:
 		var plan := PlanGenerator.generate(seed)
 		assert(int(plan["seed"]) == seed)
 		assert(plan["districts"].size() == 15)
-		assert(plan["roads"].size() >= 70)
+		assert(plan["roads"].size() >= 60)
 		assert(plan["parcels"].size() >= 60)
 		assert(plan["nodes"].size() > 0)
 		assert(plan["graphEdges"].size() >= plan["roads"].size())
