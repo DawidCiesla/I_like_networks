@@ -8,6 +8,7 @@ const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 
 var _static_root: Node3D
+var _selection_root: Node3D
 var _bus_root: Node3D
 var _bus_meshes: Dictionary = {}
 var _bus_model_mesh: ArrayMesh
@@ -22,12 +23,18 @@ func _ready() -> void:
 	_static_root.name = "StaticNetwork"
 	add_child(_static_root)
 
+	_selection_root = Node3D.new()
+	_selection_root.name = "NetworkSelection"
+	add_child(_selection_root)
+
 	_bus_root = Node3D.new()
 	_bus_root.name = "Buses"
 	add_child(_bus_root)
 
 	GameStore.state_changed.connect(_on_state_changed)
+	GameStore.selection_changed.connect(_on_selection_changed)
 	rebuild()
+	_rebuild_selection_overlay()
 
 func _process(_delta: float) -> void:
 	_update_buses()
@@ -37,6 +44,66 @@ func _on_state_changed() -> void:
 	if next_signature == _signature:
 		return
 	rebuild()
+
+func _on_selection_changed(_selection: String) -> void:
+	_rebuild_selection_overlay()
+
+func _rebuild_selection_overlay() -> void:
+	if _selection_root == null:
+		return
+	for child in _selection_root.get_children():
+		child.queue_free()
+
+	var selection := GameStore.selected
+	if not selection.begins_with("free_stop:"):
+		return
+	var stop_id := selection.trim_prefix("free_stop:")
+	var stop := GameStore.transit_stop(stop_id)
+	if stop.is_empty():
+		return
+	var point := Vector2(
+		float(stop.get("x", 0.0)),
+		float(stop.get("y", 0.0))
+	)
+	var stats := GameStore.custom_stop_catchment(stop_id)
+	var radius := float(
+		stats.get("radius", TransitNetwork.DEFAULT_CATCHMENT_RADIUS)
+	)
+
+	var disk_instance := MeshInstance3D.new()
+	var disk := CylinderMesh.new()
+	disk.top_radius = radius
+	disk.bottom_radius = radius
+	disk.height = 0.20
+	disk.radial_segments = 56
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.20, 0.62, 0.96, 0.10)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	disk.material = material
+	disk_instance.mesh = disk
+	disk_instance.position = Vector3(
+		point.x,
+		TerrainSurface.height(GameStore.city_seed, point.x, point.y) + 0.12,
+		point.y
+	)
+	disk_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_selection_root.add_child(disk_instance)
+
+	var label := Label3D.new()
+	label.text = "%d BUILDINGS · %.1f PAX/MIN" % [
+		int(stats.get("building_count", 0)),
+		float(stats.get("demand_ppm", 0.0)),
+	]
+	label.position = Vector3(
+		point.x,
+		TerrainSurface.height(GameStore.city_seed, point.x, point.y) + 24.0,
+		point.y
+	)
+	label.font_size = 24
+	label.outline_size = 7
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_selection_root.add_child(label)
 
 func _visual_signature() -> String:
 	var parts: Array[String] = []
@@ -128,6 +195,7 @@ func rebuild() -> void:
 
 	if bool(GameStore.depot.built) or GameStore.can_build_depot():
 		_add_depot(not bool(GameStore.depot.built))
+	_rebuild_selection_overlay()
 
 func _add_ribbon(
 	points: Array[Vector2],
