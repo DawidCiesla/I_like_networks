@@ -1,0 +1,10 @@
+[mcp_servers.godot-mcp-toolkit]
+command = "npx"
+args = ["-y", "@npgamedev/godot-mcp-server"]
+cwd = "godot"
+startup_timeout_sec = 60
+tool_timeout_sec = 60
+default_tools_approval_mode = "writes"
+
+[mcp_servers.godot-mcp-toolkit.env]
+GODOT_MCP_CONFIG_VERSION = "1"
