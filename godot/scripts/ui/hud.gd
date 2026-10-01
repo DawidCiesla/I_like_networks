@@ -90,6 +90,9 @@ func refresh() -> void:
 	var delivered_ppm := 0.0
 	for line_key in Data.LINE_KEYS:
 		delivered_ppm += float(GameStore.lines[line_key].get("last_delivered_ppm", 0.0))
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var custom_line := GameStore.transit_line(line_id)
+		delivered_ppm += float(custom_line.get("last_delivered_ppm", 0.0))
 	throughput_label.text = "%.1f PAX/MIN" % delivered_ppm
 	_render_objective()
 	_render_progress()
@@ -243,6 +246,10 @@ func _built_line_count() -> int:
 	var result := 0
 	for line_key in Data.LINE_KEYS:
 		if bool(GameStore.lines[line_key].built):
+			result += 1
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var line := GameStore.transit_line(line_id)
+		if str(line.get("status", "")) == "active":
 			result += 1
 	return result
 
