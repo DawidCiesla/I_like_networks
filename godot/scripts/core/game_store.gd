@@ -8,6 +8,8 @@ signal toast_requested(message: String)
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
+const RoadRouter = preload("res://scripts/transport/road_router.gd")
 const BrowserSaveImporter = preload("res://scripts/persistence/browser_save_importer.gd")
 
 const SAVE_PATH := "user://save_godot_v2.json"
@@ -23,6 +25,7 @@ var stations: Dictionary = {}
 var depot: Dictionary = {}
 var stats: Dictionary = {}
 var city: Dictionary = {}
+var transit_network: Dictionary = {}
 
 var _autosave_timer := 0.0
 var _fare_changed_this_frame := false
@@ -97,6 +100,11 @@ func reset_state(emit_signal: bool = true) -> void:
 	}
 
 	city = CityRuntime.create_initial_city(city_seed)
+	transit_network = TransitNetwork.create_legacy_bridge(
+		city,
+		lines,
+		stations
+	)
 
 	stats = {
 		"lifetime_revenue": 0.0,
@@ -120,6 +128,45 @@ func set_speed(speed: int) -> void:
 func set_selection(value: String) -> void:
 	selected = value
 	selection_changed.emit(selected)
+
+func transit_stop(stop_id: String) -> Dictionary:
+	var stops: Dictionary = transit_network.get("stops", {})
+	return stops.get(stop_id, {}).duplicate(true)
+
+func transit_line(line_id: String) -> Dictionary:
+	var network_lines: Dictionary = transit_network.get("lines", {})
+	return network_lines.get(line_id, {}).duplicate(true)
+
+func snap_transit_point(
+	point: Vector2,
+	built_only: bool = true,
+	max_distance: float = 90.0
+) -> Dictionary:
+	return RoadRouter.snap_to_road(city, point, built_only, max_distance)
+
+func preview_transit_route(
+	start_point: Vector2,
+	end_point: Vector2,
+	built_only: bool = true,
+	prefer_major_roads: bool = true,
+	max_snap_distance: float = 90.0
+) -> Dictionary:
+	return RoadRouter.route_between_points(
+		city,
+		start_point,
+		end_point,
+		built_only,
+		prefer_major_roads,
+		max_snap_distance
+	)
+
+func _sync_transit_network_bridge() -> void:
+	transit_network = TransitNetwork.ensure_legacy_bridge(
+		transit_network,
+		city,
+		lines,
+		stations
+	)
 
 func station_level(station_id: String) -> int:
 	var station: Dictionary = stations.get(station_id, {"level": 0})
@@ -878,6 +925,7 @@ func bus_visuals() -> Array[Dictionary]:
 
 func _commit_change() -> void:
 	var city_did_change := CityRuntime.sync_with_transport(self)
+	_sync_transit_network_bridge()
 	if not suppress_persistence:
 		save_game()
 	state_changed.emit()
@@ -902,6 +950,7 @@ func save_game() -> void:
 		"depot": depot,
 		"stats": stats,
 		"city": city,
+		"transit_network": transit_network,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -948,6 +997,7 @@ func _apply_payload(parsed: Dictionary) -> void:
 	depot = parsed.get("depot", depot)
 	stats = parsed.get("stats", stats)
 	city = parsed.get("city", CityRuntime.create_initial_city(city_seed))
+	transit_network = parsed.get("transit_network", {})
 	CityRuntime.ensure_city(self)
 
 	for line_key in Data.LINE_KEYS:
@@ -960,6 +1010,7 @@ func _apply_payload(parsed: Dictionary) -> void:
 			stations[station_id] = {"level": 0}
 
 	CityRuntime.sync_with_transport(self)
+	_sync_transit_network_bridge()
 	state_changed.emit()
 	city_changed.emit()
 	selection_changed.emit(selected)
