@@ -80,12 +80,15 @@ static func create_ribbon_mesh(
 		append_triangle_above_terrain(mesh, seed, right[index], left[index + 1], right[index + 1], height_offset)
 
 	if rounded_caps:
-		var start_outward := (points.front() - points[1]).normalized()
-		var end_outward := (points.back() - points[points.size() - 2]).normalized()
+		var last_index := points.size() - 1
+		var start_point: Vector2 = points[0]
+		var end_point: Vector2 = points[last_index]
+		var start_outward: Vector2 = (start_point - points[1]).normalized()
+		var end_outward: Vector2 = (end_point - points[last_index - 1]).normalized()
 		_append_endpoint_cap(
 			mesh,
 			seed,
-			points.front(),
+			start_point,
 			start_outward,
 			half_width,
 			height_offset
@@ -93,7 +96,7 @@ static func create_ribbon_mesh(
 		_append_endpoint_cap(
 			mesh,
 			seed,
-			points.back(),
+			end_point,
 			end_outward,
 			half_width,
 			height_offset
