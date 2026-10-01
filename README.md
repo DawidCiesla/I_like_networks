@@ -4,15 +4,15 @@ A passenger-transport incremental / management game prototype inspired by the cl
 
 ## Current development status
 
-**Bus Era — Godot migration in progress**
+**Bus Era — Godot 4.6 primary runtime**
 
-A native Godot 4.6 port now lives in `godot/` alongside the existing browser build. The browser version remains the gameplay reference until feature parity is reached.
+The migration to Godot is complete for the current Bus Era. The native runtime now owns transport simulation, exact passenger flow, procedural city generation, road topology, terrain, buildings, visible passengers, ambient traffic, UI and persistence.
 
-The current Godot milestone already includes deterministic terrain, vegetation, all four Bus Era route geometries, shared physical stations, the Bus Depot, local station upgrades, exact origin→destination passenger queues, real boarding/alighting vehicle phases, arrival-only fare revenue, the canonical 15-district city plan, incremental road/building growth, visible buses, map picking, a city-builder camera, HUD/Inspector and native saves.
+The old Three.js build remains in the repository only as a legacy/reference implementation and as an exporter for pre-migration browser saves.
 
-See [`docs/godot-port.md`](docs/godot-port.md) for the migration/parity contract.
+See [`docs/godot-port.md`](docs/godot-port.md) for the native architecture and browser-save migration workflow.
 
-**Current browser build — 3D living-city foundation**
+**Legacy browser reference build**
 
 The current build focuses on making the first minutes of the game feel like a real incremental transport game rather than a systems sandbox.
 
@@ -149,7 +149,7 @@ Existing lines and stations do not teleport when new content is unlocked.
 
 ## Run locally
 
-### Godot port
+### Primary Godot build
 
 Requires Godot 4.6.
 
@@ -157,19 +157,19 @@ Requires Godot 4.6.
 godot --path godot
 ```
 
-Headless parity smoke test:
+Headless runtime/self-test:
 
 ```bash
 godot --headless --path godot --script res://scripts/debug/self_test.gd
 ```
 
-Regenerate the canonical default-seed city fixture from the browser generator:
+The historical JS-generated city fixture can still be regenerated for regression comparison only:
 
 ```bash
 npm run godot:fixture
 ```
 
-### Browser reference build
+### Legacy browser reference build
 
 Requires Node.js 20+.
 
