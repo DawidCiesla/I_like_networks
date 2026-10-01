@@ -281,6 +281,14 @@ func _render_objective() -> void:
 	if GameStore.can_build_depot():
 		objective_label.text = "BUS DEPOT UNLOCKED · CLICK ITS GHOST BUILDING"
 		return
+	if bool(GameStore.depot.get("built", false)):
+		var custom_ids := TransitNetwork.custom_line_ids(GameStore.transit_network)
+		objective_label.text = (
+			"CREATE YOUR OWN BUS LINE · USE THE CREATE LINE BUTTON"
+			if custom_ids.is_empty()
+			else "EXPAND YOUR NETWORK · CREATE OR EDIT BUS LINES"
+		)
+		return
 
 	for line_key in Data.LINE_KEYS:
 		var line: Dictionary = GameStore.lines[line_key]
