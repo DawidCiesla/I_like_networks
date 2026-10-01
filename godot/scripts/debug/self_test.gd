@@ -67,13 +67,13 @@ func _test_arrival_fare_simulation() -> void:
 	store.reset_state(false)
 	store.money = 10_000.0
 
-	var before := store.money
+	var before: float = float(store.money)
 	assert(store.build_next_stop("line1"))
 	assert(bool(store.lines["line1"]["built"]))
 	assert(int(store.lines["line1"]["fleet_count"]) == 1)
 	assert(float(store.stats["lifetime_revenue"]) == 0.0)
 
-	var after_purchase := store.money
+	var after_purchase: float = float(store.money)
 	assert(after_purchase < before)
 
 	store._advance_simulation(0.5)
@@ -217,7 +217,7 @@ func _test_browser_save_import() -> void:
 		},
 	}
 
-	var converted := BrowserImporter.convert(web_state)
+	var converted := BrowserImporter.convert_browser_save(web_state)
 	assert(not converted.is_empty())
 	assert(int(converted["version"]) == Data.GAME_VERSION)
 	assert(is_equal_approx(float(converted["money"]), 4321.0))
