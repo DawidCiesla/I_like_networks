@@ -1,0 +1,16 @@
+[gd_scene format=3]
+
+[node name="LineLegendItem" type="HBoxContainer"]
+theme_override_constants/separation = 8
+
+[node name="Swatch" type="ColorRect" parent="."]
+custom_minimum_size = Vector2(9, 9)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.027451, 0.592157, 0.92549, 1)
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 10
+text = "LINE 1"

@@ -2,11 +2,20 @@ extends Node3D
 
 const Terrain = preload("res://scripts/world/terrain_model.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
+const TREE_SCENES := {
+	"small": preload("res://assets/kenney/suburban/models/tree-small.glb"),
+	"large": preload("res://assets/kenney/suburban/models/tree-large.glb"),
+}
+const TREE_MODEL_SCALE := {
+	"small": 20.0,
+	"large": 28.0,
+}
 
 @export var spacing := 92.0
 @export var margin := 560.0
 
-var _trees: MultiMeshInstance3D
+var _tree_multimeshes: Dictionary = {}
+var _tree_model_transforms: Dictionary = {}
 var _tree_data: Array[Dictionary] = []
 var _occupancy_signature := ""
 
@@ -20,6 +29,8 @@ func rebuild() -> void:
 		child.queue_free()
 
 	_tree_data.clear()
+	_tree_multimeshes.clear()
+	_tree_model_transforms.clear()
 	var bounds := _world_bounds()
 
 	var x := bounds.position.x
@@ -32,9 +43,11 @@ func rebuild() -> void:
 			var pz := z + jitter_z
 
 			if _should_place_tree(px, pz):
+				var tree_type := "large" if _pseudo(px, pz, 6) > 0.56 else "small"
 				_tree_data.append({
 					"x": px,
 					"z": pz,
+					"type": tree_type,
 					"scale": 0.75 + _pseudo(px, pz, 4) * 0.75,
 					"rotation": _pseudo(px, pz, 5) * TAU,
 					"ground": Terrain.height(GameStore.city_seed, px, pz),
@@ -42,33 +55,42 @@ func rebuild() -> void:
 			z += spacing
 		x += spacing
 
-	var tree_mesh := CylinderMesh.new()
-	tree_mesh.top_radius = 0.0
-	tree_mesh.bottom_radius = 7.0
-	tree_mesh.height = 17.0
-	tree_mesh.radial_segments = 6
-	tree_mesh.rings = 1
+	var counts := {"small": 0, "large": 0}
+	for tree in _tree_data:
+		var tree_type := str(tree["type"])
+		tree["instance_index"] = int(counts[tree_type])
+		counts[tree_type] = int(counts[tree_type]) + 1
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("#315b31")
-	material.roughness = 1.0
-	tree_mesh.material = material
+	for tree_type in counts:
+		var count := int(counts[tree_type])
+		if count <= 0:
+			continue
 
-	var multi := MultiMesh.new()
-	multi.transform_format = MultiMesh.TRANSFORM_3D
-	multi.instance_count = _tree_data.size()
-	multi.mesh = tree_mesh
+		var source_root: Node = TREE_SCENES[tree_type].instantiate()
+		var mesh_data := _find_tree_mesh(source_root, Transform3D.IDENTITY)
+		if mesh_data.is_empty():
+			source_root.free()
+			continue
 
-	_trees = MultiMeshInstance3D.new()
-	_trees.multimesh = multi
-	_trees.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_trees)
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.mesh = mesh_data["mesh"]
+		multi.instance_count = count
+		_tree_multimeshes[tree_type] = multi
+		_tree_model_transforms[tree_type] = mesh_data["transform"]
+
+		var tree_instances := MultiMeshInstance3D.new()
+		tree_instances.name = "KenneyTrees%s" % tree_type.capitalize()
+		tree_instances.multimesh = multi
+		tree_instances.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(tree_instances)
+		source_root.free()
 
 	_occupancy_signature = ""
 	_sync_city_occupancy(true)
 
 func _sync_city_occupancy(force: bool = false) -> void:
-	if _trees == null or _trees.multimesh == null:
+	if _tree_multimeshes.is_empty():
 		return
 
 	var signature := _city_occupancy_signature()
@@ -111,15 +133,37 @@ func _sync_city_occupancy(force: bool = false) -> void:
 					break
 
 		var scale := 0.0001 if blocked else float(tree["scale"])
-		var transform := Transform3D.IDENTITY
-		transform = transform.rotated(Vector3.UP, float(tree["rotation"]))
-		transform = transform.scaled(Vector3.ONE * scale)
-		transform.origin = Vector3(
-			float(tree["x"]),
-			float(tree["ground"]) + 8.5 * scale,
-			float(tree["z"])
+		var tree_type := str(tree["type"])
+		var multimesh: MultiMesh = _tree_multimeshes.get(tree_type)
+		if multimesh == null:
+			continue
+		var asset_scale := scale * float(TREE_MODEL_SCALE[tree_type])
+		var basis := Basis(Vector3.UP, float(tree["rotation"])).scaled(Vector3.ONE * asset_scale)
+		var transform := Transform3D(
+			basis,
+			Vector3(float(tree["x"]), float(tree["ground"]), float(tree["z"]))
 		)
-		_trees.multimesh.set_instance_transform(index, transform)
+		multimesh.set_instance_transform(
+			int(tree["instance_index"]),
+			transform * _tree_model_transforms[tree_type]
+		)
+
+func _find_tree_mesh(node: Node, parent_transform: Transform3D) -> Dictionary:
+	var transform := parent_transform
+	if node is Node3D:
+		transform = parent_transform * (node as Node3D).transform
+	if node is MeshInstance3D:
+		var mesh_instance := node as MeshInstance3D
+		if mesh_instance.mesh != null:
+			return {
+				"mesh": mesh_instance.mesh,
+				"transform": transform,
+			}
+	for child in node.get_children():
+		var result := _find_tree_mesh(child, transform)
+		if not result.is_empty():
+			return result
+	return {}
 
 func _city_occupancy_signature() -> String:
 	if GameStore.city.is_empty():
@@ -170,7 +214,11 @@ func _should_place_tree(x: float, z: float) -> bool:
 	var forest := Terrain.forest_potential(GameStore.city_seed, x, z)
 	if forest < 0.59:
 		return false
-	if _pseudo(x, z, 3) < 0.46:
+	# A low-frequency mask gathers instances into groves and leaves clearings.
+	# Keep a separate small-scale rejection so individual trees do not form rows.
+	if _grove_noise(x, z) < 0.45:
+		return false
+	if _pseudo(x, z, 3) < 0.09:
 		return false
 
 	for line_key in ["line1", "line2", "line3", "line4"]:
@@ -181,6 +229,28 @@ func _should_place_tree(x: float, z: float) -> bool:
 					return false
 
 	return true
+
+func _grove_noise(x: float, z: float) -> float:
+	const GROVE_SCALE := 430.0
+	var grid_x := floori(x / GROVE_SCALE)
+	var grid_z := floori(z / GROVE_SCALE)
+	var fraction_x := _smoothstep(x / GROVE_SCALE - float(grid_x))
+	var fraction_z := _smoothstep(z / GROVE_SCALE - float(grid_z))
+	var top := lerpf(
+		_pseudo(float(grid_x), float(grid_z), 11),
+		_pseudo(float(grid_x + 1), float(grid_z), 11),
+		fraction_x
+	)
+	var bottom := lerpf(
+		_pseudo(float(grid_x), float(grid_z + 1), 11),
+		_pseudo(float(grid_x + 1), float(grid_z + 1), 11),
+		fraction_x
+	)
+	return lerpf(top, bottom, fraction_z)
+
+func _smoothstep(value: float) -> float:
+	var clamped := clampf(value, 0.0, 1.0)
+	return clamped * clamped * (3.0 - 2.0 * clamped)
 
 func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
 	var ab := b - a

@@ -2,6 +2,10 @@ extends RefCounted
 class_name TerrainModel
 
 const TAU := PI * 2.0
+const GRASSLAND_COLOR := Color(0.26, 0.38, 0.22)
+const MEADOW_COLOR := Color(0.34, 0.46, 0.24)
+const FOREST_COLOR := Color(0.18, 0.31, 0.18)
+const HILLSIDE_COLOR := Color(0.31, 0.34, 0.25)
 
 static func _hash32(value: String) -> int:
 	var hash_value: int = 2166136261
@@ -15,6 +19,9 @@ static func _random01(seed: int, key: String) -> float:
 
 static func _smoothstep(value: float) -> float:
 	return value * value * (3.0 - 2.0 * value)
+
+static func _transition_weight(value: float, start: float, finish: float) -> float:
+	return _smoothstep(clampf((value - start) / (finish - start), 0.0, 1.0))
 
 static func _lattice_value(
 	seed: int,
@@ -86,16 +93,19 @@ static func moisture(seed: int, x: float, z: float) -> float:
 	return _fbm(seed, x + 791.0, z - 433.0, 720.0, 4, "moisture") * 0.5 + 0.5
 
 static func forest_potential(seed: int, x: float, z: float) -> float:
-	var noise := _fbm(seed, x - 311.0, z + 907.0, 610.0, 4, "forest") * 0.5 + 0.5
 	var wet := moisture(seed, x, z)
 	var slope := slope_degrees(seed, x, z)
+	return _forest_score(seed, x, z, wet, slope)
+
+static func _forest_score(seed: int, x: float, z: float, wet: float, slope: float) -> float:
+	var noise := _fbm(seed, x - 311.0, z + 907.0, 610.0, 4, "forest") * 0.5 + 0.5
 	var slope_bonus: float = minf(0.18, slope / 90.0)
 	return clamp(noise * 0.68 + wet * 0.32 + slope_bonus, 0.0, 1.0)
 
 static func biome(seed: int, x: float, z: float) -> String:
 	var slope := slope_degrees(seed, x, z)
-	var forest := forest_potential(seed, x, z)
 	var wet := moisture(seed, x, z)
+	var forest := _forest_score(seed, x, z, wet, slope)
 
 	if slope >= 18.0:
 		return "hillside"
@@ -106,12 +116,18 @@ static func biome(seed: int, x: float, z: float) -> String:
 	return "grassland"
 
 static func terrain_color(seed: int, x: float, z: float) -> Color:
-	match biome(seed, x, z):
-		"forest":
-			return Color(0.18, 0.31, 0.18)
-		"meadow":
-			return Color(0.34, 0.46, 0.24)
-		"hillside":
-			return Color(0.31, 0.34, 0.25)
-		_:
-			return Color(0.26, 0.38, 0.22)
+	var slope := slope_degrees(seed, x, z)
+	var wet := moisture(seed, x, z)
+	var forest := _forest_score(seed, x, z, wet, slope)
+	var hillside_weight := _transition_weight(slope, 10.0, 24.0)
+	var forest_weight := _transition_weight(forest, 0.45, 0.76) * (1.0 - hillside_weight * 0.8)
+	var meadow_weight := _transition_weight(wet, 0.52, 0.76) * (1.0 - forest_weight)
+
+	var color := GRASSLAND_COLOR.lerp(MEADOW_COLOR, meadow_weight)
+	color = color.lerp(FOREST_COLOR, forest_weight)
+	color = color.lerp(HILLSIDE_COLOR, hillside_weight)
+	var surface_tint := _lattice_value(seed, x, z, 260.0, "terrain-tint") * 0.018
+	color.r += surface_tint
+	color.g += surface_tint * 0.92
+	color.b += surface_tint * 0.68
+	return color

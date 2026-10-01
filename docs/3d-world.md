@@ -92,7 +92,7 @@ Current visual biomes:
 - forest,
 - hillside.
 
-Biomes change terrain colour and forest density.
+Biomes change terrain colour and forest density. Their terrain colours blend across slope, moisture and forest-potential gradients, with slight seeded low-frequency variation to avoid hard green patches. The forest score reuses the already sampled moisture and slope values when classifying and colouring a terrain point.
 
 ## Terrain-aware urban planning
 
@@ -153,9 +153,7 @@ Roads and buildings sample the exact same height function, so the visual world a
 
 ## Roads in 3D
 
-Roads are generated as terrain-following ribbon meshes.
-
-Each semantic polyline is resampled at short intervals.
+Roads are generated as terrain-following ribbon meshes from the semantic road polylines.
 
 At every sample:
 
@@ -178,6 +176,8 @@ Road classes keep distinct physical widths:
 - service.
 
 Real compiled junctions receive shared sidewalk and road disks so T-junctions and crossroads read as one continuous paved surface.
+
+Completed arterials and collectors receive dashed center lines. The renderer batches each road class into one mesh, keeps the markings above the sampled terrain, and trims them near junctions. Local and service streets stay unmarked at this scale. Narrow raised curb strips follow the same semantic road polylines, stop before active junctions (including junctions inside a semantic road), and are batched by road class alongside lane markings. Pedestrian crosswalks use the compiled graph edges to mark visible built road arms at active junctions.
 
 ### Construction
 
@@ -217,6 +217,16 @@ The nearest frontage segment determines persistent `rotationRadians`.
 
 Buildings therefore face the street and retain exactly the same orientation after save / reload.
 
+The Godot renderer resolves which side of that frontage contains the parcel and turns the selected model's configured front toward the road. Each model has an explicit local front-side setting because the GLBs do not encode semantic frontage metadata. This is derived at render time; save data and the simulation's frontage angle remain unchanged.
+
+### Foundations
+
+Godot samples the final rotated building footprint on a grid no wider than 8 m. The platform top sits 0.7 m above the highest sample, matching the existing model-to-ground clearance; its underside reaches the lowest sample. A shared `BoxMesh` and one `MultiMeshInstance3D` render every foundation. A building gets its foundation when construction begins, and construction progress only changes the building visual, not the platform.
+
+### Building models
+
+The Godot asset library selects Kenney variants using `kind`, `floors` and `density`. It keeps each model's existing windows, entrance and roof geometry, including pitched residential roofs, flat commercial roofs and industrial roof features. The renderer does not add separate window or roof nodes, so the detailed GLBs remain the facade and roof source.
+
 ### Construction animation
 
 A building under construction grows vertically according to `constructionProgress`.
@@ -248,11 +258,17 @@ Park reservations may retain trees.
 
 ## Vehicles
 
+### Stations
+
+Shared station IDs still produce one selectable station. Their visual tier now progresses from a route-marked platform and sign (Stop), through a roofed shelter (Shelter), to an enclosed station (Station) and a larger multi-canopy interchange (Hub). The four tiers reuse cached low-poly meshes; ghost stations use translucent materials and keep the purchase label.
+
 ### Buses
 
-Each simulation bus has one persistent reusable 3D mesh.
+Each simulation bus has one persistent `MeshInstance3D` using shared low-poly bus geometry. The model has a route-colored body, dark side/front windows and four wheels, all in two mesh surfaces.
 
 Its position and heading are read from the same transport route interpolation used by gameplay.
+
+The maximum fleet is 32 buses. Each bus keeps one renderer node and reuses the shared mesh; its transform is updated without rebuilding geometry.
 
 ### Ambient cars
 

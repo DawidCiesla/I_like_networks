@@ -46,7 +46,7 @@ The Godot build now owns the full playable Bus Era loop:
 - ambient car traffic,
 - orbit/pan/zoom camera,
 - map-first building and station interaction,
-- Inspector/HUD.
+- responsive pixel-style HUD with resources, objective, line legend and contextual inspector.
 
 ## Runtime architecture
 
@@ -169,6 +169,16 @@ Car count scales with completed city buildings and is capped.
 Traffic is decorative in the current Bus Era and does not affect travel times yet.
 
 It is implemented as a separate renderer so a later congestion simulation can replace its motion source without changing the road/city model.
+
+## Kenney city-kit visuals
+
+Curated Kenney City Kit GLB models provide visual variants for residential, commercial, industrial and civic buildings. The asset library chooses variants from `kind`, `floors` and `density`, fits the complete model uniformly inside the parcel footprint and profile height, and aligns its configured front with the frontage road. Since the GLBs do not encode semantic frontage metadata, the local front-side mapping is explicit per model and should be checked when adding or replacing assets. The imported assets already carry their facade and roof features, so the renderer keeps those details without adding duplicate window or roof geometry. If an imported scene has no usable geometry, the renderer falls back to the existing procedural block.
+
+Building platforms use the final rotated model footprint plus a small edge margin. Terrain samples are spaced at most 8 m apart; the shared platform level is 0.7 m above the highest sample and its lower edge reaches the lowest sample. All foundations share one `BoxMesh` in a single `MultiMeshInstance3D`; they appear as construction starts and stay fixed while the building grows. This path changes render geometry only and does not alter terrain, city simulation or save data.
+
+The suburban kit's small and large trees are batched into two `MultiMeshInstance3D` nodes while retaining the existing terrain and city-clearance rules. A render-only low-frequency mask groups them into deterministic groves and clearings; it does not change terrain biomes or city planning.
+
+Terrain colours now blend across moisture, forest-potential and slope gradients with a small deterministic surface variation; biome classification and city-growth thresholds are unchanged. The Roads kit currently supplies roadside lights. They are placed only along completed arterial/collector roads and rendered through one `MultiMeshInstance3D`; semantic road geometry and junction shapes remain generated from the city road graph. Completed arterials and collectors also get dashed center lines; narrow raised curb strips follow built and constructing semantic roads, stop before active junctions (including intersections inside a semantic road), and are batched by road class. Crosswalks are batched from graph edges for built arms at active junctions. These details rebuild only when road state changes. Shared station IDs render once, with tier-specific Stop, Shelter, Station and Hub meshes. Buses use shared low-poly geometry with route-colored bodies, dark windows and four wheels. The HUD uses a shared Theme plus reusable stat and line-legend row scenes; the inspector scrolls, and the layout moves to a bottom dock on narrow viewports. Each imported kit subset keeps its own `License.txt` and texture atlas under `godot/assets/kenney/`.
 
 ## Save files
 

@@ -7,6 +7,11 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 var _static_root: Node3D
 var _bus_root: Node3D
 var _bus_meshes: Dictionary = {}
+var _bus_model_mesh: ArrayMesh
+var _bus_details_material: StandardMaterial3D
+var _station_mesh_cache: Dictionary = {}
+var _station_body_material_cache: Dictionary = {}
+var _station_details_material_cache: Dictionary = {}
 var _signature := ""
 
 func _ready() -> void:
@@ -150,36 +155,18 @@ func _add_station(
 
 	var shape := CollisionShape3D.new()
 	var cylinder_shape := CylinderShape3D.new()
-	cylinder_shape.radius = 19.0 + float(level) * 4.0
-	cylinder_shape.height = 12.0 + float(level) * 4.0
+	cylinder_shape.radius = 20.0 + float(level) * 7.0
+	cylinder_shape.height = 16.0 + float(level) * 4.0
 	shape.shape = cylinder_shape
 	area.add_child(shape)
 
-	var base := MeshInstance3D.new()
-	var cylinder := CylinderMesh.new()
-	cylinder.top_radius = 13.0 + float(level) * 4.0
-	cylinder.bottom_radius = cylinder.top_radius
-	cylinder.height = 3.0 + float(level)
-	cylinder.radial_segments = 16
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.14, 0.16, 0.14, 0.58) if ghost else color
-	material.roughness = 0.72
-	if ghost:
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	cylinder.material = material
-	base.mesh = cylinder
-	area.add_child(base)
-
-	if not ghost and level >= 1:
-		var canopy := MeshInstance3D.new()
-		var canopy_mesh := BoxMesh.new()
-		canopy_mesh.size = Vector3(26.0 + float(level) * 5.0, 2.6, 15.0 + float(level) * 3.0)
-		var canopy_material := StandardMaterial3D.new()
-		canopy_material.albedo_color = Color("#d8d7cf")
-		canopy_mesh.material = canopy_material
-		canopy.mesh = canopy_mesh
-		canopy.position.y = 9.0 + float(level) * 1.4
-		area.add_child(canopy)
+	var station_model := MeshInstance3D.new()
+	station_model.name = "StationModel"
+	station_model.mesh = _station_mesh_for_level(level)
+	station_model.set_surface_override_material(0, _station_body_material(color, ghost))
+	station_model.set_surface_override_material(1, _station_details_material(ghost))
+	station_model.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	area.add_child(station_model)
 
 	var label := Label3D.new()
 	label.text = Data.station_name(station_id)
@@ -191,15 +178,112 @@ func _add_station(
 		)
 	elif level > 0:
 		label.text += "\n%s" % GameStore.station_tier(station_id)
-	label.position.y = 26.0 + float(level) * 4.0
-	label.font_size = 28
-	label.outline_size = 8
+	label.position.y = 11.0 + float(level) * 0.8
+	label.font_size = 24
+	label.outline_size = 6
 	label.modulate = Color.WHITE
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	area.add_child(label)
 
 	area.input_event.connect(_on_pick.bind(area))
 	_static_root.add_child(area)
+
+func _station_mesh_for_level(level: int) -> ArrayMesh:
+	if _station_mesh_cache.has(level):
+		return _station_mesh_cache[level]
+
+	var platform_sizes := [
+		Vector3(30.0, 1.4, 12.0),
+		Vector3(34.0, 1.4, 14.0),
+		Vector3(40.0, 1.5, 18.0),
+		Vector3(52.0, 1.7, 24.0),
+	]
+	var platform_size: Vector3 = platform_sizes[clampi(level, 0, 3)]
+	var mesh := ArrayMesh.new()
+	var body := SurfaceTool.new()
+	body.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_append_station_box(body, platform_size, Vector3(0.0, -1.3, 0.0))
+
+	var sign_x := -platform_size.x * 0.5 + 2.8
+	_append_station_box(body, Vector3(0.7, 4.8, 0.7), Vector3(sign_x, 1.8, 0.0))
+	_append_station_box(body, Vector3(5.0, 1.8, 0.7), Vector3(sign_x + 1.8, 4.9, 0.0))
+
+	match level:
+		1:
+			_append_station_box(body, Vector3(28.0, 0.8, 13.0), Vector3(0.0, 5.6, 0.0))
+			_add_station_supports(body, [-11.5, 11.5], [-5.2, 5.2], 5.8, 2.6)
+		2:
+			_append_station_box(body, Vector3(34.0, 1.0, 16.0), Vector3(0.0, 6.1, 0.0))
+			_append_station_box(body, Vector3(19.0, 4.0, 12.0), Vector3(0.0, 1.35, 0.0))
+			_add_station_supports(body, [-14.5, 14.5], [-6.7, 6.7], 6.2, 2.9)
+		3:
+			_append_station_box(body, Vector3(21.0, 0.9, 17.0), Vector3(0.0, 4.1, 0.0))
+			_append_station_box(body, Vector3(19.0, 0.8, 20.0), Vector3(-16.0, 6.0, 0.0))
+			_append_station_box(body, Vector3(19.0, 0.8, 20.0), Vector3(16.0, 6.0, 0.0))
+			_append_station_box(body, Vector3(20.0, 4.4, 14.0), Vector3(0.0, 1.45, 0.0))
+			_add_station_supports(body, [-23.0, -16.0, 16.0, 23.0], [-8.5, 8.5], 6.4, 3.0)
+
+	body.generate_normals()
+	body.commit(mesh)
+
+	var details := SurfaceTool.new()
+	details.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# A dark route board distinguishes even the basic Stop tier.
+	_append_station_box(details, Vector3(3.8, 1.05, 0.12), Vector3(sign_x + 1.8, 4.9, 0.39))
+	if level == 2:
+		for side in [-1.0, 1.0]:
+			for x in [-6.0, 0.0, 6.0]:
+				_append_station_box(details, Vector3(3.8, 1.9, 0.12), Vector3(x, 1.65, side * 6.08))
+			_append_station_box(details, Vector3(0.12, 2.0, 6.0), Vector3(9.58, 1.75, 0.0))
+	if level == 3:
+		for side in [-1.0, 1.0]:
+			for x in [-6.0, 0.0, 6.0]:
+				_append_station_box(details, Vector3(3.8, 2.1, 0.12), Vector3(x, 1.75, side * 7.08))
+		_append_station_box(details, Vector3(0.12, 2.0, 7.0), Vector3(10.08, 1.75, 0.0))
+	details.generate_normals()
+	details.commit(mesh)
+	mesh.surface_set_material(1, _station_details_material())
+	_station_mesh_cache[level] = mesh
+	return mesh
+
+func _add_station_supports(
+	surface: SurfaceTool,
+	x_positions: Array,
+	z_positions: Array,
+	height: float,
+	center_y: float
+) -> void:
+	for x in x_positions:
+		for z in z_positions:
+			_append_station_box(surface, Vector3(0.65, height, 0.65), Vector3(float(x), center_y, float(z)))
+
+func _append_station_box(surface: SurfaceTool, size: Vector3, position: Vector3) -> void:
+	var box := BoxMesh.new()
+	box.size = size
+	surface.append_from(box, 0, Transform3D(Basis.IDENTITY, position))
+
+func _station_body_material(color: Color, ghost: bool) -> StandardMaterial3D:
+	var cache_key := "%s:%s" % [color.to_html(), ghost]
+	if _station_body_material_cache.has(cache_key):
+		return _station_body_material_cache[cache_key]
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color.r, color.g, color.b, 0.48) if ghost else color
+	material.roughness = 0.78
+	if ghost:
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_station_body_material_cache[cache_key] = material
+	return material
+
+func _station_details_material(ghost: bool = false) -> StandardMaterial3D:
+	if _station_details_material_cache.has(ghost):
+		return _station_details_material_cache[ghost]
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.145, 0.196, 0.22, 0.56) if ghost else Color("#253238")
+	material.roughness = 0.58
+	if ghost:
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_station_details_material_cache[ghost] = material
+	return material
 
 func _add_depot(ghost: bool) -> void:
 	var point := Layout.depot_position()
@@ -266,7 +350,7 @@ func _update_buses() -> void:
 		bus.visible = true
 		bus.position = Vector3(
 			point.x,
-			Terrain.height(GameStore.city_seed, point.x, point.y) + 4.5,
+			Terrain.height(GameStore.city_seed, point.x, point.y) + 0.58,
 			point.y
 		)
 		bus.rotation.y = -atan2(tangent.y, tangent.x)
@@ -276,15 +360,63 @@ func _update_buses() -> void:
 			_bus_meshes[key].visible = false
 
 func _create_bus(line_key: String) -> MeshInstance3D:
+	if _bus_model_mesh == null:
+		_bus_model_mesh = _build_bus_mesh()
+		_bus_details_material = StandardMaterial3D.new()
+		_bus_details_material.albedo_color = Color("#253238")
+		_bus_details_material.roughness = 0.58
+		_bus_model_mesh.surface_set_material(1, _bus_details_material)
+
 	var bus := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(13.0, 7.0, 6.5)
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Data.LINE_COLORS[line_key]
+	material.roughness = 0.7
 	material.emission_enabled = true
 	material.emission = Data.LINE_COLORS[line_key]
-	material.emission_energy_multiplier = 0.18
-	box.material = material
-	bus.mesh = box
+	material.emission_energy_multiplier = 0.08
+	bus.mesh = _bus_model_mesh
+	bus.set_surface_override_material(0, material)
 	bus.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return bus
+
+func _build_bus_mesh() -> ArrayMesh:
+	var result := ArrayMesh.new()
+	var body := SurfaceTool.new()
+	body.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_append_bus_box(body, Vector3(15.0, 2.1, 5.8), Vector3(0.0, 1.86, 0.0))
+	_append_bus_box(body, Vector3(13.8, 2.8, 5.65), Vector3(-0.1, 4.05, 0.0))
+	_append_bus_box(body, Vector3(11.5, 0.38, 5.35), Vector3(-0.15, 5.64, 0.0))
+	body.generate_normals()
+	body.commit(result)
+
+	var details := SurfaceTool.new()
+	details.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [-1.0, 1.0]:
+		for x in [-4.4, -1.6, 1.2, 3.8]:
+			_append_bus_box(details, Vector3(2.25, 1.45, 0.08), Vector3(x, 4.15, side * 2.88))
+	_append_bus_box(details, Vector3(0.1, 1.65, 5.0), Vector3(6.98, 4.05, 0.0))
+	_append_bus_box(details, Vector3(0.1, 1.35, 4.6), Vector3(-7.0, 4.0, 0.0))
+	_append_bus_wheel(details, Vector3(-4.6, 1.0, -2.82))
+	_append_bus_wheel(details, Vector3(-4.6, 1.0, 2.82))
+	_append_bus_wheel(details, Vector3(4.55, 1.0, -2.82))
+	_append_bus_wheel(details, Vector3(4.55, 1.0, 2.82))
+	details.generate_normals()
+	details.commit(result)
+	return result
+
+func _append_bus_box(surface: SurfaceTool, size: Vector3, position: Vector3) -> void:
+	var box := BoxMesh.new()
+	box.size = size
+	surface.append_from(box, 0, Transform3D(Basis.IDENTITY, position))
+
+func _append_bus_wheel(surface: SurfaceTool, position: Vector3) -> void:
+	var wheel := CylinderMesh.new()
+	wheel.top_radius = 0.92
+	wheel.bottom_radius = 0.92
+	wheel.height = 0.68
+	wheel.radial_segments = 10
+	surface.append_from(
+		wheel,
+		0,
+		Transform3D(Basis(Vector3.RIGHT, PI * 0.5), position)
+	)
