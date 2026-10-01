@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 const Data = preload("res://scripts/core/game_data.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 const StatRowScene = preload("res://scenes/ui/inspector_stat_row.tscn")
 const LineLegendItemScene = preload("res://scenes/ui/line_legend_item.tscn")
 
@@ -33,6 +34,8 @@ const LineLegendItemScene = preload("res://scenes/ui/line_legend_item.tscn")
 
 var _import_dialog: FileDialog
 var _legend_item_by_line: Dictionary = {}
+var _custom_legend_item_by_line: Dictionary = {}
+var _create_line_button: Button
 
 var _primary_action := ""
 var _primary_payload := ""
@@ -42,6 +45,7 @@ func _ready() -> void:
 	GameStore.state_changed.connect(refresh)
 	GameStore.selection_changed.connect(_on_selection_changed)
 	GameStore.toast_requested.connect(show_toast)
+	GameStore.route_editor_changed.connect(refresh)
 	root_control.resized.connect(_layout_hud)
 
 	primary_button.pressed.connect(_on_primary_pressed)
@@ -53,6 +57,12 @@ func _ready() -> void:
 	speed_4_button.pressed.connect(func(): GameStore.set_speed(4))
 	reset_button.pressed.connect(_on_reset_pressed)
 	import_button.pressed.connect(_on_import_pressed)
+
+	_create_line_button = Button.new()
+	_create_line_button.name = "CreateLineButton"
+	_create_line_button.text = "CREATE LINE"
+	_create_line_button.pressed.connect(_on_create_line_pressed)
+	root_control.add_child(_create_line_button)
 
 	_import_dialog = FileDialog.new()
 	_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -85,6 +95,7 @@ func refresh() -> void:
 	_render_progress()
 	_render_speed()
 	_render_line_legend()
+	_render_create_line_button()
 	_render_inspector()
 
 func _compact_amount(amount: float) -> String:
@@ -127,6 +138,16 @@ func _layout_hud() -> void:
 		toast_label.offset_bottom = -104.0
 
 	legend_panel.visible = width >= 1220.0
+	if _create_line_button != null:
+		_create_line_button.anchor_left = 0.0
+		_create_line_button.anchor_right = 0.0
+		_create_line_button.anchor_top = 1.0
+		_create_line_button.anchor_bottom = 1.0
+		_create_line_button.offset_left = 16.0
+		_create_line_button.offset_right = 190.0
+		_create_line_button.offset_top = -108.0
+		_create_line_button.offset_bottom = -66.0
+
 	var inspector_height := minf(500.0, maxf(300.0, height * 0.54))
 	if width < 820.0:
 		var dock_height := minf(420.0, maxf(230.0, height * 0.46))
@@ -171,6 +192,43 @@ func _render_line_legend() -> void:
 			status = "LOCKED" if line_key != "line1" else "1/%d STOPS" % max_stops
 		label.text = "L%d  %s" % [Data.line_number(line_key), status]
 
+	var live_custom: Dictionary = {}
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		live_custom[line_id] = true
+		var item: HBoxContainer = _custom_legend_item_by_line.get(line_id)
+		if item == null:
+			item = LineLegendItemScene.instantiate()
+			legend_rows.add_child(item)
+			_custom_legend_item_by_line[line_id] = item
+		var line := GameStore.transit_line(line_id)
+		var swatch: ColorRect = item.get_node("Swatch")
+		swatch.color = Color(str(line.get("color", "#58b8ff")))
+		var label: Label = item.get_node("Label")
+		label.text = "%s  %d STOPS · %d BUS" % [
+			str(line.get("name", "CUSTOM")),
+			TransitNetwork.line_stop_ids(GameStore.transit_network, line_id).size(),
+			int(line.get("fleet_count", 0)),
+		]
+
+	for line_id_value in _custom_legend_item_by_line.keys():
+		var line_id := str(line_id_value)
+		if live_custom.has(line_id):
+			continue
+		var stale: Node = _custom_legend_item_by_line[line_id]
+		if is_instance_valid(stale):
+			stale.queue_free()
+		_custom_legend_item_by_line.erase(line_id)
+
+func _render_create_line_button() -> void:
+	if _create_line_button == null:
+		return
+	_create_line_button.visible = bool(GameStore.depot.get("built", false))
+	_create_line_button.disabled = (
+		GameStore.route_editor_active()
+		or not GameStore.can_begin_free_line()
+	)
+	_create_line_button.text = "CREATE LINE" if not GameStore.route_editor_active() else "EDITING LINE"
+
 func _built_line_count() -> int:
 	var result := 0
 	for line_key in Data.LINE_KEYS:
@@ -192,6 +250,14 @@ func _render_speed() -> void:
 			speed_4_button.disabled = true
 
 func _render_objective() -> void:
+	if GameStore.route_editor_active():
+		var points := GameStore.route_editor_points()
+		objective_label.text = (
+			"DESIGN LINE · CLICK ROADS TO ADD STOPS · ENTER TO CONFIRM"
+			if points.size() >= 2
+			else "DESIGN LINE · CLICK BUILT ROADS TO PLACE STOPS"
+		)
+		return
 	if not bool(GameStore.lines.line1.built):
 		objective_label.text = "BUY MARKET SQUARE · START BUS LINE 1"
 		return
@@ -215,6 +281,13 @@ func _render_objective() -> void:
 	objective_label.text = "GROW BUS ERA · UPGRADE BUSY STATIONS INTO HUBS"
 
 func _render_progress() -> void:
+	if GameStore.route_editor_active():
+		var points := GameStore.route_editor_points()
+		progress_label.text = "%d STOPS · COST $%d · RMB UNDO · DEL REMOVE" % [
+			points.size(),
+			int(GameStore.route_editor.get("estimated_cost", 0)),
+		]
+		return
 	if not bool(GameStore.lines.line1.built):
 		progress_label.text = "1 / 5 STOPS  ·  START THE FIRST LINE"
 		return
@@ -228,6 +301,9 @@ func _render_progress() -> void:
 		GameStore.garage_used(),
 		int(GameStore.depot.garage_slots),
 	]
+
+func _on_create_line_pressed() -> void:
+	GameStore.begin_free_line_editor()
 
 func _on_pause_pressed() -> void:
 	GameStore.set_speed(1 if GameStore.simulation_speed == 0 else 0)
@@ -251,7 +327,13 @@ func _render_inspector() -> void:
 
 	inspector.visible = true
 
-	if selection.begins_with("station:"):
+	if selection == "route_editor":
+		_render_route_editor()
+	elif selection.begins_with("free_line:"):
+		_render_free_line(selection.trim_prefix("free_line:"))
+	elif selection.begins_with("free_stop:"):
+		_render_free_stop(selection.trim_prefix("free_stop:"))
+	elif selection.begins_with("station:"):
 		_render_station(selection.trim_prefix("station:"))
 	elif selection.begins_with("future_stop:"):
 		_render_future_stop(selection.trim_prefix("future_stop:"))
@@ -276,6 +358,89 @@ func _add_stat_row(key: String, value: String) -> void:
 func _clear_stat_rows() -> void:
 	for child in inspector_stat_rows.get_children():
 		child.queue_free()
+
+func _render_route_editor() -> void:
+	var points := GameStore.route_editor_points()
+	var mode := str(GameStore.route_editor.get("mode", "new"))
+	inspector_eyebrow.text = "ROUTE DESIGNER"
+	inspector_title.text = "NEW BUS LINE" if mode == "new" else "EDIT BUS LINE"
+	inspector_body.text = "Click a built road to add a stop. Click an existing draft stop, then another road position, to move it."
+	_add_stat_row("Stops", "%d / %d" % [points.size(), TransitNetwork.MAX_CUSTOM_STOPS])
+	_add_stat_row("Minimum spacing", "%d" % roundi(TransitNetwork.MIN_STOP_SPACING))
+	_add_stat_row("Build / edit cost", "$%d" % int(GameStore.route_editor.get("estimated_cost", 0)))
+	_add_stat_row("Controls", "ENTER CONFIRM · RMB UNDO · ESC CANCEL")
+	primary_button.visible = true
+	primary_button.disabled = (
+		points.size() < 2
+		or GameStore.money < float(GameStore.route_editor.get("estimated_cost", 0))
+	)
+	primary_button.text = "CONFIRM LINE  ·  $%d" % int(GameStore.route_editor.get("estimated_cost", 0))
+	_primary_action = "commit_route"
+
+func _render_free_line(line_id: String) -> void:
+	var line := GameStore.transit_line(line_id)
+	if line.is_empty():
+		inspector.visible = false
+		return
+	var stop_count := TransitNetwork.line_stop_ids(GameStore.transit_network, line_id).size()
+	var headway := GameStore.custom_line_headway_minutes(line_id)
+	inspector_eyebrow.text = "CUSTOM BUS LINE"
+	inspector_title.text = str(line.get("name", line_id)).to_upper()
+	inspector_body.text = "A player-designed route following the live road network."
+	_add_stat_row("Stops", "%d" % stop_count)
+	_add_stat_row("Route", "%.2f KM" % GameStore.custom_line_route_length_km(line_id))
+	_add_stat_row("Demand", "%.1f PAX/MIN" % GameStore.custom_line_demand(line_id))
+	_add_stat_row("Waiting", "%.1f PAX" % GameStore.custom_line_waiting_passengers(line_id))
+	_add_stat_row(
+		"Headway",
+		("%.1f MIN" % headway) if is_finite(headway) else "NO SERVICE"
+	)
+	_add_stat_row("Buses", "%d" % int(line.get("fleet_count", 0)))
+	primary_button.visible = true
+	primary_button.text = "EDIT LINE"
+	primary_button.disabled = GameStore.route_editor_active()
+	_primary_action = "edit_free_line"
+	_primary_payload = line_id
+
+	var add_bus_button := Button.new()
+	add_bus_button.text = "BUY BUS  ·  $%d" % GameStore.vehicle_purchase_cost()
+	add_bus_button.disabled = (
+		GameStore.garage_used() >= int(GameStore.depot.get("garage_slots", 0))
+		or GameStore.money < GameStore.vehicle_purchase_cost()
+		or int(line.get("fleet_count", 0)) >= int(Data.ECONOMY.max_vehicles_per_line)
+	)
+	add_bus_button.pressed.connect(GameStore.add_bus_to_transit_line.bind(line_id))
+	fleet_box.add_child(add_bus_button)
+
+	var remove_button := Button.new()
+	remove_button.text = "REMOVE LINE"
+	remove_button.pressed.connect(GameStore.delete_custom_line.bind(line_id))
+	fleet_box.add_child(remove_button)
+
+func _render_free_stop(stop_id: String) -> void:
+	var stop := GameStore.transit_stop(stop_id)
+	if stop.is_empty():
+		inspector.visible = false
+		return
+	var stats := GameStore.custom_stop_catchment(stop_id)
+	var served: Array = stop.get("served_line_ids", [])
+	var served_names: Array[String] = []
+	for line_id_value in served:
+		var line_id := str(line_id_value)
+		var line := GameStore.transit_line(line_id)
+		served_names.append(str(line.get("name", line_id)))
+	inspector_eyebrow.text = "FREE-FORM STOP"
+	inspector_title.text = str(stop.get("name", stop_id)).to_upper()
+	inspector_body.text = (
+		" + ".join(served_names)
+		if not served_names.is_empty()
+		else "NO ACTIVE SERVICE"
+	)
+	_add_stat_row("Catchment", "%d" % roundi(float(stats.get("radius", 0.0))))
+	_add_stat_row("Buildings", "%d" % int(stats.get("building_count", 0)))
+	_add_stat_row("Demand", "%.1f PAX/MIN" % float(stats.get("demand_ppm", 0.0)))
+	_add_stat_row("Waiting", "%.1f PAX" % GameStore.custom_stop_waiting_passengers(stop_id))
+	_add_stat_row("Overlapping stops", "%d" % int(stats.get("overlap_count", 0)))
 
 func _render_station(station_id: String) -> void:
 	var served := GameStore.station_served_lines(station_id)
@@ -374,6 +539,21 @@ func _render_depot() -> void:
 		button.pressed.connect(_buy_bus.bind(line_key))
 		fleet_box.add_child(button)
 
+	for line_id in TransitNetwork.custom_line_ids(GameStore.transit_network):
+		var line := GameStore.transit_line(line_id)
+		var button := Button.new()
+		button.text = "BUY BUS FOR %s  ·  $%d" % [
+			str(line.get("name", line_id)).to_upper(),
+			GameStore.vehicle_purchase_cost(),
+		]
+		button.disabled = (
+			GameStore.garage_used() >= int(GameStore.depot.garage_slots)
+			or int(line.get("fleet_count", 0)) >= int(Data.ECONOMY.max_vehicles_per_line)
+			or GameStore.money < GameStore.vehicle_purchase_cost()
+		)
+		button.pressed.connect(GameStore.add_bus_to_transit_line.bind(line_id))
+		fleet_box.add_child(button)
+
 	var upgrade_cost := roundi(
 		float(Data.ECONOMY.depot_upgrade_base_cost)
 		* pow(float(Data.ECONOMY.depot_upgrade_cost_growth), int(GameStore.depot.level))
@@ -398,6 +578,10 @@ func _on_primary_pressed() -> void:
 		"build_depot":
 			if GameStore.build_depot():
 				GameStore.set_selection("depot")
+		"commit_route":
+			GameStore.commit_route_editor()
+		"edit_free_line":
+			GameStore.begin_edit_line_editor(_primary_payload)
 
 func _buy_bus(line_key: String) -> void:
 	GameStore.add_bus(line_key)
