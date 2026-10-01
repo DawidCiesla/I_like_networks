@@ -270,7 +270,7 @@ func _render_objective() -> void:
 	if GameStore.route_editor_active():
 		var points := GameStore.route_editor_points()
 		objective_label.text = (
-			"DESIGN LINE · CLICK ROADS TO ADD STOPS · ENTER TO CONFIRM"
+			"DESIGN LINE · CTRL+CLICK ADDS VIA POINTS · ENTER TO CONFIRM"
 			if points.size() >= 2
 			else "DESIGN LINE · CLICK BUILT ROADS TO PLACE STOPS"
 		)
@@ -392,14 +392,46 @@ func _clear_stat_rows() -> void:
 
 func _render_route_editor() -> void:
 	var points := GameStore.route_editor_points()
+	var waypoints := GameStore.route_editor_waypoints()
+	var waypoint_count := 0
+	for segment_value in waypoints:
+		var segment: Array = segment_value
+		waypoint_count += segment.size()
 	var mode := str(GameStore.route_editor.get("mode", "new"))
+	var selected := int(GameStore.route_editor.get("selected_index", -1))
 	inspector_eyebrow.text = "ROUTE DESIGNER"
 	inspector_title.text = "NEW BUS LINE" if mode == "new" else "EDIT BUS LINE"
-	inspector_body.text = "Click a built road to add a stop. Click an existing draft stop, then another road position, to move it."
+	inspector_body.text = "Click roads to add stops. Select a stop to move or reorder it. Ctrl+click adds a VIA point that forces the route through another street."
 	_add_stat_row("Stops", "%d / %d" % [points.size(), TransitNetwork.MAX_CUSTOM_STOPS])
+	_add_stat_row("Via points", "%d" % waypoint_count)
 	_add_stat_row("Minimum spacing", "%d" % roundi(TransitNetwork.MIN_STOP_SPACING))
 	_add_stat_row("Build / edit cost", "$%d" % int(GameStore.route_editor.get("estimated_cost", 0)))
-	_add_stat_row("Controls", "ENTER CONFIRM · RMB UNDO · ESC CANCEL")
+	_add_stat_row("Controls", "CTRL+LMB VIA · CTRL+RMB REMOVE VIA")
+	_add_stat_row("Finish", "ENTER CONFIRM · RMB UNDO · ESC CANCEL")
+
+	if selected >= 0 and selected < points.size():
+		var earlier_button := Button.new()
+		earlier_button.text = "MOVE STOP EARLIER"
+		earlier_button.disabled = selected <= 0
+		earlier_button.pressed.connect(
+			GameStore.route_editor_reorder_selected.bind(-1)
+		)
+		fleet_box.add_child(earlier_button)
+
+		var later_button := Button.new()
+		later_button.text = "MOVE STOP LATER"
+		later_button.disabled = selected >= points.size() - 1
+		later_button.pressed.connect(
+			GameStore.route_editor_reorder_selected.bind(1)
+		)
+		fleet_box.add_child(later_button)
+
+		var remove_button := Button.new()
+		remove_button.text = "REMOVE SELECTED STOP"
+		remove_button.disabled = points.size() <= 2
+		remove_button.pressed.connect(GameStore.route_editor_remove_selected)
+		fleet_box.add_child(remove_button)
+
 	primary_button.visible = true
 	primary_button.disabled = (
 		points.size() < 2
