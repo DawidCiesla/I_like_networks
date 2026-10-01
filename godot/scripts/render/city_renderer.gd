@@ -461,17 +461,14 @@ func _append_curb_strips(
 			_add_curb_triangle(mesh, inner_edges[index + 1], outer_edges[index], outer_edges[index + 1])
 
 func _add_curb_triangle(mesh: ImmediateMesh, a: Vector2, b: Vector2, c: Vector2) -> void:
-	_add_curb_vertex(mesh, a)
-	_add_curb_vertex(mesh, b)
-	_add_curb_vertex(mesh, c)
-
-func _add_curb_vertex(mesh: ImmediateMesh, point: Vector2) -> void:
-	mesh.surface_set_normal(Vector3.UP)
-	mesh.surface_add_vertex(Vector3(
-		point.x,
-		Terrain.height(GameStore.city_seed, point.x, point.y) + CURB_SURFACE_HEIGHT,
-		point.y
-	))
+	RoadGeometry.append_triangle_above_terrain(
+		mesh,
+		GameStore.city_seed,
+		a,
+		b,
+		c,
+		CURB_SURFACE_HEIGHT
+	)
 
 func _append_centerline_dashes(
 	mesh: ImmediateMesh,
@@ -500,17 +497,14 @@ func _append_centerline_dashes(
 		distance += dash_length + gap_length
 
 func _add_marking_triangle(mesh: ImmediateMesh, a: Vector2, b: Vector2, c: Vector2) -> void:
-	_add_marking_vertex(mesh, a)
-	_add_marking_vertex(mesh, b)
-	_add_marking_vertex(mesh, c)
-
-func _add_marking_vertex(mesh: ImmediateMesh, point: Vector2) -> void:
-	mesh.surface_set_normal(Vector3.UP)
-	mesh.surface_add_vertex(Vector3(
-		point.x,
-		Terrain.height(GameStore.city_seed, point.x, point.y) + MARKING_SURFACE_HEIGHT,
-		point.y
-	))
+	RoadGeometry.append_triangle_above_terrain(
+		mesh,
+		GameStore.city_seed,
+		a,
+		b,
+		c,
+		MARKING_SURFACE_HEIGHT
+	)
 
 func _polyline_length(points: Array[Vector2]) -> float:
 	var result := 0.0

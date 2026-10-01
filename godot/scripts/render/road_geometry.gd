@@ -1,7 +1,7 @@
 extends RefCounted
 class_name RoadGeometry
 
-const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 
 const DEFAULT_SAMPLE_SPACING := 8.0
 const DEFAULT_MITER_LIMIT := 2.2
@@ -76,8 +76,8 @@ static func create_ribbon_mesh(
 		right.append(points[index] - offset)
 
 	for index in range(points.size() - 1):
-		_add_triangle_up(mesh, seed, left[index], left[index + 1], right[index], height_offset)
-		_add_triangle_up(mesh, seed, right[index], left[index + 1], right[index + 1], height_offset)
+		append_triangle_above_terrain(mesh, seed, left[index], left[index + 1], right[index], height_offset)
+		append_triangle_above_terrain(mesh, seed, right[index], left[index + 1], right[index + 1], height_offset)
 
 	if rounded_caps:
 		_append_round_cap(mesh, seed, points.front(), half_width, height_offset)
@@ -106,7 +106,7 @@ static func create_junction_patch_mesh(
 
 	var anchor := polygon[0]
 	for index in range(1, polygon.size() - 1):
-		_add_triangle_up(
+		append_triangle_above_terrain(
 			mesh,
 			seed,
 			anchor,
@@ -207,9 +207,9 @@ static func _append_round_cap(
 		var angle_b := TAU * float(index + 1) / float(SEGMENTS)
 		var point_a := center + Vector2(cos(angle_a), sin(angle_a)) * radius
 		var point_b := center + Vector2(cos(angle_b), sin(angle_b)) * radius
-		_add_triangle_up(mesh, seed, center, point_a, point_b, height_offset)
+		append_triangle_above_terrain(mesh, seed, center, point_a, point_b, height_offset)
 
-static func _add_triangle_up(
+static func append_triangle_above_terrain(
 	mesh: ImmediateMesh,
 	seed: int,
 	a: Vector2,
@@ -217,8 +217,11 @@ static func _add_triangle_up(
 	c: Vector2,
 	height_offset: float
 ) -> void:
+	# Godot treats clockwise triangle winding as front-facing. In the X/Z
+	# plane used by the city, a positive Vector2 cross product matches the
+	# winding used by terrain_renderer.gd when viewed from above.
 	var cross := (b - a).cross(c - a)
-	if cross > 0.0:
+	if cross < 0.0:
 		var temporary := b
 		b = c
 		c = temporary
@@ -236,7 +239,7 @@ static func _add_vertex(
 	mesh.surface_set_normal(Vector3.UP)
 	mesh.surface_add_vertex(Vector3(
 		point.x,
-		Terrain.height(seed, point.x, point.y) + height_offset,
+		TerrainSurface.height(seed, point.x, point.y) + height_offset,
 		point.y
 	))
 
