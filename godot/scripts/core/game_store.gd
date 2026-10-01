@@ -1233,8 +1233,80 @@ func _custom_unload_at_stop(
 		alighting,
 		fare
 	)
+	var stop_ids := TransitNetwork.line_stop_ids(transit_network, line_id)
+	if stop_index >= 0 and stop_index < stop_ids.size():
+		_inject_transfer_passengers(stop_ids[stop_index], line_id, alighting)
 	_fare_changed_this_frame = true
 	return alighting
+
+func _inject_transfer_passengers(
+	stop_id: String,
+	from_line_id: String,
+	alighting: float
+) -> void:
+	if alighting <= 0.0:
+		return
+	var stop := transit_stop(stop_id)
+	var served: Array = stop.get("served_line_ids", [])
+	var targets: Array[String] = []
+	for line_id_value in served:
+		var line_id := str(line_id_value)
+		if line_id != from_line_id:
+			targets.append(line_id)
+	if targets.is_empty():
+		return
+
+	var transfer_total := alighting * 0.18
+	var per_line := transfer_total / float(targets.size())
+	for target_line_id in targets:
+		if target_line_id in Data.LINE_KEYS:
+			var target_line: Dictionary = lines[target_line_id]
+			if not bool(target_line.get("built", false)):
+				continue
+			var stop_index := Data.STATION_IDS[target_line_id].find(stop_id)
+			var stop_count := int(target_line.get("stop_count", 0))
+			if stop_index < 0 or stop_index >= stop_count or stop_count < 2:
+				continue
+			var destination := stop_count - 1 if stop_index < stop_count - 1 else 0
+			if destination == stop_index:
+				continue
+			var matrix: Array = target_line.get("waiting_by_stop", [])
+			if stop_index >= matrix.size():
+				continue
+			var row: Array = matrix[stop_index]
+			if destination >= row.size():
+				continue
+			row[destination] = float(row[destination]) + per_line
+			matrix[stop_index] = row
+			target_line["waiting_by_stop"] = matrix
+			lines[target_line_id] = target_line
+			continue
+
+		var network_lines: Dictionary = transit_network.get("lines", {})
+		if not network_lines.has(target_line_id):
+			continue
+		var target_line: Dictionary = network_lines[target_line_id]
+		if str(target_line.get("source", "")) != "custom":
+			continue
+		var stop_ids := TransitNetwork.line_stop_ids(transit_network, target_line_id)
+		var stop_index := stop_ids.find(stop_id)
+		if stop_index < 0 or stop_ids.size() < 2:
+			continue
+		var destination := stop_ids.size() - 1 if stop_index < stop_ids.size() - 1 else 0
+		if destination == stop_index:
+			continue
+		var matrix: Array = target_line.get("waiting_by_stop", [])
+		if stop_index >= matrix.size():
+			continue
+		var row: Array = matrix[stop_index]
+		if destination >= row.size():
+			continue
+		row[destination] = float(row[destination]) + per_line
+		matrix[stop_index] = row
+		target_line["waiting_by_stop"] = matrix
+		network_lines[target_line_id] = target_line
+		transit_network["lines"] = network_lines
+		_update_custom_queue(target_line_id)
 
 func _custom_board_at_stop(line_id: String, vehicle: Dictionary) -> float:
 	var network_lines: Dictionary = transit_network.get("lines", {})
@@ -1599,6 +1671,8 @@ func _unload_at_stop(line_key: String, vehicle: Dictionary, stop_index: int) -> 
 	lines[line_key] = line
 
 	_emit_passenger_event(line_key, "alight", stop_index, int(vehicle["id"]), alighting, fare)
+	var transfer_stop_id: String = Data.STATION_IDS[line_key][stop_index]
+	_inject_transfer_passengers(transfer_stop_id, line_key, alighting)
 	_fare_changed_this_frame = true
 	return alighting
 
