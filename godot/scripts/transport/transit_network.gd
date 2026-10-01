@@ -268,7 +268,16 @@ static func update_custom_line_points(
 		if index < old_stop_ids.size():
 			var stop_id := old_stop_ids[index]
 			var stop: Dictionary = stops.get(stop_id, {})
-			if str(stop.get("source", "")) == "custom":
+			var served: Array = stop.get("served_line_ids", [])
+			var shared_with_other := false
+			for served_line_value in served:
+				if str(served_line_value) != line_id:
+					shared_with_other = true
+					break
+			if (
+				str(stop.get("source", "")) == "custom"
+				and not shared_with_other
+			):
 				_apply_snap_to_stop(stop, point, snap)
 				stops[stop_id] = stop
 				next_ids.append(stop_id)
