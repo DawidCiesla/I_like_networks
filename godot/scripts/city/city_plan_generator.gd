@@ -253,6 +253,25 @@ static func _generate_district(
 		if not Topology.has_parallel_overlap(local, existing_roads + district_roads, 4.0):
 			district_roads.append(local)
 
+	if district_roads.size() < 3:
+		for fallback_index in range(3 - district_roads.size()):
+			var fraction := 0.38 + float(fallback_index) * 0.22
+			var center := stop + outward * float(spec["depth"]) * fraction
+			var service_id := "service-%s-fallback-%d" % [spec["id"], fallback_index]
+			district_roads.append(_road(
+				service_id,
+				str(spec["id"]),
+				"service",
+				[
+					center - tangent * float(spec["halfWidth"]) * 0.48,
+					center + tangent * float(spec["halfWidth"]) * 0.48,
+				],
+				{"districtId": spec["id"]},
+				30 + fallback_index,
+				"city",
+				[collector_id]
+			))
+
 	var blocks: Array = []
 	var parcels: Array = []
 	var parcel_serial := 1
@@ -370,16 +389,27 @@ static func _fallback_parcels(
 	var parcels: Array = []
 	var blocks: Array = []
 
-	for index in range(6):
-		var serial := start_serial + index
-		var t := 0.25 + float(index % 3) * 0.25
-		var side := -1.0 if index < 3 else 1.0
+	var candidate_index := 0
+	while parcels.size() < 6 and candidate_index < 18:
+		var serial := start_serial + candidate_index
+		var column := candidate_index % 5
+		var side := -1.0 if candidate_index % 2 == 0 else 1.0
+		var t := 0.14 + float(column) * 0.18
 		var density := _density_for(spec, seed, serial)
 		var zone := _zone_for(spec, seed, serial)
 		var size := _footprint(str(spec["id"]), zone, density)
-		var position := a.lerp(b, t) + normal * (Topology.road_half_width("collector") + size.y * 0.65 + 14.0) * side
+		var extra_offset := float(candidate_index / 10) * 28.0
+		var position := a.lerp(b, t) + normal * (
+			Topology.road_half_width("collector")
+			+ size.y * 0.65
+			+ 14.0
+			+ extra_offset
+		) * side
+
+		candidate_index += 1
 		if _inside_reservation(position, size, reservations):
 			continue
+
 		var parcel_id := "parcel-%s-%d" % [spec["id"], serial]
 		var block_id := "block-%s-%d" % [spec["id"], serial]
 		parcels.append({
@@ -394,7 +424,7 @@ static func _fallback_parcels(
 			"density": density,
 			"setback": 6.0,
 			"frontageRoadId": collector["id"],
-			"developmentOrder": float(index) * 0.15,
+			"developmentOrder": float(candidate_index) * 0.12,
 			"terrainSlope": Terrain.slope_degrees(seed, position.x, position.y),
 			"forestPressure": Terrain.forest_potential(seed, position.x, position.y),
 			"status": "vacant",
