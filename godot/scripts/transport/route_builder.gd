@@ -59,21 +59,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			)
 		elif selected >= 0 and selected < points.size():
 			var routes: Array = []
+			var waypoints := GameStore.route_editor_waypoints()
 			if selected > 0:
-				routes.append(GameStore.preview_transit_route(
+				var previous_waypoints: Array = (
+					waypoints[selected - 1]
+					if selected - 1 < waypoints.size()
+					else []
+				)
+				routes.append(GameStore.preview_transit_route_via(
 					points[selected - 1],
 					snapped,
-					true,
-					true,
-					125.0
+					previous_waypoints
 				))
 			if selected < points.size() - 1:
-				routes.append(GameStore.preview_transit_route(
+				var next_waypoints: Array = (
+					waypoints[selected]
+					if selected < waypoints.size()
+					else []
+				)
+				routes.append(GameStore.preview_transit_route_via(
 					snapped,
 					points[selected + 1],
-					true,
-					true,
-					125.0
+					next_waypoints
 				))
 			preview = {"success": true, "routes": routes}
 			for route_value in routes:
@@ -101,6 +108,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			var snapped: Vector2 = snap["point"]
 			var points := GameStore.route_editor_points()
+			if event.ctrl_pressed and points.size() >= 2:
+				var segment_index := _nearest_draft_segment(points, snapped)
+				if segment_index >= 0:
+					GameStore.route_editor_add_waypoint(snapped, segment_index)
+				get_viewport().set_input_as_handled()
+				return
+
 			var nearby := _nearest_draft_stop(points, snapped, 32.0)
 			var selected := int(GameStore.route_editor.get("selected_index", -1))
 			if nearby >= 0:
@@ -116,7 +130,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 		if event.button_index == MOUSE_BUTTON_RIGHT:
-			if int(GameStore.route_editor.get("selected_index", -1)) >= 0:
+			if event.ctrl_pressed:
+				var point := _screen_to_world(event.position)
+				if point != null:
+					GameStore.route_editor_remove_nearest_waypoint(point, 38.0)
+			elif int(GameStore.route_editor.get("selected_index", -1)) >= 0:
 				GameStore.route_editor_remove_selected()
 			else:
 				GameStore.route_editor_undo_last()
@@ -156,15 +174,21 @@ func _rebuild() -> void:
 	for index in range(points.size()):
 		_add_stop_marker(_draft_root, points[index], index, index == selected, false)
 		if index > 0:
-			var route := GameStore.preview_transit_route(
-				points[index - 1],
-				points[index],
-				true,
-				true,
-				125.0
-			)
+			var route := GameStore.route_editor_segment_preview(index - 1)
 			if bool(route.get("success", false)):
 				_add_route_preview(_draft_root, route, Color("#58b8ff"), 4.8, 0.16)
+
+	var waypoints := GameStore.route_editor_waypoints()
+	for segment_index in range(waypoints.size()):
+		var segment: Array = waypoints[segment_index]
+		for waypoint_index in range(segment.size()):
+			var waypoint: Vector2 = segment[waypoint_index]
+			_add_waypoint_marker(
+				_draft_root,
+				waypoint,
+				segment_index,
+				waypoint_index
+			)
 
 	var hover_value = GameStore.route_editor.get("hover_point", null)
 	if hover_value is Vector2:
@@ -273,6 +297,45 @@ func _add_stop_marker(
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	root.add_child(label)
 
+func _add_waypoint_marker(
+	parent: Node3D,
+	point: Vector2,
+	segment_index: int,
+	waypoint_index: int
+) -> void:
+	var root := Node3D.new()
+	root.position = Vector3(
+		point.x,
+		TerrainSurface.height(GameStore.city_seed, point.x, point.y) + 1.1,
+		point.y
+	)
+	parent.add_child(root)
+
+	var marker := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = 5.5
+	cylinder.bottom_radius = 5.5
+	cylinder.height = 1.2
+	cylinder.radial_segments = 4
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color("#ff9f43")
+	material.emission_enabled = true
+	material.emission = Color("#ff9f43")
+	material.emission_energy_multiplier = 0.20
+	cylinder.material = material
+	marker.mesh = cylinder
+	marker.rotation.y = PI * 0.25
+	marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(marker)
+
+	var label := Label3D.new()
+	label.text = "VIA %d.%d" % [segment_index + 1, waypoint_index + 1]
+	label.position.y = 6.5
+	label.font_size = 16
+	label.outline_size = 5
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	root.add_child(label)
+
 func _add_catchment_disk(parent: Node3D, point: Vector2, valid: bool) -> void:
 	var mesh_instance := MeshInstance3D.new()
 	var cylinder := CylinderMesh.new()
@@ -337,6 +400,31 @@ func _nearest_draft_stop(
 			best_index = index
 	return best_index
 
+func _nearest_draft_segment(
+	points: Array[Vector2],
+	point: Vector2
+) -> int:
+	var best_index := -1
+	var best_distance := INF
+	for index in range(points.size() - 1):
+		var a := points[index]
+		var b := points[index + 1]
+		var ab := b - a
+		var length_squared := ab.length_squared()
+		var projection := a
+		if length_squared > 0.000001:
+			var t := clampf(
+				(point - a).dot(ab) / length_squared,
+				0.0,
+				1.0
+			)
+			projection = a + ab * t
+		var distance := point.distance_to(projection)
+		if distance < best_distance:
+			best_distance = distance
+			best_index = index
+	return best_index
+
 func _editor_signature() -> String:
 	if not GameStore.route_editor_active():
 		return "inactive"
@@ -347,6 +435,15 @@ func _editor_signature() -> String:
 	]
 	for point in GameStore.route_editor_points():
 		parts.append("%.2f,%.2f" % [point.x, point.y])
+	for segment_index in range(GameStore.route_editor_waypoints().size()):
+		var segment: Array = GameStore.route_editor_waypoints()[segment_index]
+		for waypoint in segment:
+			var via: Vector2 = waypoint
+			parts.append("v%d:%.2f,%.2f" % [
+				segment_index,
+				via.x,
+				via.y,
+			])
 	var hover = GameStore.route_editor.get("hover_point", null)
 	if hover is Vector2:
 		var hover_point: Vector2 = hover
