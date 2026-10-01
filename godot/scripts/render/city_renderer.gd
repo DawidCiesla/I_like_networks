@@ -23,6 +23,27 @@ const SIDEWALK_WIDTH := {
 	"service": 19.0,
 }
 
+const ROAD_COLOR := {
+	"arterial": Color("#343735"),
+	"collector": Color("#3a3d3a"),
+	"local": Color("#40433f"),
+	"service": Color("#464944"),
+}
+
+const SIDEWALK_COLOR := {
+	"arterial": Color("#666b66"),
+	"collector": Color("#6a6f69"),
+	"local": Color("#6e736c"),
+	"service": Color("#72766f"),
+}
+
+const CURB_COLOR := {
+	"arterial": Color("#878c85"),
+	"collector": Color("#858a83"),
+	"local": Color("#838880"),
+	"service": Color("#81857e"),
+}
+
 const SIDEWALK_SURFACE_HEIGHT := 0.045
 const ROAD_SURFACE_HEIGHT := 0.065
 const CURB_SURFACE_HEIGHT := 0.082
@@ -168,14 +189,14 @@ func _create_road_node(road: Dictionary, signature: String) -> Node3D:
 		root,
 		points,
 		float(SIDEWALK_WIDTH.get(road_class, 23.0)),
-		Color("#777a74"),
+		SIDEWALK_COLOR.get(road_class, Color("#6e736c")),
 		SIDEWALK_SURFACE_HEIGHT
 	)
 	_add_ribbon(
 		root,
 		points,
 		float(ROAD_WIDTH.get(road_class, 15.0)),
-		Color("#3b3d3b"),
+		ROAD_COLOR.get(road_class, Color("#40433f")),
 		ROAD_SURFACE_HEIGHT
 	)
 	return root
@@ -251,7 +272,7 @@ func _rebuild_road_markings() -> void:
 
 		var mesh := ImmediateMesh.new()
 		var curb_material := StandardMaterial3D.new()
-		curb_material.albedo_color = Color("#969991")
+		curb_material.albedo_color = CURB_COLOR.get(road_class, Color("#838880"))
 		curb_material.roughness = 1.0
 		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, curb_material)
 		for road_detail in road_details:
@@ -268,14 +289,34 @@ func _rebuild_road_markings() -> void:
 				_append_curb_strips(mesh, curb_path, float(ROAD_WIDTH[road_class]), 1.4)
 		mesh.surface_end()
 
-		if road_class in ["arterial", "collector"] and not marking_roads.is_empty():
-			var marking_material := StandardMaterial3D.new()
-			marking_material.albedo_color = Color("#cbbc7f") if road_class == "arterial" else Color("#c7c7b5")
-			marking_material.roughness = 1.0
-			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, marking_material)
+		if road_class == "arterial" and not marking_roads.is_empty():
+			var center_material := StandardMaterial3D.new()
+			center_material.albedo_color = Color("#d2c57c")
+			center_material.roughness = 1.0
+			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, center_material)
 			for marking_road in marking_roads:
 				var points: Array[Vector2] = marking_road["points"]
-				_append_centerline_dashes(mesh, points, road_class)
+				_append_dashed_line(mesh, points, 0.0, 9.0, 6.0, 0.72)
+			mesh.surface_end()
+
+			var lane_material := StandardMaterial3D.new()
+			lane_material.albedo_color = Color("#d9d9cd")
+			lane_material.roughness = 1.0
+			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, lane_material)
+			var lane_offset := float(ROAD_WIDTH["arterial"]) * 0.25
+			for marking_road in marking_roads:
+				var points: Array[Vector2] = marking_road["points"]
+				_append_dashed_line(mesh, points, -lane_offset, 6.0, 7.0, 0.42)
+				_append_dashed_line(mesh, points, lane_offset, 6.0, 7.0, 0.42)
+			mesh.surface_end()
+		elif road_class == "collector" and not marking_roads.is_empty():
+			var collector_material := StandardMaterial3D.new()
+			collector_material.albedo_color = Color("#d0d0c4")
+			collector_material.roughness = 1.0
+			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, collector_material)
+			for marking_road in marking_roads:
+				var points: Array[Vector2] = marking_road["points"]
+				_append_dashed_line(mesh, points, 0.0, 5.5, 7.0, 0.48)
 			mesh.surface_end()
 
 		var markings := MeshInstance3D.new()
@@ -470,16 +511,16 @@ func _add_curb_triangle(mesh: ImmediateMesh, a: Vector2, b: Vector2, c: Vector2)
 		CURB_SURFACE_HEIGHT
 	)
 
-func _append_centerline_dashes(
+func _append_dashed_line(
 	mesh: ImmediateMesh,
 	points: Array[Vector2],
-	road_class: String
+	lateral_offset: float,
+	dash_length: float,
+	gap_length: float,
+	marking_width: float
 ) -> void:
 	var total_length := _polyline_length(points)
 	var end_distance := total_length - 12.0
-	var dash_length := 8.0 if road_class == "arterial" else 5.5
-	var gap_length := 8.0 if road_class == "arterial" else 7.0
-	var marking_width := 0.72 if road_class == "arterial" else 0.48
 	var distance := 12.0
 	while distance < end_distance:
 		var dash_end := minf(distance + dash_length, end_distance)
@@ -487,11 +528,14 @@ func _append_centerline_dashes(
 		var finish := _point_on_polyline(points, dash_end)
 		var direction := (finish - start).normalized()
 		if direction.length_squared() > 0.0:
-			var normal := Vector2(-direction.y, direction.x) * marking_width * 0.5
-			var left_start := start + normal
-			var right_start := start - normal
-			var left_end := finish + normal
-			var right_end := finish - normal
+			var across := Vector2(-direction.y, direction.x)
+			start += across * lateral_offset
+			finish += across * lateral_offset
+			var half_width := across * marking_width * 0.5
+			var left_start := start + half_width
+			var right_start := start - half_width
+			var left_end := finish + half_width
+			var right_end := finish - half_width
 			_add_marking_triangle(mesh, left_start, left_end, right_start)
 			_add_marking_triangle(mesh, left_end, right_end, right_start)
 		distance += dash_length + gap_length
@@ -672,15 +716,27 @@ func _sync_junctions() -> void:
 		_add_junction_patch(
 			junction_position,
 			sidewalk_arms,
-			Color("#777a74"),
+			_junction_style_color(visible_roads, SIDEWALK_COLOR, Color("#6e736c")),
 			SIDEWALK_SURFACE_HEIGHT
 		)
 		_add_junction_patch(
 			junction_position,
 			road_arms,
-			Color("#3b3d3b"),
+			_junction_style_color(visible_roads, ROAD_COLOR, Color("#40433f")),
 			ROAD_SURFACE_HEIGHT
 		)
+
+func _junction_style_color(
+	roads: Dictionary,
+	palette: Dictionary,
+	fallback: Color
+) -> Color:
+	var priority := ["arterial", "collector", "local", "service"]
+	for road_class in priority:
+		for road in roads.values():
+			if str(road.get("class", "local")) == road_class:
+				return palette.get(road_class, fallback)
+	return fallback
 
 func _add_junction_patch(
 	center: Vector2,
