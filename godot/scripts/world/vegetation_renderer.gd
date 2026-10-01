@@ -187,7 +187,7 @@ func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
 	var length_sq := ab.length_squared()
 	if length_sq <= 0.000001:
 		return point.distance_to(a)
-	var t := clamp((point - a).dot(ab) / length_sq, 0.0, 1.0)
+	var t: float = clampf((point - a).dot(ab) / length_sq, 0.0, 1.0)
 	return point.distance_to(a + ab * t)
 
 func _pseudo(x: float, z: float, channel: int) -> float:
