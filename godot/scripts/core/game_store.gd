@@ -1593,7 +1593,7 @@ func _inject_transfer_passengers(
 			var target_line: Dictionary = lines[target_line_id]
 			if not bool(target_line.get("built", false)):
 				continue
-			var stop_index := Data.STATION_IDS[target_line_id].find(target_stop_id)
+			var stop_index: int = Data.STATION_IDS[target_line_id].find(target_stop_id)
 			var stop_count := int(target_line.get("stop_count", 0))
 			if stop_index < 0 or stop_index >= stop_count or stop_count < 2:
 				continue

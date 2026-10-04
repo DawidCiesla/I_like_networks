@@ -36,7 +36,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseMotion:
-		var point := _screen_to_world(event.position)
+		var point: Variant = _screen_to_world(event.position)
 		if point == null:
 			GameStore.clear_route_editor_hover()
 			return
@@ -98,7 +98,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			var point := _screen_to_world(event.position)
+			var point: Variant = _screen_to_world(event.position)
 			if point == null:
 				return
 			var snap := GameStore.snap_transit_point(point, true, 125.0)
@@ -131,7 +131,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			if event.ctrl_pressed:
-				var point := _screen_to_world(event.position)
+				var point: Variant = _screen_to_world(event.position)
 				if point != null:
 					GameStore.route_editor_remove_nearest_waypoint(point, 38.0)
 			elif int(GameStore.route_editor.get("selected_index", -1)) >= 0:
