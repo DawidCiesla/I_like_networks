@@ -88,7 +88,8 @@ func _test_growth_is_deterministic_without_transit() -> void:
 	var initial_demographics: Dictionary = one_chunk.city.get("demographics", {}).duplicate(true)
 	var initial_settlement_totals := _settlement_totals(one_chunk.city)
 	var interval := CityRuntime.REGIONAL_GROWTH_INTERVAL_SECONDS
-	CityRuntime.advance(one_chunk, interval * 2.0)
+	CityRuntime.advance(one_chunk, interval * 3.0)
+	CityRuntime.advance(two_chunks, interval)
 	CityRuntime.advance(two_chunks, interval)
 	CityRuntime.advance(two_chunks, interval)
 	_expect(one_chunk.transit_network.is_empty() and two_chunks.transit_network.is_empty(), "growth test has no transit service")
