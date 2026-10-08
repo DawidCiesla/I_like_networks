@@ -1,5 +1,7 @@
 extends RefCounted
 
+const BuildingStyleApplier = preload("res://scripts/render/building_style_applier.gd")
+
 const MODEL_SCENES := {
 	"suburban_a": preload("res://assets/kenney/suburban/models/building-type-a.glb"),
 	"suburban_b": preload("res://assets/kenney/suburban/models/building-type-b.glb"),
@@ -60,6 +62,37 @@ const FRONT_SIDE_BY_MODEL := {
 	"industrial_s": 1.0,
 }
 
+# Kenney's buildings use shared imported StandardMaterial3D resources. Keep the
+# source materials and their texture/roughness values intact, then apply a
+# restrained per-building modulation to a local material copy. The palettes
+# are deliberately close in value so the original authored PBR look remains
+# visible instead of turning each building into a flat color block.
+const STYLE_PALETTES := {
+	"residential": [
+		Color(1.00, 0.96, 0.92),
+		Color(0.91, 0.97, 1.00),
+		Color(0.93, 1.00, 0.93),
+		Color(1.00, 0.98, 0.93),
+	],
+	"commercial": [
+		Color(0.91, 0.97, 1.00),
+		Color(1.00, 0.95, 0.90),
+		Color(0.93, 1.00, 0.97),
+		Color(0.96, 0.93, 1.00),
+	],
+	"industrial": [
+		Color(1.00, 0.95, 0.90),
+		Color(0.91, 0.96, 0.93),
+		Color(0.91, 0.95, 1.00),
+		Color(0.98, 0.98, 0.92),
+	],
+	"civic": [
+		Color(0.91, 0.97, 0.98),
+		Color(1.00, 0.97, 0.90),
+		Color(0.95, 0.94, 1.00),
+	],
+}
+
 static func create_visual(
 	building: Dictionary,
 	width: float,
@@ -85,6 +118,12 @@ static func create_visual(
 	var imported_root := packed_scene.instantiate() as Node3D
 	if imported_root == null:
 		return {}
+	var tint := style_tint(str(building.get("zone", "")), kind, building_id)
+	# The renderer adds this root after it positions the asset; apply its local
+	# materials on tree entry so the authored scene stays reusable and tests do
+	# not allocate transient render materials for discarded off-tree instances.
+	imported_root.set_script(BuildingStyleApplier)
+	imported_root.set("tint", tint)
 
 	var bounds := _scene_bounds(imported_root)
 	if bounds.size.x <= 0.0001 or bounds.size.y <= 0.0001 or bounds.size.z <= 0.0001:
@@ -116,7 +155,49 @@ static func create_visual(
 		"footprint_depth": bounds.size.z * uniform_scale,
 		"model_key": model_key,
 		"front_side": front_side_sign(model_key),
+		"style_tint": tint,
 	}
+
+static func style_tint(zone: String, kind: String, building_id: String) -> Color:
+	var family := _style_family(zone, kind)
+	var palette: Array = STYLE_PALETTES[family]
+	var style_hash := hash("%s|%s|%s" % [zone, kind, building_id])
+	var palette_index := posmod(style_hash, palette.size())
+	var tone_index := posmod(style_hash >> 5, 5)
+	var tone_scale := 0.975 + float(tone_index) * 0.012
+	var palette_color: Color = palette[palette_index]
+	return Color(
+		clampf(palette_color.r * tone_scale, 0.88, 1.08),
+		clampf(palette_color.g * tone_scale, 0.88, 1.08),
+		clampf(palette_color.b * tone_scale, 0.88, 1.08),
+		1.0
+	)
+
+static func _style_family(zone: String, kind: String) -> String:
+	match zone:
+		"residential":
+			return "residential"
+		"commercial":
+			return "commercial"
+		"industrial":
+			return "industrial"
+		"civic":
+			return "civic"
+		"mixed":
+			if kind in ["house", "townhouse", "apartment"]:
+				return "residential"
+			if kind in ["workshop", "warehouse"]:
+				return "industrial"
+			return "commercial"
+	match kind:
+		"house", "townhouse", "apartment":
+			return "residential"
+		"workshop", "warehouse":
+			return "industrial"
+		"civic", "campus":
+			return "civic"
+		_:
+			return "commercial"
 
 static func front_side_sign(model_key: String) -> float:
 	return float(FRONT_SIDE_BY_MODEL.get(model_key, 1.0))

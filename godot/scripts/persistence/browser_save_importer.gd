@@ -3,6 +3,9 @@ class_name BrowserSaveImporter
 
 const Data = preload("res://scripts/core/game_data.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
+const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
+const TransitModes = preload("res://scripts/transport/transit_modes.gd")
 
 static func import_file(path: String) -> Dictionary:
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -66,20 +69,227 @@ static func convert_browser_save(parsed: Dictionary) -> Dictionary:
 	}
 
 	var city := _convert_city(source.get("city", {}), city_seed)
+	var world_map := _convert_world_map(_world_map_payload(parsed, source), city_seed)
+	var raw_transit_network: Variant = _transit_network_payload(parsed, source)
+	if _has_unsupported_transit_network_version(raw_transit_network):
+		return {}
+	var transit_network := _convert_transit_network(raw_transit_network)
 
-	return {
+	var result := {
 		"version": Data.GAME_VERSION,
 		"migration_source": "browser-v%d" % web_version,
 		"money": float(source.get("money", Data.ECONOMY["starting_money"])),
 		"elapsed_seconds": float(source.get("elapsedSeconds", source.get("elapsed_seconds", 0.0))),
 		"simulation_speed": int(source.get("simulationSpeed", source.get("simulation_speed", 1))),
 		"city_seed": city_seed,
+		"world_map": world_map,
 		"lines": lines,
 		"stations": stations,
 		"depot": depot,
 		"stats": stats,
 		"city": city,
 	}
+	if not transit_network.is_empty():
+		result["transit_network"] = transit_network
+	return result
+
+
+static func _transit_network_payload(parsed: Dictionary, source: Dictionary) -> Variant:
+	for key in ["transit_network", "transitNetwork"]:
+		if source.has(key):
+			return source[key]
+	for key in ["transit_network", "transitNetwork"]:
+		if parsed.has(key):
+			return parsed[key]
+	return null
+
+
+static func _world_map_payload(parsed: Dictionary, source: Dictionary) -> Variant:
+	for key in ["world_map", "worldMap"]:
+		if source.has(key):
+			return source[key]
+	for key in ["world_map", "worldMap"]:
+		if parsed.has(key):
+			return parsed[key]
+	return null
+
+
+static func _has_unsupported_transit_network_version(raw_value: Variant) -> bool:
+	if not (raw_value is Dictionary):
+		return false
+	var network: Dictionary = _normalize_browser_value(raw_value)
+	return int(network.get("schema_version", TransitNetwork.SCHEMA_VERSION)) > TransitNetwork.SCHEMA_VERSION
+
+
+static func _convert_world_map(raw_value: Variant, seed: int) -> Dictionary:
+	if not (raw_value is Dictionary):
+		return MapDefinition.create(MapDefinition.LEGACY_CITY_MAP_ID, seed)
+	var map_payload: Dictionary = _normalize_browser_value(raw_value)
+	if map_payload.is_empty():
+		return MapDefinition.create(MapDefinition.LEGACY_CITY_MAP_ID, seed)
+	return MapDefinition.normalize(map_payload, seed, true)
+
+
+static func _convert_transit_network(raw_value: Variant) -> Dictionary:
+	if not (raw_value is Dictionary):
+		return {}
+	var network: Dictionary = _normalize_browser_value(raw_value)
+	var source_version := int(network.get("schema_version", TransitNetwork.SCHEMA_VERSION))
+	if source_version > TransitNetwork.SCHEMA_VERSION:
+		return {}
+
+	var stops := _normalize_record_map(network.get("stops", {}), "custom")
+	# Do not assign a default source before classifying line IDs. The legacy
+	# network can contain line1..line4 alongside custom lines in one payload.
+	var lines := _normalize_record_map(network.get("lines", {}), "")
+	var has_custom_lines := false
+	var used_modes: Dictionary = {"bus": true}
+	for line_id_value in lines.keys():
+		var line_id := str(line_id_value)
+		var line: Dictionary = lines[line_id]
+		if Data.LINE_KEYS.has(line_id):
+			line["source"] = str(line.get("source", "legacy"))
+		else:
+			line["source"] = str(line.get("source", "custom"))
+		if str(line.get("source", "")) == "custom":
+			has_custom_lines = true
+		var mode := str(line.get("mode", "bus")).to_lower()
+		line["mode"] = mode
+		if str(line.get("source", "")) == "custom" and TransitModes.mode_ids().has(mode):
+			used_modes[mode] = true
+		if not line.has("id"):
+			line["id"] = line_id
+		var stop_ids: Variant = line.get("stop_ids", [])
+		if not (stop_ids is Array):
+			line["stop_ids"] = []
+		var vehicles: Variant = line.get("vehicles", [])
+		if not (vehicles is Array):
+			vehicles = []
+			line["vehicles"] = vehicles
+		if not line.has("fleet_count"):
+			line["fleet_count"] = vehicles.size()
+		if not line.has("next_vehicle_id"):
+			line["next_vehicle_id"] = _next_record_serial(vehicles, "id", 1)
+		lines[line_id] = line
+
+	for stop_id_value in stops.keys():
+		var stop_id := str(stop_id_value)
+		var stop: Dictionary = stops[stop_id]
+		if not stop.has("id"):
+			stop["id"] = stop_id
+		stops[stop_id] = stop
+
+	var unlocked_modes: Dictionary = {}
+	var raw_unlocked: Variant = network.get("unlocked_modes", {})
+	if raw_unlocked is Dictionary:
+		unlocked_modes = (raw_unlocked as Dictionary).duplicate(true)
+	elif raw_unlocked is Array:
+		for mode_value in raw_unlocked:
+			unlocked_modes[str(mode_value).to_lower()] = true
+	for mode in used_modes.keys():
+		unlocked_modes[str(mode)] = true
+	if not unlocked_modes.has("bus"):
+		unlocked_modes["bus"] = true
+
+	var normalized := network.duplicate(true)
+	normalized["schema_version"] = TransitNetwork.SCHEMA_VERSION
+	normalized["source"] = TransitNetwork.SOURCE_FREE_LINES if has_custom_lines else TransitNetwork.SOURCE_LEGACY_BRIDGE
+	normalized["stops"] = stops
+	normalized["lines"] = lines
+	normalized["unlocked_modes"] = unlocked_modes
+	normalized["next_stop_serial"] = maxi(
+		int(network.get("next_stop_serial", 1)),
+		_next_key_serial(stops, "custom-stop-")
+	)
+	normalized["next_line_serial"] = maxi(
+		int(network.get("next_line_serial", 1)),
+		_next_key_serial(lines, "custom-line-")
+	)
+	return normalized
+
+
+static func _normalize_record_map(raw_value: Variant, default_source: String) -> Dictionary:
+	var records: Dictionary = {}
+	if raw_value is Dictionary:
+		var raw_records: Dictionary = raw_value
+		for key_value in raw_records.keys():
+			var record_value: Variant = raw_records[key_value]
+			if not (record_value is Dictionary):
+				continue
+			var record: Dictionary = _normalize_browser_value(record_value)
+			var record_id := str(record.get("id", key_value))
+			if not record.has("source") and default_source == "custom":
+				record["source"] = default_source
+			if not record.has("id"):
+				record["id"] = record_id
+			records[record_id] = record
+	elif raw_value is Array:
+		for record_value in raw_value:
+			if not (record_value is Dictionary):
+				continue
+			var record: Dictionary = _normalize_browser_value(record_value)
+			var record_id := str(record.get("id", "")).strip_edges()
+			if record_id.is_empty():
+				continue
+			if not record.has("source") and default_source == "custom":
+				record["source"] = default_source
+			records[record_id] = record
+	return records
+
+
+static func _normalize_browser_value(value: Variant) -> Variant:
+	if value is Dictionary:
+		var normalized: Dictionary = {}
+		var dictionary: Dictionary = value
+		for key_value in dictionary.keys():
+			normalized[_snake_case_key(str(key_value))] = _normalize_browser_value(dictionary[key_value])
+		return normalized
+	if value is Array:
+		var normalized: Array = []
+		for item in value:
+			normalized.append(_normalize_browser_value(item))
+		return normalized
+	return value
+
+
+static func _snake_case_key(value: String) -> String:
+	var result := ""
+	for index in range(value.length()):
+		var current := value.substr(index, 1)
+		var previous := value.substr(index - 1, 1) if index > 0 else ""
+		var next := value.substr(index + 1, 1) if index + 1 < value.length() else ""
+		var uppercase := current == current.to_upper() and current != current.to_lower()
+		var previous_uppercase := (
+			not previous.is_empty()
+			and previous == previous.to_upper()
+			and previous != previous.to_lower()
+		)
+		var next_lowercase := not next.is_empty() and next == next.to_lower() and next != next.to_upper()
+		if uppercase and index > 0 and previous != "_" and (not previous_uppercase or next_lowercase):
+			result += "_"
+		result += current.to_lower() if uppercase else current
+	return result
+
+
+static func _next_record_serial(records: Array, field: String, fallback: int) -> int:
+	var next := fallback
+	for record_value in records:
+		if record_value is Dictionary:
+			var record: Dictionary = record_value
+			next = maxi(next, int(record.get(field, 0)) + 1)
+	return next
+
+
+static func _next_key_serial(records: Dictionary, prefix: String) -> int:
+	var next := 1
+	for key_value in records.keys():
+		var record_id := str(key_value)
+		if not record_id.begins_with(prefix):
+			continue
+		var suffix := record_id.substr(prefix.length())
+		if suffix.is_valid_int():
+			next = maxi(next, int(suffix) + 1)
+	return next
 
 static func _convert_line(raw, line_key: String) -> Dictionary:
 	var source: Dictionary = raw if typeof(raw) == TYPE_DICTIONARY else {}

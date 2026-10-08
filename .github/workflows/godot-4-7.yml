@@ -50,3 +50,19 @@ jobs:
             --headless \
             --path godot \
             --script res://scripts/debug/self_test.gd
+
+      - name: Run focused Godot tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t test_scripts < <(find godot/scripts -type f -name '*_test.gd' -print0 | sort -z)
+          for test_script in "${test_scripts[@]}"; do
+            if [[ "${test_script}" == "godot/scripts/debug/self_test.gd" ]]; then
+              continue
+            fi
+            echo "Running ${test_script}"
+            /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+              --headless \
+              --path godot \
+              --script "res://${test_script#godot/}"
+          done

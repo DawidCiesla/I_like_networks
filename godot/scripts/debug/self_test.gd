@@ -4,6 +4,7 @@ const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const StoreScript = preload("res://scripts/core/game_store.gd")
 const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
@@ -18,6 +19,39 @@ const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 
 var _self_test_failed := false
 
+func _legacy_store():
+	var store = StoreScript.new()
+	store.suppress_persistence = true
+	store.city_seed = Data.DEFAULT_CITY_SEED
+	store.world_map = MapDefinition.create(MapDefinition.LEGACY_CITY_MAP_ID, store.city_seed)
+	MapDefinition.set_active(store.world_map)
+	TerrainSurface.set_terrain_edit_payload(store.world_map.get("terrain_edits", {}))
+	store.money = float(Data.ECONOMY["starting_money"])
+	store.lines = {}
+	for line_key in Data.LINE_KEYS:
+		store.lines[line_key] = store._new_line_state(line_key)
+	store.stations = {}
+	for station_id in Data.all_station_ids():
+		store.stations[station_id] = {"level": 0}
+	store.depot = {"built": false, "garage_slots": 4, "level": 0}
+	store.city = CityRuntime.create_initial_city(store.city_seed, MapDefinition.LEGACY_CITY_MAP_ID)
+	store.transit_network = TransitNetwork.create_legacy_bridge(
+		store.city,
+		store.lines,
+		store.stations
+	)
+	store.stats = {
+		"lifetime_revenue": 0.0,
+		"lifetime_operating_costs": 0.0,
+		"lifetime_passengers": 0.0,
+		"last_fare_event_value": 0.0,
+		"last_fare_event_serial": 0,
+		"last_fare_line": "",
+		"last_fare_stop_index": -1,
+	}
+	store.route_editor = store._empty_route_editor()
+	return store
+
 func _init() -> void:
 	_test_shared_interchanges()
 	_test_route_geometry()
@@ -26,6 +60,7 @@ func _init() -> void:
 	_test_transit_network_bridge()
 	_test_free_line_workflow()
 	_test_terrain_determinism()
+	_test_terrain_surface_cache()
 	_test_building_foundation_sampling()
 	_test_building_frontage_orientation()
 	_test_building_visual_archetypes()
@@ -182,9 +217,7 @@ func _test_road_router() -> void:
 		_expect(absf(float(same_edge_route["length"]) - 200.0) <= 1.0)
 
 func _test_transit_network_bridge() -> void:
-	var store = StoreScript.new()
-	store.suppress_persistence = true
-	store.reset_state(false)
+	var store = _legacy_store()
 
 	_expect(int(store.transit_network.get("schema_version", 0)) == TransitNetwork.SCHEMA_VERSION)
 	_expect(
@@ -225,9 +258,7 @@ func _test_transit_network_bridge() -> void:
 	store.free()
 
 func _test_free_line_workflow() -> void:
-	var store = StoreScript.new()
-	store.suppress_persistence = true
-	store.reset_state(false)
+	var store = _legacy_store()
 	store.money = 10_000.0
 
 	_expect(store.build_next_stop("line1"))
@@ -371,6 +402,108 @@ func _test_terrain_determinism() -> void:
 		var forest := Terrain.forest_potential(Data.DEFAULT_CITY_SEED, point.x, point.y)
 		_expect(forest >= 0.0 and forest <= 1.0)
 
+	# Anchors captured from the pre-cache TerrainModel implementation. They make
+	# cache refactors prove they preserve the existing procedural terrain.
+	_expect_near(Terrain.height(Data.DEFAULT_CITY_SEED, 0.0, 0.0), -9.1623813419)
+	_expect_near(Terrain.height(Data.DEFAULT_CITY_SEED, 420.0, -180.0), 2.3865626090)
+	_expect_near(Terrain.height(123456, 0.0, 0.0), -7.9360631142)
+
+func _test_terrain_surface_cache() -> void:
+	var previous_map := MapDefinition.active_definition()
+	MapDefinition.set_active(MapDefinition.create(MapDefinition.LEGACY_CITY_MAP_ID, Data.DEFAULT_CITY_SEED))
+	var seed_a := Data.DEFAULT_CITY_SEED
+	var seed_b := 123456
+	var bounds := TerrainSurface.world_bounds()
+	var bounds_end := bounds.position + bounds.size
+	var steps := TerrainSurface.grid_steps(bounds)
+	var step_x := bounds.size.x / float(steps.x)
+	var step_z := bounds.size.y / float(steps.y)
+	var cell_origin := bounds.position + Vector2(step_x * 2.0, step_z * 2.0)
+	var sample_a := bounds.position + Vector2(step_x * 2.5, step_z * 2.5)
+	var sample_b := bounds.position + Vector2(step_x * 0.75, step_z * 0.25)
+	var sample_c := bounds.position + Vector2(step_x * 0.25, step_z * 0.75)
+
+	# These values come from the original TerrainSurface interpolation and the
+	# original TerrainModel height function, before introducing the caches.
+	_expect_near(TerrainSurface.height(seed_a, bounds.position.x, bounds.position.y), 15.4752252228)
+	_expect_near(TerrainSurface.height(seed_a, sample_a.x, sample_a.y), 8.9786874006)
+	_expect_near(TerrainSurface.height(seed_a, sample_b.x, sample_b.y), 12.8170202672)
+	_expect_near(TerrainSurface.height(seed_a, sample_c.x, sample_c.y), 14.7091058205)
+	_expect_near(TerrainSurface.height(seed_a, bounds_end.x, bounds_end.y), -0.5495240333)
+
+	# Queries on either side of a shared cell edge must meet at the same surface.
+	var vertical_seam := bounds.position + Vector2(step_x * 3.0, step_z * 2.5)
+	var horizontal_seam := bounds.position + Vector2(step_x * 2.5, step_z * 3.0)
+	_expect_near(TerrainSurface.height(seed_a, vertical_seam.x, vertical_seam.y), 8.9533568198)
+	_expect_near(TerrainSurface.height(seed_a, horizontal_seam.x, horizontal_seam.y), 8.9667837487)
+	_expect_near(
+		TerrainSurface.height(seed_a, vertical_seam.x - 0.01, vertical_seam.y),
+		TerrainSurface.height(seed_a, vertical_seam.x, vertical_seam.y),
+		0.001
+	)
+	_expect_near(
+		TerrainSurface.height(seed_a, vertical_seam.x + 0.01, vertical_seam.y),
+		TerrainSurface.height(seed_a, vertical_seam.x, vertical_seam.y),
+		0.001
+	)
+	_expect_near(
+		TerrainSurface.height(seed_a, horizontal_seam.x, horizontal_seam.y - 0.01),
+		TerrainSurface.height(seed_a, horizontal_seam.x, horizontal_seam.y),
+		0.001
+	)
+	_expect_near(
+		TerrainSurface.height(seed_a, horizontal_seam.x, horizontal_seam.y + 0.01),
+		TerrainSurface.height(seed_a, horizontal_seam.x, horizontal_seam.y),
+		0.001
+	)
+
+	# The rendered mesh ends at these bounds. Outside it, queries retain the
+	# original analytic TerrainModel behavior.
+	_expect_near(
+		TerrainSurface.height(seed_a, bounds.position.x - 0.001, bounds.position.y),
+		15.4752521063
+	)
+	_expect_near(
+		TerrainSurface.height(seed_a, bounds_end.x + 0.001, bounds_end.y),
+		-0.5495408080
+	)
+
+	# Changing seeds and filling/evicting the bounded caches must not reuse a
+	# height from a different seed or perturb a previously sampled location.
+	_expect_near(TerrainSurface.height(seed_b, sample_a.x, sample_a.y), -5.0674616214)
+	_expect_near(TerrainSurface.height(seed_a, sample_a.x, sample_a.y), 8.9786874006)
+	var retained_vertex := TerrainSurface._vertex_height(seed_a, cell_origin.x, cell_origin.y)
+	var vertex_cache_capacity: int = TerrainSurface.VERTEX_HEIGHT_CACHE_CAPACITY
+	for index in range(vertex_cache_capacity):
+		# A fixed x with distinct z values checks the nested cache's total entry
+		# bound; counting only its outer x dictionary would miss unbounded growth.
+		TerrainSurface._vertex_height(
+			seed_a,
+			cell_origin.x,
+			cell_origin.y + float(index + 1) * 0.0001
+		)
+	var vertex_entry_count := 0
+	for column_value in TerrainSurface._vertex_height_cache.values():
+		var column: Dictionary = column_value
+		vertex_entry_count += column.size()
+	_expect(vertex_entry_count == vertex_cache_capacity)
+	_expect(TerrainSurface._vertex_height_cache_size == vertex_cache_capacity)
+	_expect_near(
+		TerrainSurface._vertex_height(seed_a, cell_origin.x, cell_origin.y),
+		retained_vertex
+	)
+
+	# Exercise FIFO eviction in TerrainModel's seed-scoped random-value cache,
+	# then confirm an evicted value and a numeric terrain anchor recompute exactly.
+	var random_anchor := Terrain._random01(seed_a, "self-test-random-anchor")
+	var random_cache_capacity: int = Terrain.RANDOM_CACHE_CAPACITY
+	for index in range(random_cache_capacity + 1):
+		Terrain._random01(seed_a, "self-test-random-%d" % index)
+	_expect(Terrain._random_cache.size() == random_cache_capacity)
+	_expect_near(Terrain._random01(seed_a, "self-test-random-anchor"), random_anchor)
+	_expect_near(Terrain.height(seed_a, 0.0, 0.0), -9.1623813419)
+	MapDefinition.set_active(previous_map)
+
 func _test_building_foundation_sampling() -> void:
 	var seed := Data.DEFAULT_CITY_SEED
 	var cases := [
@@ -403,7 +536,7 @@ func _test_building_foundation_sampling() -> void:
 					center.x + cosine * local_x - sine * local_z,
 					center.y + sine * local_x + cosine * local_z
 				)
-				var sample_height := Terrain.height(seed, sample_point.x, sample_point.y)
+				var sample_height := TerrainSurface.height(seed, sample_point.x, sample_point.y)
 				expected_min = minf(expected_min, sample_height)
 				expected_max = maxf(expected_max, sample_height)
 
@@ -499,10 +632,16 @@ func _expect(condition: bool) -> void:
 		_self_test_failed = true
 		push_error("SELF-TEST CHECK FAILED")
 
+func _expect_near(actual: float, expected: float, tolerance: float = 0.0001) -> void:
+	if not is_finite(actual) or absf(actual - expected) > tolerance:
+		_self_test_failed = true
+		push_error(
+			"SELF-TEST CHECK FAILED: %.10f != %.10f (tol %.6f)"
+			% [actual, expected, tolerance]
+		)
+
 func _test_arrival_fare_simulation() -> void:
-	var store = StoreScript.new()
-	store.suppress_persistence = true
-	store.reset_state(false)
+	var store = _legacy_store()
 	store.money = 10_000.0
 
 	var before: float = float(store.money)
@@ -549,9 +688,7 @@ func _test_master_plan_fixture() -> void:
 
 
 func _test_city_growth_runtime() -> void:
-	var store = StoreScript.new()
-	store.suppress_persistence = true
-	store.reset_state(false)
+	var store = _legacy_store()
 	store.money = 100_000.0
 
 	_expect(store.build_next_stop("line1"))

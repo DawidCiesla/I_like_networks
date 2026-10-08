@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/terrain_renderer.gd" id="2_terrain"]
@@ -12,12 +12,20 @@
 [ext_resource type="Script" path="res://scripts/render/roadside_lighting_renderer.gd" id="10_road_lights"]
 [ext_resource type="Theme" path="res://themes/game_ui_theme.tres" id="11_ui_theme"]
 [ext_resource type="Script" path="res://scripts/transport/route_builder.gd" id="12_route_builder"]
+[ext_resource type="Script" path="res://scripts/world/water_surface_renderer.gd" id="13_water"]
+[ext_resource type="Script" path="res://scripts/render/world_environment_controller.gd" id="14_environment"]
+[ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="15_pause"]
+[ext_resource type="PackedScene" path="res://scenes/ui/tutorial_controller.tscn" id="16_tut"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
 
 [node name="Terrain" type="MeshInstance3D" parent="."]
 script = ExtResource("2_terrain")
+cast_shadow = 0
+
+[node name="Water" type="MeshInstance3D" parent="."]
+script = ExtResource("13_water")
 cast_shadow = 0
 
 [node name="Vegetation" type="Node3D" parent="."]
@@ -54,6 +62,9 @@ light_color = Color(0.62, 0.76, 1, 1)
 light_energy = 0.45
 shadow_enabled = false
 
+[node name="WorldEnvironmentController" type="Node3D" parent="."]
+script = ExtResource("14_environment")
+
 [node name="CameraRig" type="Node3D" parent="."]
 script = ExtResource("6_camera")
 
@@ -85,7 +96,7 @@ offset_right = 258.0
 offset_bottom = 116.0
 mouse_filter = 0
 
-[node name="Content" type="VBoxContainer" parent="HUD/Root/Resources"]
+[node name="Content" type="HBoxContainer" parent="HUD/Root/Resources"]
 layout_mode = 2
 theme_override_constants/separation = 3
 
@@ -302,20 +313,33 @@ offset_right = 190.0
 offset_bottom = -16.0
 grow_vertical = 0
 mouse_filter = 0
-text = "IMPORT WEB SAVE"
+text = "LOAD SAVE..."
 
-[node name="ResetButton" type="Button" parent="HUD/Root"]
+[node name="SaveCopyButton" type="Button" parent="HUD/Root"]
 layout_mode = 1
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 200.0
 offset_top = -58.0
-offset_right = 292.0
+offset_right = 318.0
 offset_bottom = -16.0
 grow_vertical = 0
 mouse_filter = 0
-text = "RESET"
+text = "SAVE COPY..."
+
+[node name="ResetButton" type="Button" parent="HUD/Root"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 328.0
+offset_top = -58.0
+offset_right = 422.0
+offset_bottom = -16.0
+grow_vertical = 0
+mouse_filter = 0
+text = "NEW REGION"
 
 [node name="Hint" type="Label" parent="HUD/Root"]
 layout_mode = 1
@@ -330,7 +354,10 @@ offset_right = -16.0
 offset_bottom = -16.0
 grow_horizontal = 0
 grow_vertical = 0
-theme_override_colors/font_color = Color(0.67, 0.69, 0.65, 1)
-theme_override_font_sizes/font_size = 10
-text = "LMB ORBIT   ·   RMB PAN   ·   WHEEL ZOOM   ·   SPACE PAUSE"
-horizontal_alignment = 2
+[node name="TutorialController" parent="HUD/Root" instance=ExtResource("16_tut")]
+layout_mode = 1
+
+[node name="PauseCanvas" type="CanvasLayer" parent="."]
+layer = 100
+
+[node name="PauseMenu" parent="PauseCanvas" instance=ExtResource("15_pause")]

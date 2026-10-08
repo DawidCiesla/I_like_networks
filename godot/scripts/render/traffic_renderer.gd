@@ -1,8 +1,10 @@
 extends Node3D
 
-const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const TrafficDemandModel = preload("res://scripts/render/traffic_demand.gd")
 
 const MAX_CARS := 24
+const TRAFFIC_SYNC_INTERVAL_SECONDS := 0.5
 const CAR_COLORS := [
 	Color("#d1d0c9"),
 	Color("#8fa0a8"),
@@ -14,21 +16,48 @@ const CAR_COLORS := [
 
 var _cars: Array[Dictionary] = []
 var _road_signature := ""
+var _traffic_sync_requested := true
+var _traffic_sync_elapsed := TRAFFIC_SYNC_INTERVAL_SECONDS
 
 func _ready() -> void:
-	GameStore.city_changed.connect(_sync_traffic)
-	GameStore.state_changed.connect(_sync_traffic)
+	GameStore.city_changed.connect(_request_traffic_sync)
+	GameStore.state_changed.connect(_request_traffic_sync)
+	GameStore.terrain_changed.connect(_on_terrain_changed)
 	_sync_traffic()
+	_traffic_sync_requested = false
+	_traffic_sync_elapsed = 0.0
+
+func _request_traffic_sync() -> void:
+	_traffic_sync_requested = true
+
+func _on_terrain_changed() -> void:
+	_road_signature = ""
+	_request_traffic_sync()
 
 func _process(delta: float) -> void:
-	if GameStore.simulation_speed <= 0:
-		return
+	_traffic_sync_elapsed += delta
+	if _traffic_sync_requested and _traffic_sync_elapsed >= TRAFFIC_SYNC_INTERVAL_SECONDS:
+		_traffic_sync_requested = false
+		_traffic_sync_elapsed = 0.0
+		_sync_traffic()
 
 	var scaled := delta * float(GameStore.simulation_speed)
 	for index in range(_cars.size()):
 		var car: Dictionary = _cars[index]
 		var node: MeshInstance3D = car["node"]
 		if not is_instance_valid(node):
+			continue
+		node.transparency = move_toward(
+			node.transparency,
+			float(car.get("target_transparency", 0.0)),
+			delta * 1.6
+		)
+		node.visible = node.transparency < 0.999
+		if not node.visible:
+			_cars[index] = car
+			continue
+		if GameStore.simulation_speed <= 0:
+			_cars[index] = car
 			continue
 
 		var length := float(car["length"])
@@ -41,15 +70,19 @@ func _process(delta: float) -> void:
 			length
 		)
 
-		var point := _point_on_polyline(car["points"], float(car["distance"]))
-		var position_2d: Vector2 = point["position"]
-		var tangent: Vector2 = point["tangent"]
+		var point := _point_on_polyline(
+			car["points"],
+			car["cumulative_lengths"],
+			float(car["distance"])
+		)
+		var position_2d := Vector2(point.x, point.y)
+		var tangent := Vector2(point.z, point.w)
 		var normal := Vector2(-tangent.y, tangent.x) * float(car["lane_offset"])
 		position_2d += normal
 
 		node.position = Vector3(
 			position_2d.x,
-			Terrain.height(GameStore.city_seed, position_2d.x, position_2d.y) + 2.1,
+			TerrainSurface.height(GameStore.city_seed, position_2d.x, position_2d.y) + 2.1,
 			position_2d.y
 		)
 		node.rotation.y = -atan2(tangent.y, tangent.x)
@@ -60,51 +93,67 @@ func _sync_traffic() -> void:
 		return
 
 	var roads := _eligible_roads()
-	var target := mini(
-		MAX_CARS,
-		maxi(0, int(GameStore.city.get("buildings", []).size() / 2))
-	)
-	if not roads.is_empty() and target == 0:
-		target = 1
+	var target := _target_car_count()
+	if roads.is_empty():
+		target = 0
 
 	var ids: Array[String] = []
 	for road in roads:
 		ids.append(str(road["id"]))
 	ids.sort()
-	var signature := "%s::%d" % ["|".join(ids), target]
-	if signature == _road_signature:
-		return
-	_road_signature = signature
-
-	for car in _cars:
-		var node: Node = car["node"]
-		if is_instance_valid(node):
-			node.queue_free()
-	_cars.clear()
+	var signature := "|".join(ids)
+	if signature != _road_signature:
+		_road_signature = signature
+		for car in _cars:
+			var node: Node = car["node"]
+			if is_instance_valid(node):
+				node.queue_free()
+		_cars.clear()
 
 	if roads.is_empty():
 		return
 
-	for index in range(target):
+	for index in range(_cars.size(), target):
 		var road_index := int(_hash32("%d:road:%d" % [GameStore.city_seed, index]) % roads.size())
 		var road: Dictionary = roads[road_index]
 		var points := _road_points(road)
-		var length := _polyline_length(points)
+		var cumulative_lengths := _cumulative_lengths(points)
+		var length := float(cumulative_lengths.back()) if not cumulative_lengths.is_empty() else 0.0
 		if length < 60.0:
 			continue
 
 		var node := _create_car(index)
+		node.transparency = 1.0
 		add_child(node)
 		var lane_side := -1.0 if index % 2 == 0 else 1.0
 		_cars.append({
 			"node": node,
 			"points": points,
+			"cumulative_lengths": cumulative_lengths,
 			"length": length,
 			"distance": fposmod(float(_hash32("%d:phase:%d" % [GameStore.city_seed, index]) % 10000) / 10000.0 * length, length),
 			"speed": 8.0 + float(_hash32("%d:speed:%d" % [GameStore.city_seed, index]) % 600) / 100.0,
 			"direction": -1.0 if index % 3 == 0 else 1.0,
 			"lane_offset": lane_side * (4.5 if str(road.get("class", "")) == "arterial" else 3.2),
+			"target_transparency": 0.0,
 		})
+
+	for index in range(_cars.size()):
+		var car: Dictionary = _cars[index]
+		car["target_transparency"] = 0.0 if index < target else 1.0
+		_cars[index] = car
+
+
+func _target_car_count() -> int:
+	if GameStore.is_sandbox():
+		return TrafficDemandModel.visible_vehicle_target(
+			GameStore.resident_transport_metrics(),
+			MAX_CARS
+		)
+	var legacy_target := maxi(0, int(GameStore.city.get("buildings", []).size() / 2))
+	if not _eligible_roads().is_empty() and legacy_target == 0:
+		legacy_target = 1
+	return mini(MAX_CARS, legacy_target)
 
 func _eligible_roads() -> Array:
 	var result: Array = []
@@ -138,32 +187,44 @@ func _road_points(road: Dictionary) -> Array[Vector2]:
 		result.append(Vector2(float(raw["x"]), float(raw["y"])))
 	return result
 
-func _polyline_length(points: Array[Vector2]) -> float:
-	var total := 0.0
+func _cumulative_lengths(points: Array[Vector2]) -> Array[float]:
+	var result: Array[float] = []
+	result.append(0.0)
 	for index in range(points.size() - 1):
-		total += points[index].distance_to(points[index + 1])
-	return total
+		result.append(result.back() + points[index].distance_to(points[index + 1]))
+	return result
 
-func _point_on_polyline(points: Array[Vector2], distance_along: float) -> Dictionary:
+func _point_on_polyline(
+	points: Array[Vector2],
+	cumulative_lengths: Array[float],
+	distance_along: float
+) -> Vector4:
 	if points.is_empty():
-		return {"position": Vector2.ZERO, "tangent": Vector2.RIGHT}
+		return Vector4(0.0, 0.0, 1.0, 0.0)
 	if points.size() == 1:
-		return {"position": points[0], "tangent": Vector2.RIGHT}
+		return Vector4(points[0].x, points[0].y, 1.0, 0.0)
 
-	var remaining: float = maxf(0.0, distance_along)
-	for index in range(points.size() - 1):
-		var a := points[index]
-		var b := points[index + 1]
-		var length := a.distance_to(b)
-		if remaining <= length or index == points.size() - 2:
-			var t: float = 0.0 if length <= 0.000001 else remaining / length
-			return {
-				"position": a.lerp(b, t),
-				"tangent": (b - a).normalized(),
-			}
-		remaining -= length
+	var target_distance := maxf(0.0, distance_along)
+	var low := 0
+	var high := points.size() - 2
+	while low < high:
+		var middle := (low + high) >> 1
+		if cumulative_lengths[middle + 1] < target_distance:
+			low = middle + 1
+		else:
+			high = middle
 
-	return {"position": points[points.size() - 1], "tangent": Vector2.RIGHT}
+	var a := points[low]
+	var b := points[low + 1]
+	var segment_length := cumulative_lengths[low + 1] - cumulative_lengths[low]
+	var t := (
+		0.0
+		if segment_length <= 0.000001
+		else (target_distance - cumulative_lengths[low]) / segment_length
+	)
+	var position := a.lerp(b, t)
+	var tangent := (b - a).normalized()
+	return Vector4(position.x, position.y, tangent.x, tangent.y)
 
 func _hash32(value: String) -> int:
 	var hash_value: int = 2166136261

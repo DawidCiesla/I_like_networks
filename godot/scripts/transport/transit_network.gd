@@ -4,6 +4,7 @@ class_name TransitNetwork
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const RoadRouter = preload("res://scripts/transport/road_router.gd")
+const TransitModes = preload("res://scripts/transport/transit_modes.gd")
 
 const SCHEMA_VERSION := 2
 const SOURCE_LEGACY_BRIDGE := "legacy_bridge"
@@ -154,8 +155,12 @@ static func create_custom_line(
 	points: Array[Vector2],
 	color: Color,
 	name: String = "",
-	segment_waypoints: Array = []
+	segment_waypoints: Array = [],
+	mode: String = "bus"
 ) -> Dictionary:
+	var mode_profile := TransitModes.profile(mode)
+	if mode_profile.is_empty():
+		return {"success": false, "reason": "unknown_transit_mode"}
 	if points.size() < 2:
 		return {"success": false, "reason": "need_two_stops"}
 	if points.size() > MAX_CUSTOM_STOPS:
@@ -163,15 +168,23 @@ static func create_custom_line(
 
 	var snapped: Array[Dictionary] = []
 	for point in points:
-		var snap := RoadRouter.snap_to_road(city, point, true, 110.0)
-		if snap.is_empty():
-			return {"success": false, "reason": "stop_not_on_built_road"}
+		var snap: Dictionary
+		if mode == "metro":
+			snap = {"point": point, "distance": 0.0}
+		else:
+			snap = RoadRouter.snap_to_road(city, point, true, 110.0)
+			if snap.is_empty():
+				return {"success": false, "reason": "stop_not_on_built_road"}
 		snapped.append(snap)
 
+	var minimum_spacing := maxf(
+		MIN_STOP_SPACING,
+		float(mode_profile.get("minimum_stop_spacing", MIN_STOP_SPACING))
+	)
 	for index in range(snapped.size() - 1):
 		var a: Vector2 = snapped[index]["point"]
 		var b: Vector2 = snapped[index + 1]["point"]
-		if a.distance_to(b) < MIN_STOP_SPACING:
+		if a.distance_to(b) < minimum_spacing:
 			return {"success": false, "reason": "stops_too_close"}
 
 	var line_serial := int(network.get("next_line_serial", 1))
@@ -183,7 +196,7 @@ static func create_custom_line(
 	for index in range(snapped.size()):
 		var snap: Dictionary = snapped[index]
 		var point: Vector2 = snap["point"]
-		var existing_id := _nearest_active_stop_id(stops, point, 28.0)
+		var existing_id := _nearest_active_stop_id(stops, point, 28.0, mode)
 		if not existing_id.is_empty():
 			stop_ids.append(existing_id)
 			continue
@@ -191,14 +204,14 @@ static func create_custom_line(
 		var stop_serial := int(network.get("next_stop_serial", 1))
 		network["next_stop_serial"] = stop_serial + 1
 		var stop_id := "custom-stop-%d" % stop_serial
-		stops[stop_id] = _custom_stop(stop_id, point, snap, stop_serial)
+		stops[stop_id] = _custom_stop(stop_id, point, snap, stop_serial, mode)
 		stop_ids.append(stop_id)
 
 	network["stops"] = stops
 	var lines: Dictionary = network.get("lines", {})
 	var final_name := name.strip_edges()
 	if final_name.is_empty():
-		final_name = "Bus Line %d" % (4 + line_serial)
+		final_name = "%s Line %d" % [mode.capitalize(), 4 + line_serial]
 	lines[line_id] = {
 		"id": line_id,
 		"name": final_name,
@@ -214,6 +227,9 @@ static func create_custom_line(
 			maxi(0, stop_ids.size() - 1)
 		),
 		"fleet_count": 1,
+		"mode": mode,
+		"right_of_way": str(mode_profile.get("right_of_way", "mixed_traffic")),
+		"grade_separated": bool(mode_profile.get("grade_separated", false)),
 		"vehicles": [],
 		"next_vehicle_id": 1,
 		"waiting_by_stop": [],
@@ -224,6 +240,21 @@ static func create_custom_line(
 		"passenger_events": [],
 		"source": "custom",
 	}
+	if mode == "tram":
+		for stop_id in stop_ids:
+			if stops.has(stop_id):
+				var tram_stop: Dictionary = stops[stop_id]
+				tram_stop["tram_access"] = true
+				stops[stop_id] = tram_stop
+	elif mode == "metro":
+		for stop_id in stop_ids:
+			if stops.has(stop_id):
+				var metro_stop: Dictionary = stops[stop_id]
+				metro_stop["accessible"] = true
+				metro_stop["station_type"] = "metro"
+				metro_stop["concourse_level"] = -1
+				stops[stop_id] = metro_stop
+		network["stops"] = stops
 	network["lines"] = lines
 	var rebuild := rebuild_custom_line(network, city, line_id)
 	if not bool(rebuild.get("success", false)):
@@ -255,15 +286,25 @@ static func update_custom_line_points(
 		return {"success": false, "reason": "too_many_stops"}
 
 	var snaps: Array[Dictionary] = []
+	var mode := str(line.get("mode", "bus"))
 	for point in points:
-		var snap := RoadRouter.snap_to_road(city, point, true, 110.0)
-		if snap.is_empty():
-			return {"success": false, "reason": "stop_not_on_built_road"}
+		var snap: Dictionary
+		if mode == "metro":
+			snap = {"point": point, "distance": 0.0}
+		else:
+			snap = RoadRouter.snap_to_road(city, point, true, 110.0)
+			if snap.is_empty():
+				return {"success": false, "reason": "stop_not_on_built_road"}
 		snaps.append(snap)
+	var mode_profile := TransitModes.profile(mode)
+	var minimum_spacing := maxf(
+		MIN_STOP_SPACING,
+		float(mode_profile.get("minimum_stop_spacing", MIN_STOP_SPACING))
+	)
 	for index in range(snaps.size() - 1):
 		var a: Vector2 = snaps[index]["point"]
 		var b: Vector2 = snaps[index + 1]["point"]
-		if a.distance_to(b) < MIN_STOP_SPACING:
+		if a.distance_to(b) < minimum_spacing:
 			return {"success": false, "reason": "stops_too_close"}
 
 	var old_stop_ids: Array[String] = line_stop_ids(network, line_id)
@@ -278,6 +319,10 @@ static func update_custom_line_points(
 		elif index < old_stop_ids.size():
 			hinted_id = old_stop_ids[index]
 
+		if not hinted_id.is_empty() and stops.has(hinted_id):
+			var hinted_stop: Dictionary = stops.get(hinted_id, {})
+			if str(hinted_stop.get("mode", "bus")) != mode:
+				hinted_id = ""
 		if not hinted_id.is_empty() and stops.has(hinted_id):
 			var stop: Dictionary = stops.get(hinted_id, {})
 			var served: Array = stop.get("served_line_ids", [])
@@ -301,15 +346,26 @@ static func update_custom_line_points(
 				next_ids.append(hinted_id)
 				continue
 
-		var existing_id := _nearest_active_stop_id(stops, point, 28.0)
+		var existing_id := _nearest_active_stop_id(stops, point, 28.0, mode)
 		if not existing_id.is_empty():
 			next_ids.append(existing_id)
 			continue
 		var serial := int(network.get("next_stop_serial", 1))
 		network["next_stop_serial"] = serial + 1
 		var new_id := "custom-stop-%d" % serial
-		stops[new_id] = _custom_stop(new_id, point, snap, serial)
+		stops[new_id] = _custom_stop(new_id, point, snap, serial, mode)
 		next_ids.append(new_id)
+	for stop_id in next_ids:
+		if not stops.has(stop_id):
+			continue
+		var mode_stop: Dictionary = stops[stop_id]
+		if mode == "metro":
+			mode_stop["accessible"] = true
+			mode_stop["station_type"] = "metro"
+			mode_stop["concourse_level"] = -1
+		elif mode == "tram":
+			mode_stop["tram_access"] = true
+		stops[stop_id] = mode_stop
 
 	line["stop_ids"] = next_ids
 	line["planned_stop_ids"] = next_ids.duplicate()
@@ -358,36 +414,41 @@ static func rebuild_custom_line(
 		var route_points: Array[Vector2] = []
 		var segment_length := 0.0
 		var road_ids: Array[String] = []
-		for control_index in range(controls.size() - 1):
-			var route := RoadRouter.route_between_points(
-				city,
-				controls[control_index],
-				controls[control_index + 1],
-				true,
-				true,
-				115.0
-			)
-			if not bool(route.get("success", false)):
-				return {
-					"success": false,
-					"reason": "segment_unroutable",
-					"segment_index": index,
-				}
-			segment_length += float(route.get("length", 0.0))
-			for road_id_value in route.get("road_ids", []):
-				var road_id := str(road_id_value)
-				if not road_ids.has(road_id):
-					road_ids.append(road_id)
-			for point_value in route.get("points", []):
-				if not (point_value is Vector2):
-					continue
-				var route_point: Vector2 = point_value
-				if (
-					not route_points.is_empty()
-					and route_points.back().distance_to(route_point) <= 0.001
-				):
-					continue
-				route_points.append(route_point)
+		if str(line.get("mode", "bus")) == "metro":
+			route_points = controls.duplicate()
+			for control_index in range(controls.size() - 1):
+				segment_length += controls[control_index].distance_to(controls[control_index + 1])
+		else:
+			for control_index in range(controls.size() - 1):
+				var route := RoadRouter.route_between_points(
+					city,
+					controls[control_index],
+					controls[control_index + 1],
+					true,
+					true,
+					115.0
+				)
+				if not bool(route.get("success", false)):
+					return {
+						"success": false,
+						"reason": "segment_unroutable",
+						"segment_index": index,
+					}
+				segment_length += float(route.get("length", 0.0))
+				for road_id_value in route.get("road_ids", []):
+					var road_id := str(road_id_value)
+					if not road_ids.has(road_id):
+						road_ids.append(road_id)
+				for point_value in route.get("points", []):
+					if not (point_value is Vector2):
+						continue
+					var route_point: Vector2 = point_value
+					if (
+						not route_points.is_empty()
+						and route_points.back().distance_to(route_point) <= 0.001
+					):
+						continue
+					route_points.append(route_point)
 
 		segments.append({
 			"from_stop_id": stop_ids[index],
@@ -396,6 +457,9 @@ static func rebuild_custom_line(
 			"length_world": segment_length,
 			"road_ids": road_ids,
 			"points": _serialize_points(route_points),
+			"grade_separated": str(line.get("mode", "bus")) == "metro",
+			"underground": str(line.get("mode", "bus")) == "metro",
+			"level": -1 if str(line.get("mode", "bus")) == "metro" else 0,
 		})
 		total += segment_length
 		for point_index in range(route_points.size()):
@@ -528,11 +592,13 @@ static func _custom_stop(
 	stop_id: String,
 	position: Vector2,
 	snap: Dictionary,
-	serial: int
+	serial: int,
+	mode: String = "bus"
 ) -> Dictionary:
 	var result := {
 		"id": stop_id,
 		"name": "Stop %d" % serial,
+		"mode": mode,
 		"level": 0,
 		"status": "built",
 		"served_line_ids": [],
@@ -655,7 +721,8 @@ static func _refresh_stop_activity(network: Dictionary) -> void:
 static func _nearest_active_stop_id(
 	stops: Dictionary,
 	point: Vector2,
-	radius: float
+	radius: float,
+	mode: String = ""
 ) -> String:
 	var best_id := ""
 	var best_distance := radius
@@ -663,6 +730,8 @@ static func _nearest_active_stop_id(
 		var stop_id := str(stop_id_value)
 		var stop: Dictionary = stops[stop_id]
 		if str(stop.get("status", "")) != "built":
+			continue
+		if not mode.is_empty() and str(stop.get("mode", "bus")) != mode:
 			continue
 		var stop_point := Vector2(
 			float(stop.get("x", 0.0)),

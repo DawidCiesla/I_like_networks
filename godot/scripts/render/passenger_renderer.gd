@@ -3,7 +3,6 @@ extends Node3D
 const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
-const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 
 const MAX_VISIBLE_PER_STATION := 12
@@ -33,6 +32,7 @@ func _ready() -> void:
 		_last_serial[line_id] = int(line.get("event_serial", 0))
 
 	GameStore.state_changed.connect(_sync_crowds)
+	GameStore.terrain_changed.connect(_sync_crowds)
 	_sync_crowds()
 
 func _process(delta: float) -> void:
@@ -65,7 +65,7 @@ func _sync_crowds() -> void:
 
 		crowd.multimesh.visible_instance_count = count
 		var station_point := _station_position(station_id)
-		var ground := Terrain.height(GameStore.city_seed, station_point.x, station_point.y)
+		var ground := TerrainSurface.height(GameStore.city_seed, station_point.x, station_point.y)
 
 		for index in range(count):
 			var angle := float(index) * 2.3999632 + _station_phase(station_id)
@@ -198,7 +198,7 @@ func _spawn_event(line_key: String, event: Dictionary) -> void:
 
 	var station_id: String = Data.STATION_IDS[line_key][stop_index]
 	var station_point := Layout.stop_position(line_key, stop_index)
-	var ground := Terrain.height(GameStore.city_seed, station_point.x, station_point.y)
+	var ground := TerrainSurface.height(GameStore.city_seed, station_point.x, station_point.y)
 	var event_type := str(event.get("type", ""))
 	var count := float(event.get("count", 0.0))
 	var markers := clampi(ceili(count / 6.0), 1, 5)

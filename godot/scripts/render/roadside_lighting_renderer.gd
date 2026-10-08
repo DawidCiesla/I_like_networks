@@ -1,6 +1,6 @@
 extends Node3D
 
-const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const LIGHT_SCENE: PackedScene = preload("res://assets/kenney/roads/models/light-curved.glb")
 
 const LIGHT_SPACING := 96.0
@@ -16,6 +16,11 @@ var _signature := ""
 func _ready() -> void:
 	GameStore.city_changed.connect(sync_lights)
 	GameStore.state_changed.connect(sync_lights)
+	GameStore.terrain_changed.connect(_on_terrain_changed)
+	sync_lights()
+
+func _on_terrain_changed() -> void:
+	_signature = ""
 	sync_lights()
 
 func sync_lights() -> void:
@@ -109,7 +114,7 @@ func _collect_light_transforms() -> Array[Transform3D]:
 					var toward_road := -normal * side
 					var yaw := atan2(-toward_road.x, -toward_road.y)
 					var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * LIGHT_SCALE)
-					var ground := Terrain.height(GameStore.city_seed, position_2d.x, position_2d.y)
+					var ground := TerrainSurface.height(GameStore.city_seed, position_2d.x, position_2d.y)
 					result.append(Transform3D(
 						basis,
 						Vector3(position_2d.x, ground, position_2d.y)

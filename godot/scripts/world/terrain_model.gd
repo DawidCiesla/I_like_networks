@@ -6,6 +6,13 @@ const GRASSLAND_COLOR := Color(0.26, 0.38, 0.22)
 const MEADOW_COLOR := Color(0.34, 0.46, 0.24)
 const FOREST_COLOR := Color(0.18, 0.31, 0.18)
 const HILLSIDE_COLOR := Color(0.31, 0.34, 0.25)
+const RANDOM_CACHE_CAPACITY := 32768
+
+static var _random_cache_seed := 0
+static var _random_cache_seed_initialized := false
+static var _random_cache: Dictionary = {}
+static var _random_cache_order: Array[String] = []
+static var _random_cache_next_eviction := 0
 
 static func _hash32(value: String) -> int:
 	var hash_value: int = 2166136261
@@ -15,7 +22,27 @@ static func _hash32(value: String) -> int:
 	return hash_value
 
 static func _random01(seed: int, key: String) -> float:
-	return float(_hash32("%s:%s" % [seed, key])) / 4294967295.0
+	if not _random_cache_seed_initialized or seed != _random_cache_seed:
+		_random_cache_seed = seed
+		_random_cache_seed_initialized = true
+		_random_cache.clear()
+		_random_cache_order.clear()
+		_random_cache_next_eviction = 0
+
+	if _random_cache.has(key):
+		return _random_cache[key]
+
+	var value := float(_hash32("%s:%s" % [seed, key])) / 4294967295.0
+	if _random_cache.size() < RANDOM_CACHE_CAPACITY:
+		_random_cache[key] = value
+		_random_cache_order.append(key)
+	else:
+		var evicted_key := _random_cache_order[_random_cache_next_eviction]
+		_random_cache.erase(evicted_key)
+		_random_cache_order[_random_cache_next_eviction] = key
+		_random_cache[key] = value
+		_random_cache_next_eviction = (_random_cache_next_eviction + 1) % RANDOM_CACHE_CAPACITY
+	return value
 
 static func _smoothstep(value: float) -> float:
 	return value * value * (3.0 - 2.0 * value)
