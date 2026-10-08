@@ -24,8 +24,8 @@ const REGIONAL_JOBS_PER_DENSITY := 5
 const REGIONAL_MIXED_RESIDENTS_PER_DENSITY := 4
 const REGIONAL_MIXED_JOBS_PER_DENSITY := 3
 
-const PEOPLE_PER_STARTER_VISUAL_BUILDING := 35.0
-const MAX_STARTER_VISUAL_BUILDINGS_PER_SETTLEMENT := 145
+const PEOPLE_PER_STARTER_VISUAL_BUILDING := 12.0
+const MAX_STARTER_VISUAL_BUILDINGS_PER_SETTLEMENT := 420
 const STARTER_PROFILE := "realistic-existing-settlements-v2"
 
 
@@ -97,7 +97,7 @@ static func _materialize_existing_region(city: Dictionary) -> void:
 		var population := int(population_by_district.get(district_id, 0))
 		var target_existing := clampi(
 			roundi(float(population) / PEOPLE_PER_STARTER_VISUAL_BUILDING),
-			mini(10, district_parcels.size()),
+			mini(20, district_parcels.size()),
 			mini(MAX_STARTER_VISUAL_BUILDINGS_PER_SETTLEMENT, district_parcels.size())
 		)
 		var built_count := 0
