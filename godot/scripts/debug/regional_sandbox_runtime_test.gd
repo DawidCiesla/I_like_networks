@@ -60,7 +60,7 @@ func _test_starter_region_is_isolated_and_has_growth_capacity() -> void:
 			local_road_count += 1
 			if str(road.get("status", "")) == "built":
 				built_local_road_count += 1
-	_expect(local_road_count > built_local_road_count, "some regional local streets remain growth capacity")
+	_expect(local_road_count == built_local_road_count, "historic local streets already exist when the game starts")
 
 	var built_parcels := 0
 	var vacant_parcels := 0
@@ -70,7 +70,7 @@ func _test_starter_region_is_isolated_and_has_growth_capacity() -> void:
 			built_parcels += 1
 		elif str(parcel.get("status", "")) == "vacant":
 			vacant_parcels += 1
-	_expect(built_parcels > 0, "the regional core starts lived in")
+	_expect(built_parcels > 0, "the regional settlements start lived in")
 	_expect(vacant_parcels > 0, "the region keeps vacant building capacity")
 	_expect(city.get("buildings", []).size() < city.get("parcels", []).size(), "not every parcel starts built")
 	for building in city.get("buildings", []):
