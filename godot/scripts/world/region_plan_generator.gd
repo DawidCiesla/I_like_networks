@@ -132,6 +132,8 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 	var nodes: Array[Dictionary] = []
 	var streets: Array[Dictionary] = []
 	var terminals: Array[Dictionary] = []
+	var parcels: Array[Dictionary] = []
+	var buildings: Array[Dictionary] = []
 	var base_angle := _unit_random(seed, "%s:orientation" % settlement_id) * TAU
 
 	for street_index in range(street_count):
