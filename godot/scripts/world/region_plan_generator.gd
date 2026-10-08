@@ -9,10 +9,13 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 
 const WORLD_LAYERS_PATH := "res://scripts/world/world_layers.gd"
 const MAX_STARTER_POPULATION := 5000
-const PEOPLE_PER_VISUAL_BUILDING := 35.0
+# A rendered footprint represents a small household cluster / multifamily
+# building rather than dozens of homes. This keeps a 4-5k town visually dense.
+const PEOPLE_PER_VISUAL_BUILDING := 12.0
+const MAX_VISUAL_BUILDINGS_PER_SETTLEMENT := 420
 const DEVELOPMENT_RESERVE_MULTIPLIER := 1.20
-const MAX_LOCAL_STREETS_PER_SETTLEMENT := 10
-const MAX_SLOTS_PER_STREET := 12
+const MAX_LOCAL_STREETS_PER_SETTLEMENT := 16
+const MAX_SLOTS_PER_STREET := 18
 
 const POPULATION_PROFILE := {
 	"regional-center": 4700,
@@ -67,9 +70,8 @@ static func _population_profile_key(settlement_id: String) -> String:
 
 
 static func _built_up_radius(population: int, tier: String) -> float:
-	# Gross density deliberately includes gardens, minor roads and open plots.
-	# Small towns therefore occupy a believable 1.5-2.1 km diameter instead of
-	# collapsing into a few houses around a graph node.
+	# Gross density includes gardens, local streets and open plots. The largest
+	# starter town therefore occupies roughly a 2 km diameter built-up area.
 	var gross_density_per_km2 := 650.0
 	if tier == "capital":
 		gross_density_per_km2 = 1450.0
@@ -122,9 +124,9 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 	var population := maxi(350, int(settlement.get("population", 350)))
 	var tier := str(settlement.get("tier", "village"))
 	var radius := float(settlement.get("built_up_radius_m", _built_up_radius(population, tier)))
-	var minimum_streets := 3 if tier == "village" else 5
+	var minimum_streets := 4 if tier == "village" else 6
 	var street_count := clampi(
-		ceili(float(population) / 520.0),
+		ceili(float(population) / 320.0),
 		minimum_streets,
 		MAX_LOCAL_STREETS_PER_SETTLEMENT
 	)
@@ -201,11 +203,15 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 				100 + ring_index
 			))
 
-	var target_existing := clampi(roundi(float(population) / PEOPLE_PER_VISUAL_BUILDING), 10, 145)
+	var target_existing := clampi(
+		roundi(float(population) / PEOPLE_PER_VISUAL_BUILDING),
+		20,
+		MAX_VISUAL_BUILDINGS_PER_SETTLEMENT
+	)
 	var target_capacity := maxi(target_existing, ceili(float(target_existing) * DEVELOPMENT_RESERVE_MULTIPLIER))
 	var slots_per_street := clampi(
 		ceili(float(target_capacity) / float(maxi(1, streets.size()))),
-		2,
+		3,
 		MAX_SLOTS_PER_STREET
 	)
 	var created := 0
@@ -231,9 +237,9 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 			var is_existing := occupied < target_existing
 			var ordinal := created + 1
 			var building_type := _starter_building_type(tier, ordinal)
-			var footprint := Vector2(14.0, 10.0)
-			if building_type == "shop":
-				footprint = Vector2(22.0, 14.0)
+			var footprint := _building_footprint(building_type)
+			if _overlaps_existing_parcel(parcels, anchor["position"], footprint):
+				continue
 			var parcel_id := "parcel-%s-%04d" % [settlement_id, ordinal]
 			var building_id := "building-%s-%04d" % [settlement_id, ordinal]
 			parcels.append({
@@ -342,7 +348,7 @@ static func _building_anchor(
 	var total_length := _polyline_length(points)
 	if points.size() < 2 or total_length < 70.0:
 		return {}
-	var fraction := clampf(float(slot_index + 1) / float(slot_count + 1), 0.10, 0.90)
+	var fraction := clampf(float(slot_index + 1) / float(slot_count + 1), 0.06, 0.94)
 	var along := total_length * fraction
 	var sample := _point_and_tangent(points, along)
 	var access_point: Vector2 = sample["point"]
@@ -353,7 +359,7 @@ static func _building_anchor(
 	var safe_bounds := Rect2(bounds.position + Vector2.ONE * safe_padding, bounds.size - Vector2.ONE * safe_padding * 2.0)
 
 	for side in [preferred_side, -preferred_side]:
-		for lateral in [21.0, 26.0, 31.0]:
+		for lateral in [22.0, 28.0, 34.0]:
 			var candidate := _clamp_to_rect(access_point + normal * float(side) * float(lateral), safe_bounds)
 			if _point_is_buildable(seed, candidate, 20.0):
 				return {"position": candidate, "access_point": access_point}
@@ -362,8 +368,38 @@ static func _building_anchor(
 
 static func _starter_building_type(tier: String, ordinal: int) -> String:
 	if tier == "village":
-		return "shop" if ordinal % 19 == 1 else "house"
-	return "shop" if ordinal % 11 == 1 else "house"
+		return "shop" if ordinal % 23 == 1 else "house"
+	if ordinal % 17 == 1:
+		return "shop"
+	if ordinal % 11 == 0:
+		return "apartment"
+	if ordinal % 5 == 0:
+		return "townhouse"
+	return "house"
+
+
+static func _building_footprint(building_type: String) -> Vector2:
+	match building_type:
+		"shop":
+			return Vector2(22.0, 14.0)
+		"townhouse":
+			return Vector2(13.0, 20.0)
+		"apartment":
+			return Vector2(28.0, 22.0)
+		_:
+			return Vector2(14.0, 10.0)
+
+
+static func _overlaps_existing_parcel(parcels: Array[Dictionary], position: Vector2, footprint: Vector2) -> bool:
+	for parcel in parcels:
+		var other_position: Vector2 = parcel.get("position", Vector2.ZERO)
+		var other_footprint: Vector2 = parcel.get("footprint", Vector2(14.0, 10.0))
+		if (
+			absf(position.x - other_position.x) < (footprint.x + other_footprint.x) * 0.5 + 4.0
+			and absf(position.y - other_position.y) < (footprint.y + other_footprint.y) * 0.5 + 4.0
+		):
+			return true
+	return false
 
 
 static func _point_is_buildable(seed: int, point: Vector2, max_slope: float) -> bool:
