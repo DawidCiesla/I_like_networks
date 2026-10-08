@@ -101,9 +101,13 @@ static func _materialize_existing_region(city: Dictionary) -> void:
 			mini(MAX_STARTER_VISUAL_BUILDINGS_PER_SETTLEMENT, district_parcels.size())
 		)
 		var built_count := 0
-		for parcel_value in district_parcels:
-			var parcel: Dictionary = parcel_value
-			var should_exist := built_count < target_existing
+		for parcel_index in range(district_parcels.size()):
+			var parcel: Dictionary = district_parcels[parcel_index]
+			# Roughly every sixth lot remains undeveloped. Because the generator
+			# creates about 20% reserve capacity this yields the requested initial
+			# building count while scattering future growth through the town.
+			var reserve_slot := (parcel_index + 1) % 6 == 0
+			var should_exist := not reserve_slot and built_count < target_existing
 			if should_exist:
 				var building := _existing_building_for_parcel(city, parcel)
 				parcel["source"] = "regional-existing"
