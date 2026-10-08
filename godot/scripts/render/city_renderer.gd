@@ -1,6 +1,6 @@
 extends Node3D
 
-const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 const BuildingAssets = preload("res://scripts/render/building_asset_library.gd")
 const BuildingFoundation = preload("res://scripts/render/building_foundation.gd")
@@ -61,12 +61,19 @@ var _roads_root: Node3D
 var _road_markings_root: Node3D
 var _junction_root: Node3D
 var _buildings_root: Node3D
+var _service_buildings_root: Node3D
 var _foundation_instance: MultiMeshInstance3D
 var _foundation_multimesh: MultiMesh
 var _foundation_signature := ""
+var _foundations_dirty := true
 
 var _road_cache: Dictionary = {}
+var _road_marking_batches: Dictionary = {}
+var _road_marking_inputs: Dictionary = {}
+var _crosswalks_root: Node3D
+var _crosswalk_signature := ""
 var _building_cache: Dictionary = {}
+var _service_building_cache: Dictionary = {}
 var _junction_signature := ""
 var _active_junctions_cache: Array[Dictionary] = []
 var _active_junctions_source_signature := ""
@@ -78,6 +85,9 @@ func _ready() -> void:
 	_road_markings_root = Node3D.new()
 	_road_markings_root.name = "RoadMarkings"
 	add_child(_road_markings_root)
+	_crosswalks_root = Node3D.new()
+	_crosswalks_root.name = "Crosswalks"
+	_road_markings_root.add_child(_crosswalks_root)
 
 	_junction_root = Node3D.new()
 	_junction_root.name = "Junctions"
@@ -86,13 +96,42 @@ func _ready() -> void:
 	_buildings_root = Node3D.new()
 	_buildings_root.name = "Buildings"
 	add_child(_buildings_root)
+	_service_buildings_root = Node3D.new()
+	_service_buildings_root.name = "PlayerServiceBuildings"
+	add_child(_service_buildings_root)
 	_setup_foundations()
 
 	GameStore.city_changed.connect(sync_city)
 	GameStore.state_changed.connect(_on_state_changed)
+	GameStore.terrain_changed.connect(_on_terrain_changed)
 	sync_city()
 
 func _on_state_changed() -> void:
+	sync_city()
+
+func _on_terrain_changed() -> void:
+	for entry_value in _road_cache.values():
+		var road_node: Node = entry_value.get("node")
+		if road_node:
+			road_node.queue_free()
+	_road_cache.clear()
+	for entry_value in _building_cache.values():
+		var building_node: Node = entry_value.get("root")
+		if building_node:
+			building_node.queue_free()
+	_building_cache.clear()
+	for entry_value in _service_building_cache.values():
+		var service_node: Node = entry_value.get("root")
+		if service_node:
+			service_node.queue_free()
+	_service_building_cache.clear()
+	_road_marking_inputs.clear()
+	_junction_signature = "terrain-edited"
+	_active_junctions_source_signature = ""
+	_active_junctions_cache.clear()
+	_crosswalk_signature = "terrain-edited"
+	_foundation_signature = ""
+	_foundations_dirty = true
 	sync_city()
 
 func sync_city() -> void:
@@ -101,6 +140,7 @@ func sync_city() -> void:
 	_sync_roads()
 	_sync_junctions()
 	_sync_buildings()
+	_sync_player_service_buildings()
 
 func _road_signature(road: Dictionary) -> String:
 	var status := str(road.get("status", "planned"))
@@ -112,6 +152,19 @@ func _road_signature(road: Dictionary) -> String:
 	return status
 
 func _road_planned_visible(road: Dictionary) -> bool:
+	if GameStore.is_sandbox() and str(road.get("regionalRole", "")) != "":
+		if str(road.get("status", "")) == "planned":
+			var regional_status := GameStore.regional_road_build_status(str(road.get("id", "")))
+			if bool(regional_status.get("available", false)) or str(regional_status.get("reason", "")) == "insufficient_funds":
+				return true
+			for project_value in GameStore.city.get("projects", []):
+				if (
+					str(project_value.get("type", "")) == "road"
+					and str(project_value.get("targetId", "")) == str(road.get("id", ""))
+					and str(project_value.get("status", "")) in ["queued", "active"]
+				):
+					return true
+			return false
 	var district_id := str(road.get("districtId", ""))
 	for district in GameStore.city["districts"]:
 		if str(district.get("id", "")) == district_id:
@@ -175,31 +228,153 @@ func _create_road_node(road: Dictionary, signature: String) -> Node3D:
 		points = _polyline_prefix(points, float(bucket) / 20.0)
 
 	if signature == "planned:true":
-		_add_ribbon(
-			root,
-			points,
-			3.0,
-			Color(0.55, 0.57, 0.54, 0.30),
-			MARKING_SURFACE_HEIGHT
+		var regional_status := GameStore.regional_road_build_status(str(road.get("id", "")))
+		var is_regional_frontier := bool(regional_status.get("available", false))
+		var can_select_regional_frontier := (
+			is_regional_frontier or str(regional_status.get("reason", "")) == "insufficient_funds"
 		)
+		var road_class := str(road.get("class", "collector"))
+		var width := maxf(5.0, float(ROAD_WIDTH.get(road_class, 15.0)) * 0.55)
+		var color := Color("#e6c16d", 0.66) if is_regional_frontier else Color(0.55, 0.57, 0.54, 0.30)
+		_add_ribbon(root, points, width, color, MARKING_SURFACE_HEIGHT)
+		if can_select_regional_frontier:
+			_add_regional_road_pick_area(root, points, str(road.get("id", "")), width)
 		return root
 
 	var road_class := str(road.get("class", "local"))
+	var profile_widths := _road_profile_widths(road, road_class)
 	_add_ribbon(
 		root,
 		points,
-		float(SIDEWALK_WIDTH.get(road_class, 23.0)),
+		maxf(float(SIDEWALK_WIDTH.get(road_class, 23.0)), float(profile_widths.y)),
 		SIDEWALK_COLOR.get(road_class, Color("#6e736c")),
 		SIDEWALK_SURFACE_HEIGHT
 	)
 	_add_ribbon(
 		root,
 		points,
-		float(ROAD_WIDTH.get(road_class, 15.0)),
+		maxf(float(ROAD_WIDTH.get(road_class, 15.0)), float(profile_widths.x)),
 		ROAD_COLOR.get(road_class, Color("#40433f")),
 		ROAD_SURFACE_HEIGHT
 	)
+	_add_bridge_decks(root, road, maxf(float(ROAD_WIDTH.get(road_class, 15.0)), float(profile_widths.x)))
 	return root
+
+
+func _add_regional_road_pick_area(parent: Node3D, points: Array[Vector2], road_id: String, road_width: float) -> void:
+	var area := Area3D.new()
+	area.name = "BuildRegionalRoad_%s" % road_id
+	area.input_ray_pickable = true
+	area.set_meta("selection", "regional_road:%s" % road_id)
+	area.collision_layer = 1
+	area.collision_mask = 0
+	for index in range(points.size() - 1):
+		var start := points[index]
+		var finish := points[index + 1]
+		var delta := finish - start
+		var length := delta.length()
+		if length <= 1.0:
+			continue
+		var center := (start + finish) * 0.5
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(length + 10.0, 14.0, maxf(42.0, road_width * 4.0))
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		collision.position = Vector3(
+			center.x,
+			TerrainSurface.height(GameStore.city_seed, center.x, center.y) + 7.0,
+			center.y
+		)
+		collision.rotation.y = -atan2(delta.y, delta.x)
+		area.add_child(collision)
+	area.input_event.connect(_on_regional_road_pick.bind(road_id))
+	parent.add_child(area)
+
+
+func _on_regional_road_pick(
+	_camera: Node,
+	event: InputEvent,
+	_event_position: Vector3,
+	_normal: Vector3,
+	_shape_idx: int,
+	road_id: String
+) -> void:
+	if GameStore.route_editor_active() or GameStore.road_builder_active() or GameStore.depot_placement_active():
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		GameStore.set_selection("regional_road:%s" % road_id)
+		get_viewport().set_input_as_handled()
+
+func _road_profile_widths(road: Dictionary, road_class: String) -> Vector2:
+	var profile: Dictionary = road.get("profile", {})
+	var lane_width := 0.0
+	for lane in profile.get("lanes", []):
+		if lane is Dictionary:
+			lane_width += maxf(0.0, float(lane.get("width_m", 0.0)))
+	if lane_width <= 0.0:
+		var legacy_width := float(ROAD_WIDTH.get(road_class, 15.0))
+		return Vector2(legacy_width, float(SIDEWALK_WIDTH.get(road_class, 23.0)))
+	var extras := 0.0
+	var parking: Dictionary = profile.get("parking", {})
+	var sidewalk: Dictionary = profile.get("sidewalk", {})
+	var bike_lane: Dictionary = profile.get("bike_lane", {})
+	for side in ["left", "right"]:
+		if bool(parking.get(side, false)):
+			extras += 2.2
+		if bool(sidewalk.get(side, false)):
+			extras += 2.0
+	var bike_width := 0.0
+	for lane in profile.get("lanes", []):
+		if lane is Dictionary and str(lane.get("type", "")) == "bike":
+			bike_width += maxf(0.0, float(lane.get("width_m", 0.0)))
+	if bike_width <= 0.0:
+		for side in ["left", "right"]:
+			if bool(bike_lane.get(side, false)):
+				bike_width += 1.8
+	return Vector2(lane_width + bike_width, lane_width + bike_width + extras)
+
+func _add_bridge_decks(parent: Node3D, road: Dictionary, road_width: float) -> void:
+	for crossing in road.get("bridgeCrossings", []):
+		if not crossing is Dictionary:
+			continue
+		var deck_points: Array[Vector2] = []
+		var crossing_start := _bridge_point(crossing.get("start", Vector2.ZERO))
+		var crossing_end := _bridge_point(crossing.get("end", Vector2.ZERO))
+		deck_points.append(crossing_start)
+		for raw_water_point in crossing.get("water_points", []):
+			var water_point := _bridge_point(raw_water_point)
+			if deck_points.back().distance_to(water_point) > 0.5:
+				deck_points.append(water_point)
+		if deck_points.back().distance_to(crossing_end) > 0.5:
+			deck_points.append(crossing_end)
+		if deck_points.size() < 2:
+			continue
+		var deck_offset := ROAD_SURFACE_HEIGHT + 2.8
+		_add_ribbon(parent, deck_points, road_width * 0.92, Color("#303633"), deck_offset)
+		for side in [-1.0, 1.0]:
+			var rail_points := _offset_polyline(deck_points, side * road_width * 0.46)
+			_add_ribbon(parent, rail_points, 0.72, Color("#969d97"), deck_offset + 1.15)
+
+func _bridge_point(value: Variant) -> Vector2:
+	if value is Vector2:
+		return value
+	if typeof(value) == TYPE_DICTIONARY:
+		return Vector2(float(value.get("x", 0.0)), float(value.get("y", 0.0)))
+	return Vector2.ZERO
+
+func _offset_polyline(points: Array[Vector2], offset: float) -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	for index in range(points.size()):
+		var before := points[maxi(0, index - 1)]
+		var after := points[mini(points.size() - 1, index + 1)]
+		var tangent := after - before
+		if tangent.length_squared() <= 0.000001:
+			result.append(points[index])
+			continue
+		var direction := tangent.normalized()
+		var normal := Vector2(-direction.y, direction.x)
+		result.append(points[index] + normal * offset)
+	return result
 
 func _add_ribbon(
 	parent: Node3D,
@@ -235,8 +410,9 @@ func _road_points(road: Dictionary) -> Array[Vector2]:
 	return result
 
 func _rebuild_road_markings() -> void:
-	for child in _road_markings_root.get_children():
-		child.queue_free()
+	# Curbs and lane markings are grouped into class batches. A change to
+	# one road only regenerates the batches containing that road (and any roads
+	# whose junction trim changed), rather than resampling every road in the city.
 	var junction_positions_by_road: Dictionary = {}
 	for junction_data in _active_junctions():
 		var junction: Dictionary = junction_data["junction"]
@@ -247,87 +423,184 @@ func _rebuild_road_markings() -> void:
 				junction_positions_by_road[road_id] = []
 			junction_positions_by_road[road_id].append(position)
 
-	for road_class in ["arterial", "collector", "local", "service"]:
-		var road_details: Array[Dictionary] = []
-		var marking_roads: Array[Dictionary] = []
-		for road in GameStore.city.get("roads", []):
-			var status := str(road.get("status", ""))
-			if status not in ["built", "constructing"]:
-				continue
-			if str(road.get("class", "local")) != road_class:
-				continue
-			var points := _road_points(road)
-			if status == "constructing":
-				var signature := _road_signature(road)
-				var bucket := int(signature.get_slice(":", 1))
-				points = _polyline_prefix(points, float(bucket) / 20.0)
-			points = RoadGeometry.resample_polyline(points)
-			if points.size() < 2:
-				continue
-			road_details.append({"road": road, "points": points})
-			if status == "built" and _polyline_length(points) > 30.0:
-				marking_roads.append({"road": road, "points": points})
-		if road_details.is_empty():
+	var current_inputs: Dictionary = {}
+	var roads_by_batch: Dictionary = {}
+	for road in GameStore.city.get("roads", []):
+		var status := str(road.get("status", ""))
+		if status not in ["built", "constructing"]:
 			continue
+		var road_id := str(road["id"])
+		var road_class := str(road.get("class", "local"))
+		var points := _road_points(road)
+		if status == "constructing":
+			var road_signature := _road_signature(road)
+			var bucket := int(road_signature.get_slice(":", 1))
+			points = _polyline_prefix(points, float(bucket) / 20.0)
+		points = RoadGeometry.resample_polyline(points)
+		if points.size() < 2:
+			continue
+		var batch_key := _road_marking_batch_key(road_class)
+		var junctions: Array = junction_positions_by_road.get(road_id, [])
+		var input_signature := _road_marking_input_signature(road, status, points, junctions)
+		current_inputs[road_id] = {
+			"signature": input_signature,
+			"batch_key": batch_key,
+			"road": road,
+			"status": status,
+			"points": points,
+			"junctions": junctions,
+		}
+		if not roads_by_batch.has(batch_key):
+			roads_by_batch[batch_key] = []
+		roads_by_batch[batch_key].append(current_inputs[road_id])
 
-		var mesh := ImmediateMesh.new()
-		var curb_material := StandardMaterial3D.new()
-		curb_material.albedo_color = CURB_COLOR.get(road_class, Color("#838880"))
-		curb_material.roughness = 1.0
-		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, curb_material)
-		for road_detail in road_details:
-			var points: Array[Vector2] = road_detail["points"]
-			var road: Dictionary = road_detail["road"]
-			var road_id := str(road["id"])
-			var curb_paths := _curb_paths(
-				points,
-				float(ROAD_WIDTH[road_class]) * 0.5,
-				junction_positions_by_road.get(road_id, [])
-			)
-			for curb_path_value in curb_paths:
-				var curb_path: Array[Vector2] = curb_path_value
-				_append_curb_strips(mesh, curb_path, float(ROAD_WIDTH[road_class]), 1.4)
+	var dirty_batches: Dictionary = {}
+	for road_id_value in _road_marking_inputs:
+		var road_id := str(road_id_value)
+		if not current_inputs.has(road_id):
+			var old_input: Dictionary = _road_marking_inputs[road_id]
+			dirty_batches[str(old_input["batch_key"])] = true
+	for road_id_value in current_inputs:
+		var road_id := str(road_id_value)
+		var current: Dictionary = current_inputs[road_id]
+		var previous: Dictionary = _road_marking_inputs.get(road_id, {})
+		if previous.is_empty() or str(previous["signature"]) != str(current["signature"]):
+			if not previous.is_empty():
+				dirty_batches[str(previous["batch_key"])] = true
+			dirty_batches[str(current["batch_key"])] = true
+
+	for batch_key_value in dirty_batches:
+		var batch_key := str(batch_key_value)
+		var previous_node: Node = _road_marking_batches.get(batch_key)
+		if previous_node:
+			previous_node.queue_free()
+			_road_marking_batches.erase(batch_key)
+		if not roads_by_batch.has(batch_key):
+			continue
+		var markings := _build_road_marking_batch(batch_key, roads_by_batch[batch_key])
+		if markings != null:
+			_road_markings_root.add_child(markings)
+			_road_marking_batches[batch_key] = markings
+
+	_road_marking_inputs = current_inputs
+	_rebuild_crosswalks_if_changed()
+
+func _road_marking_batch_key(road_class: String) -> String:
+	# Keep one draw batch per road class, as before. Caching at this level still
+	# avoids rebuilding unrelated classes when a road advances a construction bucket.
+	return road_class
+
+func _road_marking_input_signature(
+	road: Dictionary,
+	status: String,
+	points: Array[Vector2],
+	junctions: Array
+) -> String:
+	var parts: Array[String] = [str(GameStore.city_seed), str(road.get("class", "local")), status]
+	if status == "constructing":
+		parts.append(_road_signature(road))
+	for point in points:
+		parts.append("%s,%s" % [str(point.x), str(point.y)])
+	var sorted_junctions: Array[Vector2] = []
+	for junction_value in junctions:
+		sorted_junctions.append(junction_value)
+	sorted_junctions.sort_custom(func(a: Vector2, b: Vector2) -> bool:
+		if not is_equal_approx(a.x, b.x):
+			return a.x < b.x
+		return a.y < b.y
+	)
+	for junction in sorted_junctions:
+		parts.append("j%s,%s" % [str(junction.x), str(junction.y)])
+	return "|".join(parts)
+
+func _build_road_marking_batch(batch_key: String, road_details: Array) -> MeshInstance3D:
+	if road_details.is_empty():
+		return null
+	var road_class := batch_key.get_slice(":", 0)
+	var mesh := ImmediateMesh.new()
+	var marking_roads: Array[Dictionary] = []
+	for detail in road_details:
+		if str(detail["status"]) != "built":
+			continue
+		var detail_points: Array[Vector2] = detail["points"]
+		if _polyline_length(detail_points) > 30.0:
+			marking_roads.append({"points": detail_points})
+	var curb_material := StandardMaterial3D.new()
+	curb_material.albedo_color = CURB_COLOR.get(road_class, Color("#838880"))
+	curb_material.roughness = 1.0
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, curb_material)
+	for detail in road_details:
+		var points: Array[Vector2] = detail["points"]
+		var curb_paths := _curb_paths(
+			points,
+			float(ROAD_WIDTH.get(road_class, 15.0)) * 0.5,
+			detail["junctions"]
+		)
+		for curb_path_value in curb_paths:
+			var curb_path: Array[Vector2] = curb_path_value
+			_append_curb_strips(mesh, curb_path, float(ROAD_WIDTH.get(road_class, 15.0)), 1.4)
+	mesh.surface_end()
+
+	if road_class == "arterial" and not marking_roads.is_empty():
+		var center_material := StandardMaterial3D.new()
+		center_material.albedo_color = Color("#d2c57c")
+		center_material.roughness = 1.0
+		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, center_material)
+		for marking_road in marking_roads:
+			var points: Array[Vector2] = marking_road["points"]
+			_append_dashed_line(mesh, points, 0.0, 9.0, 6.0, 0.72)
 		mesh.surface_end()
 
-		if road_class == "arterial" and not marking_roads.is_empty():
-			var center_material := StandardMaterial3D.new()
-			center_material.albedo_color = Color("#d2c57c")
-			center_material.roughness = 1.0
-			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, center_material)
-			for marking_road in marking_roads:
-				var points: Array[Vector2] = marking_road["points"]
-				_append_dashed_line(mesh, points, 0.0, 9.0, 6.0, 0.72)
-			mesh.surface_end()
+		var lane_material := StandardMaterial3D.new()
+		lane_material.albedo_color = Color("#d9d9cd")
+		lane_material.roughness = 1.0
+		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, lane_material)
+		var lane_offset := float(ROAD_WIDTH["arterial"]) * 0.25
+		for marking_road in marking_roads:
+			var points: Array[Vector2] = marking_road["points"]
+			_append_dashed_line(mesh, points, -lane_offset, 6.0, 7.0, 0.42)
+			_append_dashed_line(mesh, points, lane_offset, 6.0, 7.0, 0.42)
+		mesh.surface_end()
+	elif road_class == "collector" and not marking_roads.is_empty():
+		var collector_material := StandardMaterial3D.new()
+		collector_material.albedo_color = Color("#d0d0c4")
+		collector_material.roughness = 1.0
+		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, collector_material)
+		for marking_road in marking_roads:
+			var points: Array[Vector2] = marking_road["points"]
+			_append_dashed_line(mesh, points, 0.0, 5.5, 7.0, 0.48)
+		mesh.surface_end()
 
-			var lane_material := StandardMaterial3D.new()
-			lane_material.albedo_color = Color("#d9d9cd")
-			lane_material.roughness = 1.0
-			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, lane_material)
-			var lane_offset := float(ROAD_WIDTH["arterial"]) * 0.25
-			for marking_road in marking_roads:
-				var points: Array[Vector2] = marking_road["points"]
-				_append_dashed_line(mesh, points, -lane_offset, 6.0, 7.0, 0.42)
-				_append_dashed_line(mesh, points, lane_offset, 6.0, 7.0, 0.42)
-			mesh.surface_end()
-		elif road_class == "collector" and not marking_roads.is_empty():
-			var collector_material := StandardMaterial3D.new()
-			collector_material.albedo_color = Color("#d0d0c4")
-			collector_material.roughness = 1.0
-			mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, collector_material)
-			for marking_road in marking_roads:
-				var points: Array[Vector2] = marking_road["points"]
-				_append_dashed_line(mesh, points, 0.0, 5.5, 7.0, 0.48)
-			mesh.surface_end()
+	var markings := MeshInstance3D.new()
+	markings.name = "%sRoadDetails_%s" % [road_class.capitalize(), batch_key.replace(":", "_")]
+	markings.mesh = mesh
+	markings.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return markings
 
-		var markings := MeshInstance3D.new()
-		markings.name = "%sRoadDetails" % road_class.capitalize()
-		markings.mesh = mesh
-		markings.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_road_markings_root.add_child(markings)
-
+func _rebuild_crosswalks_if_changed() -> void:
+	var signature_parts: Array[String] = []
+	for junction_data in _active_junctions():
+		var junction: Dictionary = junction_data["junction"]
+		var road_ids: Array[String] = []
+		for road in junction_data["roads"]:
+			road_ids.append(str(road["id"]))
+		road_ids.sort()
+		signature_parts.append("%s:%s" % [str(junction["id"]), "|".join(road_ids)])
+	for road in GameStore.city.get("roads", []):
+		if str(road.get("status", "")) == "built":
+			signature_parts.append("built:%s:%s" % [
+				str(road.get("id", "")), str(road.get("class", "local"))
+			])
+	signature_parts.sort()
+	var signature := "%d::%s" % [GameStore.city_seed, "|".join(signature_parts)]
+	if signature == _crosswalk_signature:
+		return
+	_crosswalk_signature = signature
 	_rebuild_crosswalks()
 
 func _rebuild_crosswalks() -> void:
+	for child in _crosswalks_root.get_children():
+		child.queue_free()
 	var node_lookup: Dictionary = {}
 	for node in GameStore.city.get("nodes", []):
 		node_lookup[str(node["id"])] = Vector2(float(node["x"]), float(node["y"]))
@@ -354,8 +627,8 @@ func _rebuild_crosswalks() -> void:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color("#d8d2be")
 	material.roughness = 1.0
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
 	var has_crosswalks := false
+	var surface_started := false
 	for junction_data in _active_junctions():
 		var junction: Dictionary = junction_data["junction"]
 		var node_id := str(junction.get("nodeId", ""))
@@ -372,17 +645,20 @@ func _rebuild_crosswalks() -> void:
 			var direction := (neighbor_position - junction_position).normalized()
 			if direction.length_squared() <= 0.000001:
 				continue
+			if not surface_started:
+				mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
+				surface_started = true
 			_append_crosswalk(mesh, junction_position, direction, float(ROAD_WIDTH[road_class]))
 			has_crosswalks = true
-	mesh.surface_end()
 	if not has_crosswalks:
 		return
+	mesh.surface_end()
 
 	var instance := MeshInstance3D.new()
 	instance.name = "PedestrianCrosswalks"
 	instance.mesh = mesh
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_road_markings_root.add_child(instance)
+	_crosswalks_root.add_child(instance)
 
 func _append_crosswalk(
 	mesh: ImmediateMesh,
@@ -776,6 +1052,7 @@ func _sync_buildings() -> void:
 		if entry.is_empty():
 			entry = _create_building(building, parcel)
 			_building_cache[building_id] = entry
+			_foundations_dirty = true
 
 		_update_building(entry, building)
 
@@ -786,8 +1063,247 @@ func _sync_buildings() -> void:
 			if node:
 				node.queue_free()
 			_building_cache.erase(building_id)
+			_foundations_dirty = true
 
 	_sync_foundations()
+
+
+func _sync_player_service_buildings() -> void:
+	var live: Dictionary = {}
+	for facility_value in GameStore.city.get("service_buildings", []):
+		if typeof(facility_value) != TYPE_DICTIONARY:
+			continue
+		var facility: Dictionary = facility_value
+		if str(facility.get("source", "")) != "player":
+			continue
+		var facility_id := str(facility.get("id", ""))
+		if facility_id.is_empty():
+			continue
+		live[facility_id] = true
+		var signature := _player_service_building_signature(facility)
+		var previous: Dictionary = _service_building_cache.get(facility_id, {})
+		if not previous.is_empty() and str(previous.get("signature", "")) == signature:
+			continue
+		if not previous.is_empty():
+			var old_node: Node = previous.get("root")
+			if old_node:
+				old_node.queue_free()
+			_service_building_cache.erase(facility_id)
+		var root := _create_player_service_building(facility)
+		_service_buildings_root.add_child(root)
+		_service_building_cache[facility_id] = {"signature": signature, "root": root}
+
+	for facility_id in _service_building_cache.keys():
+		if live.has(facility_id):
+			continue
+		var entry: Dictionary = _service_building_cache[facility_id]
+		var node: Node = entry.get("root")
+		if node:
+			node.queue_free()
+		_service_building_cache.erase(facility_id)
+
+
+func _player_service_building_signature(facility: Dictionary) -> String:
+	return "%s|%s|%.3f|%.3f|%s|%.2f|%.2f" % [
+		str(facility.get("service", "")),
+		str(facility.get("settlementId", facility.get("districtId", ""))),
+		float(facility.get("x", 0.0)),
+		float(facility.get("y", 0.0)),
+		str(facility.get("status", "operational")),
+		float(facility.get("condition", 1.0)),
+		float(facility.get("capacity", 0.0)),
+	]
+
+
+func _create_player_service_building(facility: Dictionary) -> Node3D:
+	var facility_id := str(facility.get("id", "service-building"))
+	var service_type := str(facility.get("service", "healthcare"))
+	var center_x := float(facility.get("x", 0.0))
+	var center_z := float(facility.get("y", 0.0))
+	var settlement_id := str(facility.get("settlementId", facility.get("districtId", "")))
+	var stable_hash := _service_visual_hash("%s|%s|%s" % [facility_id, service_type, settlement_id])
+	var angle := float(stable_hash % 6283) / 1000.0
+	var radius := 22.0 + float((stable_hash / 6283) % 19)
+	center_x += cos(angle) * radius
+	center_z += sin(angle) * radius
+
+	var root := Node3D.new()
+	root.name = "PlayerService_%s" % facility_id.validate_node_name()
+	var ground := TerrainSurface.height(GameStore.city_seed, center_x, center_z)
+	root.position = Vector3(center_x, ground, center_z)
+	var colors := _service_visual_colors(service_type)
+	var primary: Color = colors[0]
+	var secondary: Color = colors[1]
+	var roof: Color = colors[2]
+	var under_construction := str(facility.get("status", "operational")) in ["planned", "queued", "under_construction", "constructing"]
+	var opacity := 0.72 if under_construction else 1.0
+
+	# A raised plinth keeps the small civic assets readable against varied terrain.
+	_service_add_box(root, "Plinth", Vector3(0.0, 1.0, 0.0), Vector3(46.0, 2.0, 34.0), Color("#77796e"), opacity)
+	match service_type:
+		"healthcare":
+			_service_add_box(root, "Clinic", Vector3(0.0, 8.0, 0.0), Vector3(38.0, 12.0, 27.0), primary, opacity)
+			_service_add_box(root, "ClinicWing", Vector3(-12.0, 13.0, 1.0), Vector3(16.0, 10.0, 24.0), secondary, opacity)
+			_service_add_box(root, "Roof", Vector3(1.0, 14.3, 0.0), Vector3(40.0, 1.4, 29.0), roof, opacity)
+			_service_add_box(root, "MedicalCrossH", Vector3(0.0, 23.0, 14.1), Vector3(8.0, 2.2, 0.8), Color("#f5f3e8"), opacity)
+			_service_add_box(root, "MedicalCrossV", Vector3(0.0, 23.0, 14.7), Vector3(2.2, 8.0, 0.8), Color("#f5f3e8"), opacity)
+		"education":
+			_service_add_box(root, "School", Vector3(0.0, 7.0, 0.0), Vector3(40.0, 10.0, 28.0), primary, opacity)
+			_service_add_box(root, "SchoolWing", Vector3(-12.0, 12.0, 0.0), Vector3(18.0, 8.0, 24.0), secondary, opacity)
+			_service_add_box(root, "SchoolRoof", Vector3(1.0, 12.6, 0.0), Vector3(42.0, 1.2, 30.0), roof, opacity)
+			_service_add_box(root, "BellTower", Vector3(14.0, 19.0, -6.0), Vector3(8.0, 16.0, 8.0), secondary, opacity)
+			_service_add_cone(root, "BellTowerCap", Vector3(14.0, 29.0, -6.0), 6.0, 7.0, roof, opacity)
+		"fire":
+			_service_add_box(root, "FireHall", Vector3(0.0, 7.0, 0.0), Vector3(42.0, 10.0, 29.0), primary, opacity)
+			_service_add_box(root, "FireRoof", Vector3(0.0, 12.8, 0.0), Vector3(44.0, 1.4, 31.0), roof, opacity)
+			for bay_index in range(3):
+				_service_add_box(root, "BayDoor%d" % bay_index, Vector3(-12.0 + bay_index * 12.0, 5.2, 14.7), Vector3(8.5, 7.0, 0.7), Color("#3d4342"), opacity)
+			_service_add_box(root, "WatchTower", Vector3(16.0, 17.0, -9.0), Vector3(8.0, 18.0, 9.0), secondary, opacity)
+			_service_add_box(root, "Siren", Vector3(16.0, 27.0, -9.0), Vector3(4.0, 2.0, 4.0), Color("#f2c35e"), opacity)
+		"police":
+			_service_add_box(root, "Station", Vector3(0.0, 7.0, 0.0), Vector3(38.0, 10.0, 27.0), primary, opacity)
+			_service_add_box(root, "StationWing", Vector3(13.0, 11.0, -2.0), Vector3(16.0, 8.0, 24.0), secondary, opacity)
+			_service_add_box(root, "StationRoof", Vector3(1.0, 12.8, 0.0), Vector3(40.0, 1.4, 29.0), roof, opacity)
+			_service_add_box(root, "FlagPost", Vector3(-13.0, 19.0, 14.0), Vector3(1.0, 12.0, 1.0), Color("#e5e0d1"), opacity)
+			_service_add_box(root, "Flag", Vector3(-10.0, 24.0, 14.0), Vector3(5.0, 2.8, 0.6), Color("#70a6cf"), opacity)
+		"waste":
+			_service_add_box(root, "Works", Vector3(0.0, 6.0, 0.0), Vector3(42.0, 8.0, 29.0), primary, opacity)
+			_service_add_box(root, "WorksRoof", Vector3(0.0, 10.8, 0.0), Vector3(44.0, 1.2, 31.0), roof, opacity)
+			_service_add_cylinder(root, "RecyclingSiloA", Vector3(-12.0, 12.0, -8.0), 5.2, 14.0, secondary, opacity)
+			_service_add_cylinder(root, "RecyclingSiloB", Vector3(0.0, 12.0, -8.0), 5.2, 14.0, secondary, opacity)
+			_service_add_cylinder(root, "RecyclingSiloC", Vector3(12.0, 12.0, -8.0), 5.2, 14.0, secondary, opacity)
+		"recreation":
+			_service_add_box(root, "CommunityHall", Vector3(0.0, 6.0, 0.0), Vector3(30.0, 8.0, 22.0), primary, opacity)
+			_service_add_prism(root, "PavilionRoof", Vector3(0.0, 12.0, 0.0), Vector3(35.0, 6.0, 27.0), roof, opacity)
+			_service_add_box(root, "Court", Vector3(0.0, 1.4, 24.0), Vector3(27.0, 0.8, 15.0), Color("#7d9872"), opacity)
+			_service_add_tree(root, "ParkTreeA", Vector3(-17.0, 0.0, -14.0), secondary, opacity)
+			_service_add_tree(root, "ParkTreeB", Vector3(19.0, 0.0, 15.0), secondary, opacity)
+		_:
+			_service_add_box(root, "CivicBuilding", Vector3(0.0, 7.0, 0.0), Vector3(38.0, 10.0, 27.0), primary, opacity)
+			_service_add_box(root, "CivicRoof", Vector3(0.0, 12.8, 0.0), Vector3(40.0, 1.4, 29.0), roof, opacity)
+	return root
+
+
+func _service_visual_colors(service_type: String) -> Array[Color]:
+	match service_type:
+		"healthcare":
+			return [Color("#bacac7"), Color("#759ea2"), Color("#e7e7da")]
+		"education":
+			return [Color("#bb9b78"), Color("#d2b895"), Color("#55483d")]
+		"fire":
+			return [Color("#b65c4c"), Color("#d18460"), Color("#49413c")]
+		"police":
+			return [Color("#768ea0"), Color("#9aabb0"), Color("#424e55")]
+		"waste":
+			return [Color("#758b6b"), Color("#a2ad82"), Color("#555c4b")]
+		"recreation":
+			return [Color("#d2c39e"), Color("#879b74"), Color("#a95f42")]
+	return [Color("#a4aaa9"), Color("#8f9b97"), Color("#555d59")]
+
+
+func _service_visual_hash(value: String) -> int:
+	var result := 17
+	for character in value:
+		result = posmod(result * 31 + character.unicode_at(0), 2147483647)
+	return result
+
+
+func _service_material(color: Color, opacity: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color.r, color.g, color.b, opacity)
+	material.roughness = 0.9
+	if opacity < 1.0:
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return material
+
+
+func _service_add_box(
+	parent: Node3D,
+	part_name: String,
+	center: Vector3,
+	size: Vector3,
+	color: Color,
+	opacity: float
+) -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	mesh.material = _service_material(color, opacity)
+	var instance := MeshInstance3D.new()
+	instance.name = part_name
+	instance.mesh = mesh
+	instance.position = center
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(instance)
+
+
+func _service_add_cylinder(
+	parent: Node3D,
+	part_name: String,
+	center: Vector3,
+	radius: float,
+	height: float,
+	color: Color,
+	opacity: float
+) -> void:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = radius
+	mesh.bottom_radius = radius
+	mesh.height = height
+	mesh.radial_segments = 10
+	mesh.material = _service_material(color, opacity)
+	var instance := MeshInstance3D.new()
+	instance.name = part_name
+	instance.mesh = mesh
+	instance.position = center
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(instance)
+
+
+func _service_add_cone(
+	parent: Node3D,
+	part_name: String,
+	center: Vector3,
+	radius: float,
+	height: float,
+	color: Color,
+	opacity: float
+) -> void:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.2
+	mesh.bottom_radius = radius
+	mesh.height = height
+	mesh.radial_segments = 8
+	mesh.material = _service_material(color, opacity)
+	var instance := MeshInstance3D.new()
+	instance.name = part_name
+	instance.mesh = mesh
+	instance.position = center
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(instance)
+
+
+func _service_add_prism(
+	parent: Node3D,
+	part_name: String,
+	center: Vector3,
+	size: Vector3,
+	color: Color,
+	opacity: float
+) -> void:
+	var mesh := PrismMesh.new()
+	mesh.size = size
+	mesh.material = _service_material(color, opacity)
+	var instance := MeshInstance3D.new()
+	instance.name = part_name
+	instance.mesh = mesh
+	instance.position = center
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(instance)
+
+
+func _service_add_tree(parent: Node3D, tree_name: String, center: Vector3, foliage: Color, opacity: float) -> void:
+	_service_add_cylinder(parent, "%sTrunk" % tree_name, center + Vector3(0.0, 3.0, 0.0), 1.4, 6.0, Color("#685644"), opacity)
+	_service_add_cone(parent, "%sCrown" % tree_name, center + Vector3(0.0, 10.0, 0.0), 5.5, 12.0, foliage, opacity)
 
 func _setup_foundations() -> void:
 	var mesh := BoxMesh.new()
@@ -807,6 +1323,9 @@ func _setup_foundations() -> void:
 	add_child(_foundation_instance)
 
 func _sync_foundations() -> void:
+	if not _foundations_dirty:
+		return
+
 	var building_ids: Array = _building_cache.keys()
 	building_ids.sort()
 	var signature_parts: PackedStringArray = []
@@ -836,11 +1355,13 @@ func _sync_foundations() -> void:
 
 	var signature := ";".join(signature_parts)
 	if signature == _foundation_signature:
+		_foundations_dirty = false
 		return
 	_foundation_signature = signature
 	_foundation_multimesh.instance_count = instances.size()
 	for index in range(instances.size()):
 		_foundation_multimesh.set_instance_transform(index, instances[index])
+	_foundations_dirty = false
 
 func _create_building(building: Dictionary, parcel: Dictionary) -> Dictionary:
 	var root := Node3D.new()
@@ -854,7 +1375,7 @@ func _create_building(building: Dictionary, parcel: Dictionary) -> Dictionary:
 	var x := float(building["x"])
 	var z := float(building["y"])
 	var rotation := float(building.get("rotationRadians", 0.0))
-	var center_ground := Terrain.height(GameStore.city_seed, x, z)
+	var center_ground := TerrainSurface.height(GameStore.city_seed, x, z)
 	root.position = Vector3(x, 0.0, z)
 	root.rotation.y = -rotation
 

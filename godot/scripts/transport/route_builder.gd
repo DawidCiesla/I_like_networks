@@ -41,7 +41,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			GameStore.clear_route_editor_hover()
 			return
 		var world_point: Vector2 = point
-		var snap := GameStore.snap_transit_point(world_point, true, 125.0)
+		var snap := GameStore.snap_transit_point_for_editor(world_point, true, 125.0)
 		if snap.is_empty():
 			GameStore.set_route_editor_hover(world_point, false)
 			return
@@ -101,9 +101,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			var point: Variant = _screen_to_world(event.position)
 			if point == null:
 				return
-			var snap := GameStore.snap_transit_point(point, true, 125.0)
+			var snap := GameStore.snap_transit_point_for_editor(point, true, 125.0)
 			if snap.is_empty():
-				GameStore.show_route_editor_message("No built road under cursor.")
+				GameStore.show_route_editor_message("Surface stops need a built road; metro stations must be placed inside the map.")
 				get_viewport().set_input_as_handled()
 				return
 			var snapped: Vector2 = snap["point"]

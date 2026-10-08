@@ -712,6 +712,23 @@ export function validateRoadCandidate(
 
           if (
             endpointTouch
+            && allowedTouch.has(road.id)
+            && angle < ROAD_TOPOLOGY.parallelAngleDeg
+          ) {
+            const outwardDot = sharedEndpointOutwardDot(a, b, c, d);
+            const naturalContinuation = outwardDot != null && outwardDot < -0.55;
+            if (!naturalContinuation) {
+              return {
+                ok: false,
+                reason: 'parallel-corridor-conflict',
+                roadId: road.id,
+                separation: 0,
+              };
+            }
+          }
+
+          if (
+            endpointTouch
             && (
               allowedTouch.has(
                 road.id,

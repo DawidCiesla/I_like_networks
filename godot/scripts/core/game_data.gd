@@ -1,7 +1,7 @@
 extends RefCounted
 class_name GameData
 
-const GAME_VERSION := 2
+const GAME_VERSION := 4
 const DEFAULT_CITY_SEED := 284731
 
 const LINE_KEYS := [
@@ -31,6 +31,31 @@ const FREE_LINE_COLORS := [
 
 const ECONOMY := {
 	"starting_money": 100.0,
+	"sandbox_starting_money": 100000.0,
+	"sandbox_road_cost_per_world_unit": 12.0,
+	"sandbox_depot_build_cost": 7500.0,
+	"sandbox_bus_cost": 2800.0,
+	"sandbox_line_base_cost": 450.0,
+	"sandbox_stop_cost": 180.0,
+	"sandbox_route_cost_per_world_unit": 0.12,
+	"sandbox_operating_cost_per_bus_minute": 1.5,
+	"sandbox_service_capacity_share": 0.30,
+	"sandbox_service_build_costs": {
+		"healthcare": 12000,
+		"education": 10000,
+		"fire": 8500,
+		"police": 8500,
+		"waste": 7000,
+		"recreation": 6000,
+	},
+	"sandbox_service_operating_costs_per_minute": {
+		"healthcare": 0.50,
+		"education": 0.42,
+		"fire": 0.38,
+		"police": 0.40,
+		"waste": 0.35,
+		"recreation": 0.25,
+	},
 	"fare_per_passenger": 12.0,
 	"bus_base_cost": 70.0,
 	"bus_cost_growth": 1.32,

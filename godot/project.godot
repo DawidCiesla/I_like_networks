@@ -11,11 +11,13 @@ config_version=5
 [application]
 
 config/name="I Like Transit"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/ui/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [autoload]
 
+SettingsManager="*res://scripts/core/settings_manager.gd"
+AudioManager="*res://scripts/core/audio_manager.gd"
 GameStore="*res://scripts/core/game_store.gd"
 MCPRuntimeServer="*res://addons/godot_mcp_toolkit/runtime/mcp_runtime_server.gd"
 

@@ -1,0 +1,72 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/tutorial_controller.gd" id="1_tut"]
+
+[node name="TutorialController" type="Control"]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_tut")
+
+[node name="Panel" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(420, 180)
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -440.0
+offset_top = 130.0
+offset_right = -20.0
+offset_bottom = 320.0
+grow_horizontal = 0
+
+[node name="Margin" type="MarginContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="VBox" type="VBoxContainer" parent="Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Header" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Panel/Margin/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.32, 0.79, 0.91, 1)
+text = "TUTORIAL 1/4"
+
+[node name="Body" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+text = "Tutorial text description goes here."
+autowrap_mode = 2
+
+[node name="Actions" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SkipButton" type="Button" parent="Panel/Margin/VBox/Actions"]
+custom_minimum_size = Vector2(100, 32)
+layout_mode = 2
+text = "SKIP"
+
+[node name="Spacer" type="Control" parent="Panel/Margin/VBox/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="Panel/Margin/VBox/Actions"]
+custom_minimum_size = Vector2(140, 32)
+layout_mode = 2
+text = "NEXT"

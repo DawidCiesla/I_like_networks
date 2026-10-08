@@ -5,6 +5,7 @@ const Data = preload("res://scripts/core/game_data.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const Terrain = preload("res://scripts/world/terrain_model.gd")
 const Topology = preload("res://scripts/city/road_topology.gd")
+const RoadProfile = preload("res://scripts/city/road_profile.gd")
 
 const DISTRICT_SPECS := [
 	{"id":"oldTown","name":"Old Town","lineKey":"line1","stopIndex":0,"theme":"residential","parentRoadId":"arterial-oldTown-existing","branchSide":1,"depth":250.0,"halfWidth":210.0,"crossRoadCount":2},
@@ -165,6 +166,8 @@ static func _road(
 		"id": id,
 		"districtId": district_id,
 		"class": road_class,
+		"level": 0,
+		"profile": RoadProfile.base_profile(road_class),
 		"points": serialized,
 		"unlock": unlock,
 		"buildOrder": build_order,

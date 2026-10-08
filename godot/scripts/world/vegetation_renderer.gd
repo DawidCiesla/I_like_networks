@@ -1,6 +1,8 @@
 extends Node3D
 
 const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const TREE_SCENES := {
 	"small": preload("res://assets/kenney/suburban/models/tree-small.glb"),
@@ -23,6 +25,7 @@ func _ready() -> void:
 	rebuild()
 	GameStore.city_changed.connect(_sync_city_occupancy)
 	GameStore.state_changed.connect(_sync_city_occupancy)
+	GameStore.terrain_changed.connect(rebuild)
 
 func rebuild() -> void:
 	for child in get_children():
@@ -32,13 +35,14 @@ func rebuild() -> void:
 	_tree_multimeshes.clear()
 	_tree_model_transforms.clear()
 	var bounds := _world_bounds()
+	var tree_spacing := maxf(spacing, minf(bounds.size.x, bounds.size.y) / 56.0)
 
 	var x := bounds.position.x
 	while x <= bounds.end.x:
 		var z := bounds.position.y
 		while z <= bounds.end.y:
-			var jitter_x := (_pseudo(x, z, 1) - 0.5) * spacing * 0.68
-			var jitter_z := (_pseudo(x, z, 2) - 0.5) * spacing * 0.68
+			var jitter_x := (_pseudo(x, z, 1) - 0.5) * tree_spacing * 0.68
+			var jitter_z := (_pseudo(x, z, 2) - 0.5) * tree_spacing * 0.68
 			var px := x + jitter_x
 			var pz := z + jitter_z
 
@@ -50,10 +54,10 @@ func rebuild() -> void:
 					"type": tree_type,
 					"scale": 0.75 + _pseudo(px, pz, 4) * 0.75,
 					"rotation": _pseudo(px, pz, 5) * TAU,
-					"ground": Terrain.height(GameStore.city_seed, px, pz),
+					"ground": TerrainSurface.height(GameStore.city_seed, px, pz),
 				})
-			z += spacing
-		x += spacing
+			z += tree_spacing
+		x += tree_spacing
 
 	var counts := {"small": 0, "large": 0}
 	for tree in _tree_data:
@@ -270,16 +274,19 @@ func _pseudo(x: float, z: float, channel: int) -> float:
 	return value - floor(value)
 
 func _world_bounds() -> Rect2:
+	var map_definition := MapDefinition.active_definition()
+	if str(map_definition.get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID:
+		return TerrainSurface.world_bounds()
 	var min_x := INF
 	var max_x := -INF
 	var min_z := INF
 	var max_z := -INF
 	for line_key in ["line1", "line2", "line3", "line4"]:
 		for point in Layout.line_stops(line_key):
-			min_x = min(min_x, point.x)
-			max_x = max(max_x, point.x)
-			min_z = min(min_z, point.y)
-			max_z = max(max_z, point.y)
+			min_x = minf(min_x, point.x)
+			max_x = maxf(max_x, point.x)
+			min_z = minf(min_z, point.y)
+			max_z = maxf(max_z, point.y)
 	return Rect2(
 		Vector2(min_x - margin, min_z - margin),
 		Vector2(max_x - min_x + margin * 2.0, max_z - min_z + margin * 2.0)

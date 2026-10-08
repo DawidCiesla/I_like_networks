@@ -1,6 +1,6 @@
 extends RefCounted
 
-const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const TERRAIN_SAMPLE_STEP := 8.0
 const TOP_CLEARANCE := 0.7
 
@@ -28,7 +28,7 @@ static func height_range(
 				center.x + cosine * local_x - sine * local_z,
 				center.y + sine * local_x + cosine * local_z
 			)
-			var height := Terrain.height(seed, world_point.x, world_point.y)
+			var height := TerrainSurface.height(seed, world_point.x, world_point.y)
 			minimum = minf(minimum, height)
 			maximum = maxf(maximum, height)
 

@@ -132,9 +132,12 @@ static func compile_graph(roads: Array) -> Dictionary:
 
 	for first_road_index in range(roads.size()):
 		var first: Dictionary = roads[first_road_index]
+		var first_level := _road_level(first)
 		var first_points: Array = first.get("points", [])
 		for second_road_index in range(first_road_index + 1, roads.size()):
 			var second: Dictionary = roads[second_road_index]
+			if not _same_level(first_level, _road_level(second)):
+				continue
 			var second_points: Array = second.get("points", [])
 
 			for first_segment in range(first_points.size() - 1):
@@ -167,13 +170,14 @@ static func compile_graph(roads: Array) -> Dictionary:
 
 	for road_index in range(roads.size()):
 		var road: Dictionary = roads[road_index]
+		var level := _road_level(road)
 		var points: Array = road.get("points", [])
 		for segment_index in range(points.size() - 1):
 			var splits: Array = segment_splits[_segment_key(road_index, segment_index)]
 			splits.sort_custom(func(a, b): return float(a["t"]) < float(b["t"]))
 
 			for split in splits:
-				var node_id := _get_or_create_node(nodes, node_lookup, split["point"])
+				var node_id := _get_or_create_node(nodes, node_lookup, split["point"], level)
 				if not node_roads.has(node_id):
 					node_roads[node_id] = []
 				if not node_roads[node_id].has(str(road["id"])):
@@ -184,14 +188,15 @@ static func compile_graph(roads: Array) -> Dictionary:
 				var second_point: Vector2 = splits[split_index + 1]["point"]
 				if first_point.distance_to(second_point) <= 0.5:
 					continue
-				var a_id := _get_or_create_node(nodes, node_lookup, first_point)
-				var b_id := _get_or_create_node(nodes, node_lookup, second_point)
+				var a_id := _get_or_create_node(nodes, node_lookup, first_point, level)
+				var b_id := _get_or_create_node(nodes, node_lookup, second_point, level)
 				graph_edges.append({
 					"id": "edge-%d" % edge_serial,
 					"a": a_id,
 					"b": b_id,
 					"roadId": road["id"],
 					"class": road.get("class", "local"),
+					"level": level,
 					"length": first_point.distance_to(second_point),
 				})
 				edge_serial += 1
@@ -206,6 +211,7 @@ static func compile_graph(roads: Array) -> Dictionary:
 				"nodeId": node["id"],
 				"x": node["x"],
 				"y": node["y"],
+				"level": node["level"],
 				"roadIds": road_ids.duplicate(),
 			})
 
@@ -224,12 +230,13 @@ static func _append_split(splits: Array, t: float, point: Vector2) -> void:
 static func _get_or_create_node(
 	nodes: Array,
 	lookup: Dictionary,
-	point: Vector2
+	point: Vector2,
+	level: float
 ) -> String:
 	var key := "%d:%d" % [
 		roundi(point.x * NODE_KEY_SCALE),
 		roundi(point.y * NODE_KEY_SCALE),
-	]
+	] + ":" + _level_key(level)
 	if lookup.has(key):
 		return str(lookup[key])
 
@@ -238,10 +245,20 @@ static func _get_or_create_node(
 		"id": node_id,
 		"x": point.x,
 		"y": point.y,
+		"level": level,
 		"roadIds": [],
 	})
 	lookup[key] = node_id
 	return node_id
+
+static func _road_level(road: Dictionary) -> float:
+	return float(road.get("level", 0.0))
+
+static func _level_key(level: float) -> String:
+	return str(0.0 if level == 0.0 else level)
+
+static func _same_level(first: float, second: float) -> bool:
+	return first == second
 
 static func _segment_key(road_index: int, segment_index: int) -> String:
 	return "%d:%d" % [road_index, segment_index]
