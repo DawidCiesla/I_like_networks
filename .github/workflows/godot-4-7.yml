@@ -51,6 +51,22 @@ jobs:
             --path godot \
             --script res://scripts/debug/self_test.gd
 
+      - name: Run regional world tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_script in \
+            godot/scripts/debug/regional_city_integration_test.gd \
+            godot/scripts/debug/regional_sandbox_runtime_test.gd \
+            godot/scripts/debug/regional_road_build_game_store_test.gd \
+            godot/scripts/debug/road_builder_connectivity_game_store_test.gd; do
+            echo "Running ${test_script}"
+            /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+              --headless \
+              --path godot \
+              --script "res://${test_script#godot/}"
+          done
+
       - name: Run focused Godot tests
         shell: bash
         run: |
