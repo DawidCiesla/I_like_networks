@@ -4,6 +4,7 @@ const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
 const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
+const CloudLayerRenderer = preload("res://scripts/render/cloud_layer_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
 const ForestHlodRenderer = preload("res://scripts/world/forest_hlod_renderer.gd")
@@ -28,6 +29,8 @@ func _run() -> void:
 	root_3d.name = "RegionalVisualRendererTestRoot"
 	root.add_child(root_3d)
 
+	var clouds := CloudLayerRenderer.new()
+	root_3d.add_child(clouds)
 	var building_hlod := BuildingHlodRenderer.new()
 	root_3d.add_child(building_hlod)
 	var building_windows := BuildingWindowRenderer.new()
@@ -43,6 +46,12 @@ func _run() -> void:
 
 	await process_frame
 	await process_frame
+
+	var low_clouds := clouds.get_node_or_null("CloudLayerLow") as MeshInstance3D
+	var high_clouds := clouds.get_node_or_null("CloudLayerHigh") as MeshInstance3D
+	_expect(low_clouds != null and high_clouds != null, "cloud renderer creates two animated atmosphere layers")
+	if low_clouds != null:
+		_expect(low_clouds.mesh != null and low_clouds.mesh.material is ShaderMaterial, "low cloud layer owns its procedural shader material")
 
 	var building_hlod_instance := building_hlod.get_node_or_null("RegionalBuildingHLOD") as MultiMeshInstance3D
 	_expect(building_hlod_instance != null, "building HLOD creates its MultiMesh instance")
