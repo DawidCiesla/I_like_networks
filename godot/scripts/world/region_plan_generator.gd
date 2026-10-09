@@ -9,6 +9,7 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 
 const WORLD_LAYERS_PATH := "res://scripts/world/world_layers.gd"
 const MAX_STARTER_POPULATION := 5000
+const MAX_STARTER_VILLAGE_POPULATION := 1500
 # A rendered footprint represents a small household cluster / multifamily
 # building rather than dozens of homes. This keeps a 4-5k town visually dense.
 const PEOPLE_PER_VISUAL_BUILDING := 12.0
@@ -17,14 +18,27 @@ const DEVELOPMENT_RESERVE_MULTIPLIER := 1.20
 const MAX_LOCAL_STREETS_PER_SETTLEMENT := 16
 const MAX_SLOTS_PER_STREET := 18
 
+# The region deliberately begins with one clear service centre and a rural
+# constellation around it. The satellites are villages, not additional towns;
+# their later promotion is an outcome of the transport/growth simulation.
 const POPULATION_PROFILE := {
-	"regional-center": 4700,
-	"northwest-town": 3300,
-	"northeast-town": 2800,
-	"southwest-town": 2200,
-	"southeast-town": 2500,
-	"north-village": 950,
-	"south-village": 700,
+	"regional-center": 4600,
+	"northwest-town": 1250,
+	"northeast-town": 950,
+	"southwest-town": 650,
+	"southeast-town": 1150,
+	"north-village": 750,
+	"south-village": 500,
+}
+
+const SETTLEMENT_NAMES := {
+	"regional-center": "Regional Town",
+	"northwest-town": "Northwest Village",
+	"northeast-town": "Northeast Village",
+	"southwest-town": "Southwest Village",
+	"southeast-town": "Southeast Village",
+	"north-village": "North Village",
+	"south-village": "South Village",
 }
 
 static var _world_layers_script: Script
@@ -38,7 +52,7 @@ static func generate(seed: int, bounds: Rect2) -> Dictionary:
 	_apply_population_profile(plan, seed)
 	_rebuild_local_morphology(plan, seed, bounds.abs())
 	_refresh_stats(plan)
-	plan["generation_profile"] = "realistic-starter-region-v2"
+	plan["generation_profile"] = "realistic-starter-region-v3"
 	return plan
 
 
@@ -47,18 +61,23 @@ static func _apply_population_profile(plan: Dictionary, seed: int) -> void:
 		var settlement: Dictionary = settlement_value
 		var settlement_id := str(settlement.get("id", ""))
 		var profile_key := _population_profile_key(settlement_id)
-		var base_population := int(POPULATION_PROFILE.get(profile_key, 1200))
-		var is_village := str(settlement.get("tier", "")) == "village"
-		var variation_span := 0.10 if is_village else 0.06
+		var is_hub := profile_key == "regional-center"
+		var base_population := int(POPULATION_PROFILE.get(profile_key, 800))
+		settlement["tier"] = "market" if is_hub else "village"
+		if SETTLEMENT_NAMES.has(profile_key):
+			settlement["name"] = str(SETTLEMENT_NAMES[profile_key])
+		var variation_span := 0.06 if is_hub else 0.12
 		var variation := lerpf(
 			1.0 - variation_span,
 			1.0 + variation_span,
 			_unit_random(seed, "%s:population" % settlement_id)
 		)
-		var population := clampi(roundi(float(base_population) * variation), 350, MAX_STARTER_POPULATION)
+		var upper_population := MAX_STARTER_POPULATION if is_hub else MAX_STARTER_VILLAGE_POPULATION
+		var population := clampi(roundi(float(base_population) * variation), 350, upper_population)
 		settlement["population"] = population
 		settlement["built_up_radius_m"] = _built_up_radius(population, str(settlement.get("tier", "village")))
 		settlement["population_profile"] = profile_key
+		settlement["starter_role"] = "town" if is_hub else "village"
 
 
 static func _population_profile_key(settlement_id: String) -> String:
