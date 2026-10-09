@@ -2,6 +2,7 @@ extends RefCounted
 class_name RoadGeometry
 
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const RoadSurfaceShader = preload("res://scripts/render/road_surface.gdshader")
 
 const DEFAULT_SAMPLE_SPACING := 8.0
 const DEFAULT_MITER_LIMIT := 2.2
@@ -54,16 +55,7 @@ static func create_ribbon_mesh(
 	if points.size() < 2:
 		return null
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.96
-	if color.a < 0.99:
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	if emissive:
-		material.emission_enabled = true
-		material.emission = Color(color.r, color.g, color.b)
-		material.emission_energy_multiplier = emission_energy
-
+	var material := _surface_material(color, emissive, emission_energy)
 	var mesh := ImmediateMesh.new()
 	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
 
@@ -85,22 +77,8 @@ static func create_ribbon_mesh(
 		var end_point: Vector2 = points[last_index]
 		var start_outward: Vector2 = (start_point - points[1]).normalized()
 		var end_outward: Vector2 = (end_point - points[last_index - 1]).normalized()
-		_append_endpoint_cap(
-			mesh,
-			seed,
-			start_point,
-			start_outward,
-			half_width,
-			height_offset
-		)
-		_append_endpoint_cap(
-			mesh,
-			seed,
-			end_point,
-			end_outward,
-			half_width,
-			height_offset
-		)
+		_append_endpoint_cap(mesh, seed, start_point, start_outward, half_width, height_offset)
+		_append_endpoint_cap(mesh, seed, end_point, end_outward, half_width, height_offset)
 
 	mesh.surface_end()
 	return mesh
@@ -116,26 +94,40 @@ static func create_junction_patch_mesh(
 	if polygon.size() < 3:
 		return null
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.96
-
 	var mesh := ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _surface_material(color, false, 0.0))
 
 	var anchor := polygon[0]
 	for index in range(1, polygon.size() - 1):
-		append_triangle_above_terrain(
-			mesh,
-			seed,
-			anchor,
-			polygon[index],
-			polygon[index + 1],
-			height_offset
-		)
+		append_triangle_above_terrain(mesh, seed, anchor, polygon[index], polygon[index + 1], height_offset)
 
 	mesh.surface_end()
 	return mesh
+
+static func _surface_material(color: Color, emissive: bool, emission_energy: float) -> Material:
+	# Keep transparent previews and colored transit overlays on a simple material.
+	# Opaque road/sidewalk geometry gets world-space procedural surface detail.
+	if color.a < 0.99 or emissive:
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		material.roughness = 0.96
+		if color.a < 0.99:
+			material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		if emissive:
+			material.emission_enabled = true
+			material.emission = Color(color.r, color.g, color.b)
+			material.emission_energy_multiplier = emission_energy
+		return material
+
+	var material := ShaderMaterial.new()
+	material.shader = RoadSurfaceShader
+	material.set_shader_parameter("base_color", color)
+	var luminance := color.get_luminance()
+	var asphalt := 1.0 - smoothstep(0.31, 0.48, luminance)
+	material.set_shader_parameter("roughness_base", lerpf(0.91, 0.83, asphalt))
+	material.set_shader_parameter("variation_strength", lerpf(0.038, 0.058, asphalt))
+	material.set_shader_parameter("aggregate_strength", lerpf(0.028, 0.052, asphalt))
+	return material
 
 static func junction_polygon(center: Vector2, arms: Array) -> PackedVector2Array:
 	var candidates := PackedVector2Array()
@@ -154,9 +146,6 @@ static func junction_polygon(center: Vector2, arms: Array) -> PackedVector2Array
 		var normal := Vector2(-direction.y, direction.x)
 		var half_width := width * 0.5
 		max_half_width = maxf(max_half_width, half_width)
-		# The road ribbons already overlap through the node. The patch only has
-		# to close the inside corner, so keep it compact instead of building a
-		# large diamond around every crossing.
 		var extension := maxf(3.0, half_width * 0.72)
 
 		candidates.append(center + direction * extension + normal * half_width)
@@ -165,15 +154,11 @@ static func junction_polygon(center: Vector2, arms: Array) -> PackedVector2Array
 	if candidates.size() < 3:
 		return PackedVector2Array()
 
-	# Round the centre of the junction slightly. This keeps T/Y junctions
-	# closed while avoiding the oversized diamond-like patches from V2.
 	if max_half_width > EPSILON:
 		var center_pad := max_half_width * 0.42
 		for index in range(8):
 			var angle := TAU * float(index) / 8.0
-			candidates.append(
-				center + Vector2(cos(angle), sin(angle)) * center_pad
-			)
+			candidates.append(center + Vector2(cos(angle), sin(angle)) * center_pad)
 
 	var hull := Geometry2D.convex_hull(candidates)
 	if hull.size() >= 2 and hull[0].distance_to(hull[hull.size() - 1]) <= EPSILON:
@@ -211,10 +196,7 @@ static func _join_offset(
 	if denominator <= 0.20:
 		return normal_out * half_width
 
-	var length := minf(
-		half_width / denominator,
-		half_width * DEFAULT_MITER_LIMIT
-	)
+	var length := minf(half_width / denominator, half_width * DEFAULT_MITER_LIMIT)
 	return miter * length
 
 static func endpoint_cap_points(
@@ -253,14 +235,7 @@ static func _append_endpoint_cap(
 	if arc.size() < 2:
 		return
 	for index in range(arc.size() - 1):
-		append_triangle_above_terrain(
-			mesh,
-			seed,
-			center,
-			arc[index],
-			arc[index + 1],
-			height_offset
-		)
+		append_triangle_above_terrain(mesh, seed, center, arc[index], arc[index + 1], height_offset)
 
 static func append_triangle_above_terrain(
 	mesh: ImmediateMesh,
@@ -270,9 +245,6 @@ static func append_triangle_above_terrain(
 	c: Vector2,
 	height_offset: float
 ) -> void:
-	# Godot treats clockwise triangle winding as front-facing. In the X/Z
-	# plane used by the city, a positive Vector2 cross product matches the
-	# winding used by terrain_renderer.gd when viewed from above.
 	var cross := (b - a).cross(c - a)
 	if cross < 0.0:
 		var temporary := b
