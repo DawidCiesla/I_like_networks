@@ -60,7 +60,8 @@ jobs:
             godot/scripts/debug/regional_sandbox_runtime_test.gd \
             godot/scripts/debug/regional_road_build_game_store_test.gd \
             godot/scripts/debug/road_builder_connectivity_game_store_test.gd \
-            godot/scripts/debug/regional_organic_growth_test.gd; do
+            godot/scripts/debug/regional_organic_growth_test.gd \
+            godot/scripts/debug/regional_highway_planner_test.gd; do
             echo "Running ${test_script}"
             /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
               --headless \
