@@ -3,6 +3,7 @@ extends Node3D
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
+const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
 
@@ -11,6 +12,7 @@ const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_rende
 
 var _building_detail_renderer: BuildingDetailRenderer
 var _building_hlod_renderer: BuildingHlodRenderer
+var _building_window_renderer: BuildingWindowRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 
@@ -39,6 +41,10 @@ func _setup_regional_visual_detail() -> void:
 		_building_detail_renderer = BuildingDetailRenderer.new()
 		_building_detail_renderer.name = "BuildingDetails"
 		add_child(_building_detail_renderer)
+	if _building_window_renderer == null:
+		_building_window_renderer = BuildingWindowRenderer.new()
+		_building_window_renderer.name = "BuildingWindows"
+		add_child(_building_window_renderer)
 	if _building_hlod_renderer == null:
 		_building_hlod_renderer = BuildingHlodRenderer.new()
 		_building_hlod_renderer.name = "BuildingHLOD"
