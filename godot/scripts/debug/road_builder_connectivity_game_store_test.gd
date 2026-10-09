@@ -123,19 +123,30 @@ func _test_player_connector_reaches_named_frontier_and_growth(store) -> void:
 		"the saved road preserves its endpoint pair as explicit graph metadata"
 	)
 
+	# First finish construction at ordinary frame cadence. Organic regional
+	# development intentionally runs much slower than the old 180 s auto-growth
+	# path, so after the connector exists we advance a few explicit organic ticks
+	# to verify that accessibility causes the frontier to develop.
 	for _step in range(1600):
 		CityRuntime.advance(store, 0.2)
-		if str(player_road.get("status", "")) == "built" and str(target_parcel.get("status", "")) == "built":
+		if str(player_road.get("status", "")) == "built":
 			break
 	_expect(str(player_road.get("status", "")) == "built", "the connector finishes construction")
 	_expect(CityRuntime._regional_parcel_has_strategic_access(store.city, target_parcel), "the completed player road opens strategic access at the named frontier")
-	_expect(str(target_parcel.get("status", "")) == "built", "autonomous growth occupies the newly connected frontier parcel")
+
+	for _growth_tick in range(4):
+		if str(target_parcel.get("status", "")) == "built":
+			break
+		CityRuntime.advance(store, CityRuntime.REGIONAL_ORGANIC_GROWTH_INTERVAL_SECONDS)
+
+	_expect(str(target_parcel.get("status", "")) == "built", "organic growth occupies the newly connected frontier parcel")
 	var frontier: Dictionary = {}
 	for settlement in store.city.get("regional_settlements", []):
 		if str(settlement.get("id", "")) == frontier_id:
 			frontier = settlement
 			break
-	_expect(int(frontier.get("population", 0)) > 0, "autonomous growth increases the connected frontier population")
+	_expect(int(frontier.get("population", 0)) > 0, "organic growth increases the connected frontier population")
+	_expect(int(store.city.get("regional_auto_growth_count", 0)) == 0, "legacy regional auto-growth remains inactive")
 
 
 func _find_grade_safe_points(seed: int) -> Dictionary:
