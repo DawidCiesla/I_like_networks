@@ -45,7 +45,9 @@ static func ensure_city(store: Node) -> void:
 	CoreRuntime.ensure_city(store)
 	if _is_regional_city(store.city) and str(store.city.get("starter_profile", "")) != STARTER_PROFILE:
 		_materialize_existing_region(store.city)
-	if _is_regional_city(store.city):
+	# Organic initialization scans settlement morphology and is intentionally
+	# not repeated from the per-frame simulation hot path.
+	if _is_regional_city(store.city) and not store.city.has("organic_growth"):
 		RegionalGrowth.ensure(store.city)
 
 
@@ -58,7 +60,32 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 	ensure_city(store)
 	var changed := CoreRuntime.advance(store, delta_seconds)
 	if _is_regional_city(store.city):
-		changed = RegionalGrowth.advance(store, delta_seconds) or changed
+		changed = _advance_regional_growth(store, delta_seconds) or changed
+	return changed
+
+
+static func _advance_regional_growth(store: Node, delta_seconds: float) -> bool:
+	# Strategic intercity roads use settlement IDs as semantic graph endpoints.
+	# They must still contribute accessibility, but must not be mistaken for a
+	# local urban frontier from which a residential side street should sprout.
+	var restored_settlement_ids: Array = []
+	for road_value in store.city.get("roads", []):
+		var road: Dictionary = road_value
+		if str(road.get("source", "")) != "regional-existing":
+			continue
+		if str(road.get("regionalRole", "")) not in ["spine", "loop", "external_branch", "city_connector"]:
+			continue
+		restored_settlement_ids.append([road, road.get("settlementId", null)])
+		road["settlementId"] = ""
+	var changed := RegionalGrowth.advance(store, delta_seconds)
+	for restored_value in restored_settlement_ids:
+		var restored: Array = restored_value
+		var road: Dictionary = restored[0]
+		var previous: Variant = restored[1]
+		if previous == null:
+			road.erase("settlementId")
+		else:
+			road["settlementId"] = previous
 	return changed
 
 
