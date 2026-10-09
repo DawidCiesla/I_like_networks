@@ -2,26 +2,35 @@ extends RefCounted
 class_name WorldLayers
 
 const TerrainModel = preload("res://scripts/world/terrain_model.gd")
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 
 const HASH_MASK := 0xffffffff
 const HASH_NORMALIZER := 4294967295.0
-const LAKE_FIELD_SCALE := 2350.0
+const LEGACY_RIVER_CHANNEL_SCALE := 1100.0
+const LEGACY_LAKE_FIELD_SCALE := 1900.0
+const REGIONAL_LAKE_FIELD_SCALE := 2350.0
+const LEGACY_MAX_RIVER_DEPTH := 4.2
 const MAX_RIVER_DEPTH := 7.5
 const MAX_LAKE_DEPTH := 9.0
 
 
-## Samples the regional natural world layers at a world-space point.
-## The point's x/y coordinates map to the terrain model's x/z coordinates.
 static func sample(seed: int, point: Vector2) -> Dictionary:
+	return _sample_profile(seed, point, _uses_regional_profile())
+
+
+static func sample_regional(seed: int, point: Vector2) -> Dictionary:
+	return _sample_profile(seed, point, true)
+
+
+static func _sample_profile(seed: int, point: Vector2, regional: bool) -> Dictionary:
 	var x := point.x
 	var z := point.y
-	var sampled_height: float = TerrainModel.regional_height(seed, x, z)
-	var sampled_slope: float = TerrainModel.regional_slope_degrees(seed, x, z)
-	var sampled_moisture: float = TerrainModel.regional_moisture(seed, x, z)
-	var sampled_biome: String = TerrainModel.regional_biome(seed, x, z)
-	var sampled_forest_potential: float = TerrainModel.regional_forest_potential(seed, x, z)
-
-	var water := _water_masks(seed, x, z, sampled_slope)
+	var sampled_height := TerrainModel.regional_height(seed, x, z) if regional else TerrainModel.height(seed, x, z)
+	var sampled_slope := TerrainModel.regional_slope_degrees(seed, x, z) if regional else TerrainModel.slope_degrees(seed, x, z)
+	var sampled_moisture := TerrainModel.regional_moisture(seed, x, z) if regional else TerrainModel.moisture(seed, x, z)
+	var sampled_biome := TerrainModel.regional_biome(seed, x, z) if regional else TerrainModel.biome(seed, x, z)
+	var sampled_forest_potential := TerrainModel.regional_forest_potential(seed, x, z) if regional else TerrainModel.forest_potential(seed, x, z)
+	var water := _regional_water_masks(seed, x, z, sampled_slope) if regional else _legacy_water_masks(seed, x, z, sampled_slope)
 	var river_mask: float = water["river"]
 	var lake_mask: float = water["lake"]
 	var water_depth: float = water["depth"]
@@ -37,11 +46,12 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 		0.0,
 		1.0
 	)
+	var forest_river_penalty := 0.18 if regional else 0.30
 	var forest := clampf(
 		sampled_forest_potential
 		* (0.65 + sampled_moisture * 0.35)
 		* (1.0 - minf(sampled_slope / 50.0, 1.0) * 0.45)
-		* (1.0 - river_mask * 0.18),
+		* (1.0 - river_mask * forest_river_penalty),
 		0.0,
 		1.0
 	)
@@ -57,7 +67,6 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 		0.0,
 		1.0
 	)
-
 	return {
 		"height": sampled_height,
 		"slope_degrees": sampled_slope,
@@ -75,12 +84,24 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 
 
 static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
+	return _sample_route_profile(seed, point, _uses_regional_profile())
+
+
+static func sample_route_terrain_regional(seed: int, point: Vector2) -> Dictionary:
+	return _sample_route_profile(seed, point, true)
+
+
+static func _sample_route_profile(seed: int, point: Vector2, regional: bool) -> Dictionary:
 	var x := point.x
 	var z := point.y
-	var sampled_slope := TerrainModel.regional_slope_degrees(seed, x, z)
-	var sampled_moisture := TerrainModel.regional_moisture(seed, x, z)
-	var forest := TerrainModel.regional_forest_score(seed, x, z, sampled_moisture, sampled_slope)
-	var water := _water_masks(seed, x, z, sampled_slope)
+	var sampled_slope := TerrainModel.regional_slope_degrees(seed, x, z) if regional else TerrainModel.slope_degrees(seed, x, z)
+	var sampled_moisture := TerrainModel.regional_moisture(seed, x, z) if regional else TerrainModel.moisture(seed, x, z)
+	var forest := (
+		TerrainModel.regional_forest_score(seed, x, z, sampled_moisture, sampled_slope)
+		if regional
+		else TerrainModel._forest_score(seed, x, z, sampled_moisture, sampled_slope)
+	)
+	var water := _regional_water_masks(seed, x, z, sampled_slope) if regional else _legacy_water_masks(seed, x, z, sampled_slope)
 	return {
 		"slope_degrees": sampled_slope,
 		"forest_potential": forest,
@@ -90,8 +111,16 @@ static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
 
 
 static func sample_water(seed: int, point: Vector2) -> Dictionary:
-	var slope := TerrainModel.regional_slope_degrees(seed, point.x, point.y)
-	var water := _water_masks(seed, point.x, point.y, slope)
+	return _sample_water_profile(seed, point, _uses_regional_profile())
+
+
+static func sample_water_regional(seed: int, point: Vector2) -> Dictionary:
+	return _sample_water_profile(seed, point, true)
+
+
+static func _sample_water_profile(seed: int, point: Vector2, regional: bool) -> Dictionary:
+	var slope := TerrainModel.regional_slope_degrees(seed, point.x, point.y) if regional else TerrainModel.slope_degrees(seed, point.x, point.y)
+	var water := _regional_water_masks(seed, point.x, point.y, slope) if regional else _legacy_water_masks(seed, point.x, point.y, slope)
 	return {
 		"water_depth": water["depth"],
 		"water_kind": water["kind"],
@@ -99,7 +128,25 @@ static func sample_water(seed: int, point: Vector2) -> Dictionary:
 	}
 
 
-static func _water_masks(seed: int, x: float, z: float, slope: float) -> Dictionary:
+static func _legacy_water_masks(seed: int, x: float, z: float, slope: float) -> Dictionary:
+	var warp_x := _fbm(seed, x + 341.0, z - 707.0, 1500.0, 3, "river-warp-x") * 300.0
+	var warp_z := _fbm(seed, x - 919.0, z + 503.0, 1500.0, 3, "river-warp-z") * 300.0
+	var channel_value := _fbm(seed, x + warp_x, z + warp_z, LEGACY_RIVER_CHANNEL_SCALE, 4, "river-channel")
+	var contour_distance := absf(channel_value - 0.06)
+	var slope_factor := 1.0 - _smoothstep(24.0, 42.0, slope)
+	var river_mask := (1.0 - _smoothstep(0.014, 0.046, contour_distance)) * slope_factor
+	var river_depth := maxf(0.0, (river_mask - 0.06) / 0.94) * LEGACY_MAX_RIVER_DEPTH
+	var lake_field := _fbm(seed, x + 1783.0, z - 239.0, LEGACY_LAKE_FIELD_SCALE, 3, "lake-basins") * 0.5 + 0.5
+	var lake_mask := _smoothstep(0.74, 0.84, lake_field) * (1.0 - _smoothstep(17.0, 34.0, slope))
+	var lake_depth := maxf(0.0, (lake_mask - 0.04) / 0.96) * MAX_LAKE_DEPTH
+	if lake_depth > 0.0:
+		return {"river": river_mask, "lake": lake_mask, "depth": lake_depth, "kind": "lake", "river_scale": river_mask}
+	if river_depth > 0.0:
+		return {"river": river_mask, "lake": lake_mask, "depth": river_depth, "kind": "river", "river_scale": river_mask}
+	return {"river": river_mask, "lake": lake_mask, "depth": 0.0, "kind": "none", "river_scale": river_mask}
+
+
+static func _regional_water_masks(seed: int, x: float, z: float, slope: float) -> Dictionary:
 	var channels := TerrainModel.river_profile(seed, x, z)
 	var major := float(channels.get("major", 0.0))
 	var minor := float(channels.get("minor", 0.0))
@@ -113,73 +160,28 @@ static func _water_masks(seed: int, x: float, z: float, slope: float) -> Diction
 	var minor_depth := minor * lerpf(0.75, 2.5, minor_size)
 	var river_depth := maxf(major_depth, minor_depth)
 	var river_scale := major if major >= minor else minor * 0.45
-
-	var lake_broad := _fbm(
-		seed,
-		x + 1783.0,
-		z - 239.0,
-		LAKE_FIELD_SCALE,
-		4,
-		"lake-basins"
-	) * 0.5 + 0.5
-	var lake_detail := _fbm(
-		seed,
-		x - 491.0,
-		z + 1311.0,
-		760.0,
-		3,
-		"lake-detail"
-	) * 0.5 + 0.5
+	var lake_broad := _fbm(seed, x + 1783.0, z - 239.0, REGIONAL_LAKE_FIELD_SCALE, 4, "lake-basins") * 0.5 + 0.5
+	var lake_detail := _fbm(seed, x - 491.0, z + 1311.0, 760.0, 3, "lake-detail") * 0.5 + 0.5
 	var lake_field := lake_broad * 0.82 + lake_detail * 0.18
 	var threshold_shift := (_random01(seed, "lake-threshold", 0, 0) - 0.5) * 0.035
 	var lake_mask := _smoothstep(0.735 + threshold_shift, 0.845 + threshold_shift, lake_field)
 	lake_mask *= 1.0 - _smoothstep(15.0, 30.0, slope)
 	lake_mask = maxf(lake_mask, major * 0.16)
 	var lake_depth := clampf(maxf(0.0, (lake_mask - 0.035) / 0.965) * MAX_LAKE_DEPTH, 0.0, MAX_LAKE_DEPTH)
-
 	if lake_depth > river_depth and lake_depth > 0.0:
-		return {
-			"river": river_mask,
-			"lake": lake_mask,
-			"depth": lake_depth,
-			"kind": "lake",
-			"river_scale": river_scale,
-		}
+		return {"river": river_mask, "lake": lake_mask, "depth": lake_depth, "kind": "lake", "river_scale": river_scale}
 	if river_depth > 0.0:
-		return {
-			"river": river_mask,
-			"lake": lake_mask,
-			"depth": clampf(river_depth, 0.0, MAX_RIVER_DEPTH),
-			"kind": "river",
-			"river_scale": river_scale,
-		}
-	return {
-		"river": river_mask,
-		"lake": lake_mask,
-		"depth": 0.0,
-		"kind": "none",
-		"river_scale": river_scale,
-	}
+		return {"river": river_mask, "lake": lake_mask, "depth": clampf(river_depth, 0.0, MAX_RIVER_DEPTH), "kind": "river", "river_scale": river_scale}
+	return {"river": river_mask, "lake": lake_mask, "depth": 0.0, "kind": "none", "river_scale": river_scale}
 
 
-static func _deposit_mask(
-	seed: int,
-	x: float,
-	z: float,
-	channel: String,
-	scale: float,
-	threshold: float,
-	full_abundance: float
-) -> float:
+static func _uses_regional_profile() -> bool:
+	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
+
+
+static func _deposit_mask(seed: int, x: float, z: float, channel: String, scale: float, threshold: float, full_abundance: float) -> float:
 	var broad := _fbm(seed, x + 271.0, z - 419.0, scale, 4, "%s-broad" % channel) * 0.5 + 0.5
-	var structure := _fbm(
-		seed,
-		x - 1103.0,
-		z + 683.0,
-		scale * 0.38,
-		3,
-		"%s-structure" % channel
-	) * 0.5 + 0.5
+	var structure := _fbm(seed, x - 1103.0, z + 683.0, scale * 0.38, 3, "%s-structure" % channel) * 0.5 + 0.5
 	return _smoothstep(threshold, full_abundance, broad * 0.72 + structure * 0.28)
 
 
@@ -210,26 +212,13 @@ static func _random01(seed: int, channel: String, grid_x: int, grid_z: int) -> f
 	return float(_hash32(key)) / HASH_NORMALIZER
 
 
-static func _fbm(
-	seed: int,
-	x: float,
-	z: float,
-	base_scale: float,
-	octaves: int,
-	channel: String
-) -> float:
+static func _fbm(seed: int, x: float, z: float, base_scale: float, octaves: int, channel: String) -> float:
 	var value := 0.0
 	var amplitude := 1.0
 	var frequency := 1.0
 	var amplitude_total := 0.0
 	for octave in range(octaves):
-		value += _lattice_value(
-			seed,
-			x,
-			z,
-			base_scale / frequency,
-			"%s:%d" % [channel, octave]
-		) * amplitude
+		value += _lattice_value(seed, x, z, base_scale / frequency, "%s:%d" % [channel, octave]) * amplitude
 		amplitude_total += amplitude
 		amplitude *= 0.5
 		frequency *= 2.0
