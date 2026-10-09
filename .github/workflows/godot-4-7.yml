@@ -74,6 +74,7 @@ jobs:
             godot/scripts/debug/regional_organic_growth_test.gd \
             godot/scripts/debug/regional_highway_planner_test.gd \
             godot/scripts/debug/regional_natural_terrain_test.gd \
+            godot/scripts/debug/regional_visual_renderers_test.gd \
             godot/scripts/world/world_layers_test.gd \
             godot/scripts/world/terrain_renderer_material_test.gd \
             godot/scripts/world/water_surface_renderer_test.gd; do
@@ -136,6 +137,7 @@ jobs:
               godot/scripts/debug/regional_organic_growth_test.gd|\
               godot/scripts/debug/regional_highway_planner_test.gd|\
               godot/scripts/debug/regional_natural_terrain_test.gd|\
+              godot/scripts/debug/regional_visual_renderers_test.gd|\
               godot/scripts/world/world_layers_test.gd|\
               godot/scripts/world/terrain_renderer_material_test.gd|\
               godot/scripts/world/water_surface_renderer_test.gd)
