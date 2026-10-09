@@ -25,8 +25,6 @@ func _ready() -> void:
 	_instance.name = "ProceduralGrass"
 	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	add_child(_instance)
-	if Engine.has_singleton("GameStore"):
-		pass
 	var store := get_node_or_null("/root/GameStore")
 	if store != null:
 		if store.has_signal("city_changed"):
@@ -93,20 +91,19 @@ func _rebuild(anchor: Vector2) -> void:
 				continue
 			if float(terrain_sample.get("slope_degrees", 0.0)) > 27.0:
 				continue
-			var potential := Terrain.ground_cover_potential(GameStore.city_seed, point.x, point.y)
+			var potential := Terrain.regional_ground_cover_potential(GameStore.city_seed, point.x, point.y)
 			if potential < 0.28:
 				continue
 			var acceptance := clampf((potential - 0.22) * 1.05, 0.0, 0.88)
 			if _pseudo(point.x, point.y, 3) > acceptance:
 				continue
-
 			var ground := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
 			var rotation := _pseudo(point.x, point.y, 4) * TAU
 			var width_scale := lerpf(0.72, 1.52, _pseudo(point.x, point.y, 5))
 			var height_scale := lerpf(0.48, 1.18, _pseudo(point.x, point.y, 6))
 			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(width_scale, height_scale, width_scale))
 			transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.025, point.y)))
-			var moisture := Terrain.moisture(GameStore.city_seed, point.x, point.y)
+			var moisture := Terrain.regional_moisture(GameStore.city_seed, point.x, point.y)
 			custom_data.append(Color(
 				_pseudo(point.x, point.y, 7),
 				_pseudo(point.x, point.y, 8),
