@@ -60,6 +60,7 @@ jobs:
             godot/scripts/debug/regional_sandbox_runtime_test.gd \
             godot/scripts/debug/regional_road_build_game_store_test.gd \
             godot/scripts/debug/road_builder_connectivity_game_store_test.gd \
+            godot/scripts/debug/road_geometry_test.gd \
             godot/scripts/debug/regional_organic_growth_test.gd \
             godot/scripts/debug/regional_highway_planner_test.gd \
             godot/scripts/debug/regional_natural_terrain_test.gd \
