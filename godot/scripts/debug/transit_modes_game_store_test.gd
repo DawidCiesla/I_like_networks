@@ -13,7 +13,7 @@ func _initialize() -> void:
 	store.city_seed = 731945
 	store.reset_state(false)
 	store.money = 10000000.0
-	store.city["demographics"]["residents"] = 100000
+	_set_regional_population(store, 100000)
 	store.depot["built"] = true
 	store.depot["garage_slots"] = 4
 
@@ -187,6 +187,31 @@ func _add_route_points(store, points: Array[Vector2]) -> bool:
 	return true
 
 
+func _set_regional_population(store, target_population: int) -> void:
+	var settlements: Array = store.city.get("regional_settlements", [])
+	if settlements.is_empty():
+		store.city["demographics"]["residents"] = target_population
+		return
+	var other_population := 0
+	for index in range(1, settlements.size()):
+		var settlement: Dictionary = settlements[index]
+		other_population += maxi(0, int(settlement.get("population", 0)))
+	var primary: Dictionary = settlements[0]
+	primary["population"] = maxi(0, target_population - other_population)
+	primary["jobs"] = int(round(float(primary["population"]) * 0.43))
+	var total_population := 0
+	var total_jobs := 0
+	for settlement_value in settlements:
+		var settlement: Dictionary = settlement_value
+		total_population += maxi(0, int(settlement.get("population", 0)))
+		total_jobs += maxi(0, int(settlement.get("jobs", 0)))
+	store.city["demographics"] = {
+		"residents": total_population,
+		"jobs": total_jobs,
+		"students": int(round(float(total_population) * 0.16)),
+	}
+
+
 func _first_built_road_segment(city: Dictionary, minimum: float, maximum: float) -> Dictionary:
 	var roads_by_id: Dictionary = {}
 	for road_value in city.get("roads", []):
@@ -205,7 +230,11 @@ func _first_built_road_segment(city: Dictionary, minimum: float, maximum: float)
 		var finish: Vector2 = nodes_by_id.get(str(edge.get("b", "")), Vector2.ZERO)
 		var length := start.distance_to(finish)
 		if length >= minimum and length <= maximum:
-			return {"road_id": str(road.get("id", "")), "points": [start, finish]}
+			# Stay slightly inside the edge so RoadRouter.snap_to_road cannot choose
+			# a different road that merely shares the same junction endpoint.
+			var first_stop := start.lerp(finish, 0.05)
+			var second_stop := start.lerp(finish, 0.95)
+			return {"road_id": str(road.get("id", "")), "points": [first_stop, second_stop]}
 	return {}
 
 
