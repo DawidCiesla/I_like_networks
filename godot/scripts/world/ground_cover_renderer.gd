@@ -1,0 +1,220 @@
+extends Node3D
+class_name GroundCoverRenderer
+
+const Terrain = preload("res://scripts/world/terrain_model.gd")
+const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const WorldLayers = preload("res://scripts/world/world_layers.gd")
+const GrassShader = preload("res://scripts/world/ground_cover.gdshader")
+
+const PATCH_RADIUS_METERS := 470.0
+const SAMPLE_SPACING_METERS := 15.0
+const REBUILD_DISTANCE_METERS := 115.0
+const MAX_CAMERA_HEIGHT_METERS := 1350.0
+const ROAD_CLEARANCE_METERS := 18.0
+const SETTLEMENT_CORE_FACTOR := 0.56
+const MAX_INSTANCES := 5200
+
+var _instance: MultiMeshInstance3D
+var _last_anchor := Vector2(INF, INF)
+var _dirty := true
+var _elapsed := 0.0
+
+
+func _ready() -> void:
+	_instance = MultiMeshInstance3D.new()
+	_instance.name = "ProceduralGrass"
+	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	add_child(_instance)
+	if Engine.has_singleton("GameStore"):
+		pass
+	var store := get_node_or_null("/root/GameStore")
+	if store != null:
+		if store.has_signal("city_changed"):
+			store.city_changed.connect(_mark_dirty)
+		if store.has_signal("terrain_changed"):
+			store.terrain_changed.connect(_mark_dirty)
+	_mark_dirty()
+
+
+func _process(delta: float) -> void:
+	_elapsed += delta
+	if _elapsed < 0.28:
+		return
+	_elapsed = 0.0
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var ground_xz := Vector2(camera.global_position.x, camera.global_position.z)
+	var ground_height := TerrainSurface.height(GameStore.city_seed, ground_xz.x, ground_xz.y)
+	var camera_height := camera.global_position.y - ground_height
+	if camera_height > MAX_CAMERA_HEIGHT_METERS:
+		_instance.visible = false
+		return
+	_instance.visible = true
+	if _dirty or ground_xz.distance_to(_last_anchor) >= REBUILD_DISTANCE_METERS:
+		_rebuild(ground_xz)
+
+
+func _mark_dirty() -> void:
+	_dirty = true
+
+
+func _rebuild(anchor: Vector2) -> void:
+	_dirty = false
+	_last_anchor = anchor
+	var mesh := _grass_mesh()
+	var transforms: Array[Transform3D] = []
+	var custom_data: Array[Color] = []
+	var roads := _active_roads()
+	var settlements := GameStore.city.get("regional_settlements", []) if not GameStore.city.is_empty() else []
+	var snapped := Vector2(
+		round(anchor.x / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS,
+		round(anchor.y / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS
+	)
+	var radius_steps := ceili(PATCH_RADIUS_METERS / SAMPLE_SPACING_METERS)
+	for dz in range(-radius_steps, radius_steps + 1):
+		for dx in range(-radius_steps, radius_steps + 1):
+			if transforms.size() >= MAX_INSTANCES:
+				break
+			var base := snapped + Vector2(float(dx), float(dz)) * SAMPLE_SPACING_METERS
+			if base.distance_to(anchor) > PATCH_RADIUS_METERS:
+				continue
+			var jitter := Vector2(
+				(_pseudo(base.x, base.y, 1) - 0.5) * SAMPLE_SPACING_METERS * 0.72,
+				(_pseudo(base.x, base.y, 2) - 0.5) * SAMPLE_SPACING_METERS * 0.72
+			)
+			var point := base + jitter
+			if _inside_settlement_core(point, settlements):
+				continue
+			if _near_any_road(point, roads):
+				continue
+			var terrain_sample := WorldLayers.sample_route_terrain(GameStore.city_seed, point)
+			if float(terrain_sample.get("water_depth", 0.0)) > 0.01:
+				continue
+			if float(terrain_sample.get("slope_degrees", 0.0)) > 27.0:
+				continue
+			var potential := Terrain.ground_cover_potential(GameStore.city_seed, point.x, point.y)
+			if potential < 0.28:
+				continue
+			var acceptance := clampf((potential - 0.22) * 1.05, 0.0, 0.88)
+			if _pseudo(point.x, point.y, 3) > acceptance:
+				continue
+
+			var ground := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
+			var rotation := _pseudo(point.x, point.y, 4) * TAU
+			var width_scale := lerpf(0.72, 1.52, _pseudo(point.x, point.y, 5))
+			var height_scale := lerpf(0.48, 1.18, _pseudo(point.x, point.y, 6))
+			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(width_scale, height_scale, width_scale))
+			transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.025, point.y)))
+			var moisture := Terrain.moisture(GameStore.city_seed, point.x, point.y)
+			custom_data.append(Color(
+				_pseudo(point.x, point.y, 7),
+				_pseudo(point.x, point.y, 8),
+				moisture,
+				1.0
+			))
+		if transforms.size() >= MAX_INSTANCES:
+			break
+
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_custom_data = true
+	multi.mesh = mesh
+	multi.instance_count = transforms.size()
+	for index in range(transforms.size()):
+		multi.set_instance_transform(index, transforms[index])
+		multi.set_instance_custom_data(index, custom_data[index])
+	_instance.multimesh = multi
+
+
+static func _grass_mesh() -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for blade_index in range(3):
+		var angle := TAU * float(blade_index) / 3.0
+		var right := Vector3(cos(angle), 0.0, sin(angle)) * 0.19
+		var bottom_left := -right
+		var bottom_right := right
+		var top := Vector3(0.0, 1.0, 0.0)
+		tool.set_uv(Vector2(0.0, 0.0))
+		tool.add_vertex(bottom_left)
+		tool.set_uv(Vector2(1.0, 0.0))
+		tool.add_vertex(bottom_right)
+		tool.set_uv(Vector2(0.5, 1.0))
+		tool.add_vertex(top)
+	tool.generate_normals()
+	var result := tool.commit()
+	var material := ShaderMaterial.new()
+	material.shader = GrassShader
+	result.surface_set_material(0, material)
+	return result
+
+
+func _active_roads() -> Array:
+	var result: Array = []
+	if GameStore.city.is_empty():
+		return result
+	for road_value in GameStore.city.get("roads", []):
+		if typeof(road_value) != TYPE_DICTIONARY:
+			continue
+		var road: Dictionary = road_value
+		if str(road.get("status", "")) in ["built", "constructing"]:
+			result.append(road)
+	return result
+
+
+func _inside_settlement_core(point: Vector2, settlements: Array) -> bool:
+	for settlement_value in settlements:
+		if typeof(settlement_value) != TYPE_DICTIONARY:
+			continue
+		var settlement: Dictionary = settlement_value
+		var center: Vector2 = settlement.get("position", Vector2.ZERO)
+		var radius := float(settlement.get("built_up_radius_m", 0.0)) * SETTLEMENT_CORE_FACTOR
+		if radius > 0.0 and point.distance_to(center) <= radius:
+			return true
+	return false
+
+
+func _near_any_road(point: Vector2, roads: Array) -> bool:
+	for road_value in roads:
+		var road: Dictionary = road_value
+		var width := 15.0
+		match str(road.get("class", "local")):
+			"arterial": width = 31.0
+			"collector": width = 21.0
+			"service": width = 12.0
+		var points: Array = road.get("points", [])
+		for index in range(points.size() - 1):
+			var a := _road_point(points[index])
+			var b := _road_point(points[index + 1])
+			if _distance_to_segment(point, a, b) < width * 0.5 + ROAD_CLEARANCE_METERS:
+				return true
+	return false
+
+
+static func _road_point(value: Variant) -> Vector2:
+	if value is Vector2:
+		return value
+	if typeof(value) == TYPE_DICTIONARY:
+		var point: Dictionary = value
+		return Vector2(float(point.get("x", 0.0)), float(point.get("y", 0.0)))
+	return Vector2.ZERO
+
+
+static func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var length_sq := ab.length_squared()
+	if length_sq <= 0.000001:
+		return point.distance_to(a)
+	var t := clampf((point - a).dot(ab) / length_sq, 0.0, 1.0)
+	return point.distance_to(a + ab * t)
+
+
+func _pseudo(x: float, z: float, channel: int) -> float:
+	var value := sin(
+		x * 12.9898
+		+ z * 78.233
+		+ float(GameStore.city_seed) * 0.00317
+		+ float(channel) * 19.19
+	) * 43758.5453
+	return value - floor(value)
