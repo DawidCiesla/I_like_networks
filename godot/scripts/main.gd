@@ -5,6 +5,7 @@ const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_rendere
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
 const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
+const CloudLayerRenderer = preload("res://scripts/render/cloud_layer_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
 const ForestHlodRenderer = preload("res://scripts/world/forest_hlod_renderer.gd")
@@ -16,6 +17,7 @@ var _bridge_detail_renderer: BridgeDetailRenderer
 var _building_detail_renderer: BuildingDetailRenderer
 var _building_hlod_renderer: BuildingHlodRenderer
 var _building_window_renderer: BuildingWindowRenderer
+var _cloud_layer_renderer: CloudLayerRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
@@ -33,6 +35,10 @@ func _setup_regional_visual_detail() -> void:
 	var map_definition := MapDefinition.active_definition()
 	if str(map_definition.get("id", MapDefinition.LEGACY_CITY_MAP_ID)) == MapDefinition.LEGACY_CITY_MAP_ID:
 		return
+	if _cloud_layer_renderer == null:
+		_cloud_layer_renderer = CloudLayerRenderer.new()
+		_cloud_layer_renderer.name = "CloudLayers"
+		add_child(_cloud_layer_renderer)
 	if _regional_roadside_renderer == null:
 		_regional_roadside_renderer = RegionalRoadsideRenderer.new()
 		_regional_roadside_renderer.name = "RegionalRoadsideDetail"
