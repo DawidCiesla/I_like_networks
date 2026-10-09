@@ -6,13 +6,14 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const GrassShader = preload("res://scripts/world/ground_cover.gdshader")
 
-const PATCH_RADIUS_METERS := 470.0
-const SAMPLE_SPACING_METERS := 15.0
-const REBUILD_DISTANCE_METERS := 115.0
-const MAX_CAMERA_HEIGHT_METERS := 1350.0
+const PATCH_RADIUS_METERS := 380.0
+const SAMPLE_SPACING_METERS := 8.5
+const REBUILD_DISTANCE_METERS := 92.0
+const MAX_CAMERA_HEIGHT_METERS := 980.0
 const ROAD_CLEARANCE_METERS := 18.0
 const SETTLEMENT_CORE_FACTOR := 0.56
-const MAX_INSTANCES := 5200
+const MAX_INSTANCES := 7800
+const BLADES_PER_TUFT := 10
 
 var _instance: MultiMeshInstance3D
 var _store: Node
@@ -25,6 +26,8 @@ func _ready() -> void:
 	_instance = MultiMeshInstance3D.new()
 	_instance.name = "ProceduralGrass"
 	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	_instance.visibility_range_end = 1500.0
+	_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(_instance)
 	_store = get_node_or_null("/root/GameStore")
 	if _store != null:
@@ -89,8 +92,8 @@ func _rebuild(anchor: Vector2) -> void:
 			if base.distance_to(anchor) > PATCH_RADIUS_METERS:
 				continue
 			var jitter := Vector2(
-				(_pseudo(base.x, base.y, 1, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.72,
-				(_pseudo(base.x, base.y, 2, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.72
+				(_pseudo(base.x, base.y, 1, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.82,
+				(_pseudo(base.x, base.y, 2, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.82
 			)
 			var point := base + jitter
 			if _inside_settlement_core(point, settlements):
@@ -103,17 +106,17 @@ func _rebuild(anchor: Vector2) -> void:
 			if float(terrain_sample.get("slope_degrees", 0.0)) > 27.0:
 				continue
 			var potential := Terrain.regional_ground_cover_potential(seed, point.x, point.y)
-			if potential < 0.28:
+			if potential < 0.24:
 				continue
-			var acceptance := clampf((potential - 0.22) * 1.05, 0.0, 0.88)
+			var acceptance := clampf((potential - 0.18) * 1.18, 0.0, 0.94)
 			if _pseudo(point.x, point.y, 3, seed) > acceptance:
 				continue
 			var ground := TerrainSurface.height(seed, point.x, point.y)
 			var rotation := _pseudo(point.x, point.y, 4, seed) * TAU
-			var width_scale := lerpf(0.72, 1.52, _pseudo(point.x, point.y, 5, seed))
-			var height_scale := lerpf(0.48, 1.18, _pseudo(point.x, point.y, 6, seed))
+			var width_scale := lerpf(0.70, 1.48, _pseudo(point.x, point.y, 5, seed))
+			var height_scale := lerpf(0.44, 1.10, _pseudo(point.x, point.y, 6, seed))
 			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(width_scale, height_scale, width_scale))
-			transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.025, point.y)))
+			transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.018, point.y)))
 			var moisture := Terrain.regional_moisture(seed, point.x, point.y)
 			custom_data.append(Color(
 				_pseudo(point.x, point.y, 7, seed),
@@ -138,18 +141,34 @@ func _rebuild(anchor: Vector2) -> void:
 static func _grass_mesh() -> ArrayMesh:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for blade_index in range(3):
-		var angle := TAU * float(blade_index) / 3.0
-		var right := Vector3(cos(angle), 0.0, sin(angle)) * 0.19
-		var bottom_left := -right
-		var bottom_right := right
-		var top := Vector3(0.0, 1.0, 0.0)
+	for blade_index in range(BLADES_PER_TUFT):
+		var fraction := float(blade_index) / float(BLADES_PER_TUFT)
+		var angle := TAU * fraction + sin(float(blade_index) * 2.37) * 0.31
+		var radial := 0.055 + 0.19 * (0.5 + 0.5 * sin(float(blade_index) * 4.17))
+		var center := Vector3(cos(angle) * radial, 0.0, sin(angle) * radial)
+		var width := 0.075 + 0.045 * (0.5 + 0.5 * sin(float(blade_index) * 3.11))
+		var height := 0.72 + 0.33 * (0.5 + 0.5 * sin(float(blade_index) * 5.07))
+		var right := Vector3(cos(angle), 0.0, sin(angle)) * width
+		var lean := Vector3(-sin(angle), 0.0, cos(angle)) * (0.055 + 0.075 * fraction)
+		var bottom_left := center - right
+		var bottom_right := center + right
+		var top_center := center + lean + Vector3.UP * height
+		var top_left := top_center - right * 0.18
+		var top_right := top_center + right * 0.18
+
 		tool.set_uv(Vector2(0.0, 0.0))
 		tool.add_vertex(bottom_left)
 		tool.set_uv(Vector2(1.0, 0.0))
 		tool.add_vertex(bottom_right)
-		tool.set_uv(Vector2(0.5, 1.0))
-		tool.add_vertex(top)
+		tool.set_uv(Vector2(1.0, 1.0))
+		tool.add_vertex(top_right)
+
+		tool.set_uv(Vector2(0.0, 0.0))
+		tool.add_vertex(bottom_left)
+		tool.set_uv(Vector2(1.0, 1.0))
+		tool.add_vertex(top_right)
+		tool.set_uv(Vector2(0.0, 1.0))
+		tool.add_vertex(top_left)
 	tool.generate_normals()
 	var result := tool.commit()
 	var material := ShaderMaterial.new()
