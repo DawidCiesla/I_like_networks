@@ -166,7 +166,7 @@ func _test_health_feedback_does_not_duplicate_population_flows() -> void:
 func _test_resident_health_joins_live_city_data(store) -> void:
 	var first: Dictionary = store.resident_health_metrics()
 	var second: Dictionary = store.resident_health_metrics()
-	var expected_population := 0
+	var expected_population := 0.0
 	var settlements: Array = store.city.get("regional_settlements", [])
 	var current_services: Dictionary = store._current_regional_service_results()
 	var service_districts: Dictionary = current_services.get("services", {}).get("districts", {})
@@ -174,7 +174,7 @@ func _test_resident_health_joins_live_city_data(store) -> void:
 	for settlement_value in settlements:
 		var settlement: Dictionary = settlement_value
 		var settlement_id := str(settlement.get("id", ""))
-		expected_population += maxi(0, int(settlement.get("population", 0)))
+		expected_population += maxf(0.0, float(settlement.get("population", 0.0)))
 		_expect(first.get("districts", {}).has(settlement_id), "health results preserve regional settlement identity")
 		var care: Dictionary = service_districts.get(settlement_id, {}).get("services", {}).get("healthcare", {})
 		var district_health: Dictionary = first.get("districts", {}).get(settlement_id, {})
@@ -183,7 +183,10 @@ func _test_resident_health_joins_live_city_data(store) -> void:
 			"healthcare coverage is calculated from the current service facilities and settlement population"
 		)
 		_expect(transport_districts.has(settlement_id), "transport choice is attributed to its home settlement")
-	_expect(int(first.get("population", -1.0)) == expected_population, "health population matches the aggregate regional population")
+	_expect(
+		is_equal_approx(float(first.get("population", -1.0)), expected_population),
+		"health population matches the aggregate regional population"
+	)
 	_expect(first == second, "live health evaluation is deterministic")
 	_expect(
 		float(first.get("health_index", -1.0)) >= 0.0 and float(first.get("health_index", 101.0)) <= 100.0,
