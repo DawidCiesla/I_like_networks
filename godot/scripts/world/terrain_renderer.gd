@@ -5,6 +5,7 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GroundCoverRenderer = preload("res://scripts/world/ground_cover_renderer.gd")
 const LandscapeDetailRenderer = preload("res://scripts/world/landscape_detail_renderer.gd")
+const RiparianDetailRenderer = preload("res://scripts/world/riparian_detail_renderer.gd")
 const PremiumTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
 
 const DEFAULT_GRAIN_STRENGTH := 0.046
@@ -20,6 +21,7 @@ const DEFAULT_CAVITY_STRENGTH := 0.26
 var bounds := Rect2()
 var _ground_cover: GroundCoverRenderer
 var _landscape_detail: LandscapeDetailRenderer
+var _riparian_detail: RiparianDetailRenderer
 
 
 func _ready() -> void:
@@ -41,6 +43,10 @@ func _setup_natural_detail() -> void:
 		_landscape_detail = LandscapeDetailRenderer.new()
 		_landscape_detail.name = "LandscapeDetail"
 		add_child(_landscape_detail)
+	if _riparian_detail == null:
+		_riparian_detail = RiparianDetailRenderer.new()
+		_riparian_detail.name = "RiparianDetail"
+		add_child(_riparian_detail)
 
 
 func rebuild() -> void:
