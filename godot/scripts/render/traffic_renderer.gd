@@ -13,11 +13,21 @@ const CAR_COLORS := [
 	Color("#c1a65a"),
 	Color("#6b7284"),
 ]
+const CAR_LENGTH := 4.45
+const CAR_WIDTH := 1.84
+const BODY_HEIGHT := 0.64
+const CABIN_LENGTH := 2.28
+const CABIN_WIDTH := 1.58
+const CABIN_HEIGHT := 0.72
+const WHEEL_RADIUS := 0.33
+const WHEEL_WIDTH := 0.22
+const CAR_CENTER_HEIGHT := 0.56
 
 var _cars: Array[Dictionary] = []
 var _road_signature := ""
 var _traffic_sync_requested := true
 var _traffic_sync_elapsed := TRAFFIC_SYNC_INTERVAL_SECONDS
+
 
 func _ready() -> void:
 	GameStore.city_changed.connect(_request_traffic_sync)
@@ -27,12 +37,15 @@ func _ready() -> void:
 	_traffic_sync_requested = false
 	_traffic_sync_elapsed = 0.0
 
+
 func _request_traffic_sync() -> void:
 	_traffic_sync_requested = true
+
 
 func _on_terrain_changed() -> void:
 	_road_signature = ""
 	_request_traffic_sync()
+
 
 func _process(delta: float) -> void:
 	_traffic_sync_elapsed += delta
@@ -47,11 +60,14 @@ func _process(delta: float) -> void:
 		var node: MeshInstance3D = car["node"]
 		if not is_instance_valid(node):
 			continue
+		var previous_transparency := node.transparency
 		node.transparency = move_toward(
 			node.transparency,
 			float(car.get("target_transparency", 0.0)),
 			delta * 1.6
 		)
+		if not is_equal_approx(previous_transparency, node.transparency):
+			_apply_visual_transparency(node, node.transparency)
 		node.visible = node.transparency < 0.999
 		if not node.visible:
 			_cars[index] = car
@@ -82,11 +98,12 @@ func _process(delta: float) -> void:
 
 		node.position = Vector3(
 			position_2d.x,
-			TerrainSurface.height(GameStore.city_seed, position_2d.x, position_2d.y) + 2.1,
+			TerrainSurface.height(GameStore.city_seed, position_2d.x, position_2d.y) + CAR_CENTER_HEIGHT,
 			position_2d.y
 		)
 		node.rotation.y = -atan2(tangent.y, tangent.x)
 		_cars[index] = car
+
 
 func _sync_traffic() -> void:
 	if GameStore.city.is_empty():
@@ -124,6 +141,7 @@ func _sync_traffic() -> void:
 
 		var node := _create_car(index)
 		node.transparency = 1.0
+		_apply_visual_transparency(node, 1.0)
 		add_child(node)
 		var lane_side := -1.0 if index % 2 == 0 else 1.0
 		_cars.append({
@@ -155,6 +173,7 @@ func _target_car_count() -> int:
 		legacy_target = 1
 	return mini(MAX_CARS, legacy_target)
 
+
 func _eligible_roads() -> Array:
 	var result: Array = []
 	for road in GameStore.city.get("roads", []):
@@ -167,19 +186,98 @@ func _eligible_roads() -> Array:
 		result.append(road)
 	return result
 
-func _create_car(index: int) -> MeshInstance3D:
-	var node := MeshInstance3D.new()
-	node.name = "AmbientCar_%d" % index
 
-	var box := BoxMesh.new()
-	box.size = Vector3(7.4, 3.0, 4.2)
-	var material := StandardMaterial3D.new()
-	material.albedo_color = CAR_COLORS[index % CAR_COLORS.size()]
-	material.roughness = 0.72
-	box.material = material
-	node.mesh = box
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return node
+func _create_car(index: int) -> MeshInstance3D:
+	var body := MeshInstance3D.new()
+	body.name = "AmbientCar_%d" % index
+	var body_mesh := BoxMesh.new()
+	body_mesh.size = Vector3(CAR_LENGTH, BODY_HEIGHT, CAR_WIDTH)
+	var body_material := StandardMaterial3D.new()
+	body_material.albedo_color = CAR_COLORS[index % CAR_COLORS.size()]
+	body_material.roughness = 0.58
+	body_material.metallic = 0.08
+	body_mesh.material = body_material
+	body.mesh = body_mesh
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+	var cabin := MeshInstance3D.new()
+	cabin.name = "Cabin"
+	var cabin_mesh := BoxMesh.new()
+	cabin_mesh.size = Vector3(CABIN_LENGTH, CABIN_HEIGHT, CABIN_WIDTH)
+	var cabin_material := StandardMaterial3D.new()
+	cabin_material.albedo_color = Color(0.075, 0.12, 0.14)
+	cabin_material.roughness = 0.24
+	cabin_material.metallic = 0.12
+	cabin_mesh.material = cabin_material
+	cabin.mesh = cabin_mesh
+	cabin.position = Vector3(-0.18, BODY_HEIGHT * 0.5 + CABIN_HEIGHT * 0.48, 0.0)
+	cabin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	body.add_child(cabin)
+
+	var wheel_material := StandardMaterial3D.new()
+	wheel_material.albedo_color = Color(0.035, 0.038, 0.040)
+	wheel_material.roughness = 0.88
+	for axle_x in [-1.36, 1.36]:
+		for side_z in [-1.0, 1.0]:
+			var wheel := MeshInstance3D.new()
+			wheel.name = "Wheel"
+			var wheel_mesh := CylinderMesh.new()
+			wheel_mesh.top_radius = WHEEL_RADIUS
+			wheel_mesh.bottom_radius = WHEEL_RADIUS
+			wheel_mesh.height = WHEEL_WIDTH
+			wheel_mesh.radial_segments = 10
+			wheel_mesh.rings = 2
+			wheel_mesh.material = wheel_material
+			wheel.mesh = wheel_mesh
+			wheel.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+			wheel.position = Vector3(axle_x, -0.28, side_z * CAR_WIDTH * 0.49)
+			wheel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			body.add_child(wheel)
+
+	var headlight_material := StandardMaterial3D.new()
+	headlight_material.albedo_color = Color(1.0, 0.91, 0.68)
+	headlight_material.emission_enabled = true
+	headlight_material.emission = Color(1.0, 0.82, 0.50)
+	headlight_material.emission_energy_multiplier = 1.15
+	headlight_material.roughness = 0.22
+	var tail_material := StandardMaterial3D.new()
+	tail_material.albedo_color = Color(0.52, 0.025, 0.018)
+	tail_material.emission_enabled = true
+	tail_material.emission = Color(0.82, 0.018, 0.008)
+	tail_material.emission_energy_multiplier = 0.72
+	tail_material.roughness = 0.30
+	for side_z in [-1.0, 1.0]:
+		body.add_child(_car_lamp(
+			Vector3(CAR_LENGTH * 0.505, 0.03, side_z * CAR_WIDTH * 0.31),
+			headlight_material,
+			"Headlight"
+		))
+		body.add_child(_car_lamp(
+			Vector3(-CAR_LENGTH * 0.505, 0.02, side_z * CAR_WIDTH * 0.31),
+			tail_material,
+			"TailLight"
+		))
+	return body
+
+
+func _car_lamp(position: Vector3, material: Material, lamp_name: String) -> MeshInstance3D:
+	var lamp := MeshInstance3D.new()
+	lamp.name = lamp_name
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(0.08, 0.18, 0.28)
+	mesh.material = material
+	lamp.mesh = mesh
+	lamp.position = position
+	lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return lamp
+
+
+func _apply_visual_transparency(root: Node, transparency: float) -> void:
+	if root is GeometryInstance3D:
+		(root as GeometryInstance3D).transparency = transparency
+	for child in root.get_children():
+		_apply_visual_transparency(child, transparency)
+
 
 func _road_points(road: Dictionary) -> Array[Vector2]:
 	var result: Array[Vector2] = []
@@ -187,12 +285,14 @@ func _road_points(road: Dictionary) -> Array[Vector2]:
 		result.append(Vector2(float(raw["x"]), float(raw["y"])))
 	return result
 
+
 func _cumulative_lengths(points: Array[Vector2]) -> Array[float]:
 	var result: Array[float] = []
 	result.append(0.0)
 	for index in range(points.size() - 1):
 		result.append(result.back() + points[index].distance_to(points[index + 1]))
 	return result
+
 
 func _point_on_polyline(
 	points: Array[Vector2],
@@ -225,6 +325,7 @@ func _point_on_polyline(
 	var position := a.lerp(b, t)
 	var tangent := (b - a).normalized()
 	return Vector4(position.x, position.y, tangent.x, tangent.y)
+
 
 func _hash32(value: String) -> int:
 	var hash_value: int = 2166136261
