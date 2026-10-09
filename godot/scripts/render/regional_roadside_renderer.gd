@@ -3,17 +3,11 @@ class_name RegionalRoadsideRenderer
 
 const RoadGeometry = preload("res://scripts/render/road_geometry.gd")
 
-const ROAD_WIDTH := {
-	"arterial": 31.0,
-	"collector": 21.0,
-	"local": 15.0,
-	"service": 12.0,
-}
-const SHOULDER_EXTRA_WIDTH := {
-	"arterial": 9.0,
-	"collector": 7.0,
-	"local": 5.0,
-	"service": 4.0,
+const SHOULDER_WIDTH := {
+	"arterial": 44.0,
+	"collector": 33.0,
+	"local": 25.0,
+	"service": 21.0,
 }
 const SHOULDER_COLOR := {
 	"arterial": Color("#786f5d"),
@@ -81,8 +75,7 @@ func _rebuild(roads: Array, seed: int) -> void:
 		if points.size() < 2:
 			continue
 		var road_class := str(road.get("class", "local"))
-		var road_width := float(ROAD_WIDTH.get(road_class, 15.0))
-		var shoulder_width := road_width + float(SHOULDER_EXTRA_WIDTH.get(road_class, 5.0))
+		var shoulder_width := float(SHOULDER_WIDTH.get(road_class, 25.0))
 		var mesh := RoadGeometry.create_ribbon_mesh(
 			seed,
 			points,
