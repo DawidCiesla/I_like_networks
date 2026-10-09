@@ -9,6 +9,7 @@ var _failures := 0
 
 func _init() -> void:
 	var city := CityRuntime.create_initial_city(731945, MapDefinition.DEFAULT_MAP_ID)
+	_assert_no_legacy_upgrade_hints(city)
 	var road := _first_intercity_road(city)
 	_expect(not road.is_empty(), "regional map exposes an intercity strategic road")
 	if road.is_empty():
@@ -63,6 +64,16 @@ func _init() -> void:
 		_expect(not bool(proposal.get("autoBuild", true)), "municipal ring study still cannot auto-build")
 	_expect(rings > 0, "mature multi-corridor cities can generate outer-ring planning studies")
 	_finish()
+
+
+func _assert_no_legacy_upgrade_hints(city: Dictionary) -> void:
+	for road_value in city.get("roads", []):
+		var road: Dictionary = road_value
+		if str(road.get("regionalRole", "")) not in ["spine", "loop", "external_branch", "city_connector"]:
+			continue
+		_expect(not road.has("upgradeRecommendation"), "strategic roads expose no legacy in-place upgrade recommendation")
+		_expect(not road.has("upgradePressure"), "strategic roads expose no legacy in-place upgrade pressure")
+		_expect(bool(road.get("preserveExistingRoad", false)), "strategic roads are explicitly preserved")
 
 
 func _first_intercity_road(city: Dictionary) -> Dictionary:
