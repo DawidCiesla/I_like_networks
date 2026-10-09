@@ -2,12 +2,14 @@ extends Node3D
 
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
+const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 
 @onready var _environment_controller: Node3D = $WorldEnvironmentController
 @onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
 
 var _building_detail_renderer: BuildingDetailRenderer
+var _building_hlod_renderer: BuildingHlodRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 
 
@@ -31,6 +33,10 @@ func _setup_regional_visual_detail() -> void:
 		_building_detail_renderer = BuildingDetailRenderer.new()
 		_building_detail_renderer.name = "BuildingDetails"
 		add_child(_building_detail_renderer)
+	if _building_hlod_renderer == null:
+		_building_hlod_renderer = BuildingHlodRenderer.new()
+		_building_hlod_renderer.name = "BuildingHLOD"
+		add_child(_building_hlod_renderer)
 
 
 func _process(_delta: float) -> void:
