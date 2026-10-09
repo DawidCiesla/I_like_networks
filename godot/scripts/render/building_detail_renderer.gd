@@ -21,7 +21,7 @@ func _ready() -> void:
 		if _store.has_signal("city_changed"):
 			_store.city_changed.connect(_sync)
 		if _store.has_signal("terrain_changed"):
-			_store.terrain_changed.connect(_sync)
+			_store.terrain_changed.connect(_force_sync)
 	_sync()
 
 
@@ -48,6 +48,11 @@ func _create_renderers() -> void:
 	add_child(_utilities)
 
 
+func _force_sync() -> void:
+	_signature = ""
+	_sync()
+
+
 func _sync() -> void:
 	if _store == null:
 		_store = get_node_or_null("/root/GameStore")
@@ -59,14 +64,35 @@ func _sync() -> void:
 	var city: Dictionary = city_value
 	var buildings: Array = city.get("buildings", [])
 	var parcels: Array = city.get("parcels", [])
-	var signature := "%d:%d:%d" % [buildings.size(), parcels.size(), int(_store.get("city_seed"))]
+	var seed := int(_store.get("city_seed"))
+	var signature := _detail_signature(buildings, parcels, seed)
 	if signature == _signature:
 		return
 	_signature = signature
-	_rebuild(city, buildings, parcels, int(_store.get("city_seed")))
+	_rebuild(buildings, parcels, seed)
 
 
-func _rebuild(city: Dictionary, buildings: Array, parcels: Array, seed: int) -> void:
+func _detail_signature(buildings: Array, parcels: Array, seed: int) -> String:
+	var parts: Array[String] = ["seed:%d" % seed, "p:%d" % parcels.size()]
+	for building_value in buildings:
+		if typeof(building_value) != TYPE_DICTIONARY:
+			continue
+		var building: Dictionary = building_value
+		var profile: Dictionary = building.get("profile", {})
+		parts.append("%s:%s:%s:%.1f:%.1f:%.2f:%d" % [
+			str(building.get("id", "")),
+			str(building.get("parcelId", "")),
+			str(profile.get("kind", "")),
+			float(building.get("x", 0.0)),
+			float(building.get("y", 0.0)),
+			float(building.get("rotationRadians", 0.0)),
+			int(profile.get("floors", 1)),
+		])
+	parts.sort()
+	return "|".join(parts)
+
+
+func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 	var parcel_lookup: Dictionary = {}
 	for parcel_value in parcels:
 		if typeof(parcel_value) != TYPE_DICTIONARY:
@@ -92,7 +118,10 @@ func _rebuild(city: Dictionary, buildings: Array, parcels: Array, seed: int) -> 
 			continue
 		var profile: Dictionary = building.get("profile", {})
 		var kind := str(profile.get("kind", "house"))
-		var center := Vector2(float(building.get("x", parcel.get("x", 0.0))), float(building.get("y", parcel.get("y", 0.0))))
+		var center := Vector2(
+			float(building.get("x", parcel.get("x", 0.0))),
+			float(building.get("y", parcel.get("y", 0.0)))
+		)
 		var angle := float(building.get("rotationRadians", 0.0))
 		var lateral := Vector2(cos(angle), sin(angle))
 		var frontage := Vector2(-sin(angle), cos(angle))
@@ -114,13 +143,32 @@ func _rebuild(city: Dictionary, buildings: Array, parcels: Array, seed: int) -> 
 				var planter := center + frontage * parcel_depth * 0.30 + lateral * parcel_width * 0.26
 				_append_shrub(shrub_transforms, shrub_custom, planter, building, seed)
 			if utility_transforms.size() < MAX_UTILITY_DETAILS:
-				_append_utility(utility_transforms, utility_custom, rear, angle, building, seed, false)
+				var roof_point := center + lateral * parcel_width * 0.10 - frontage * parcel_depth * 0.06
+				_append_utility(
+					utility_transforms,
+					utility_custom,
+					roof_point,
+					angle,
+					building,
+					seed,
+					false,
+					true
+				)
 		elif kind in ["workshop", "warehouse"]:
 			for side in [-1.0, 1.0]:
 				if utility_transforms.size() >= MAX_UTILITY_DETAILS:
 					break
 				var utility_point := rear + lateral * parcel_width * 0.20 * side
-				_append_utility(utility_transforms, utility_custom, utility_point, angle, building, seed, true)
+				_append_utility(
+					utility_transforms,
+					utility_custom,
+					utility_point,
+					angle,
+					building,
+					seed,
+					true,
+					false
+				)
 
 	_apply_multimesh(_hedges, _hedge_mesh(), hedge_transforms, hedge_custom)
 	_apply_multimesh(_shrubs, _shrub_mesh(), shrub_transforms, shrub_custom)
@@ -174,14 +222,18 @@ func _append_utility(
 	angle: float,
 	building: Dictionary,
 	seed: int,
-	industrial: bool
+	industrial: bool,
+	rooftop: bool
 ) -> void:
 	var ground := TerrainSurface.height(seed, point.x, point.y)
 	var size_x := (1.6 + _pseudo(point.x, point.y, 8, seed) * 1.9) if industrial else (1.0 + _pseudo(point.x, point.y, 8, seed) * 1.2)
 	var size_z := (1.1 + _pseudo(point.x, point.y, 9, seed) * 1.6) if industrial else (0.8 + _pseudo(point.x, point.y, 9, seed) * 0.9)
 	var size_y := (1.15 + _pseudo(point.x, point.y, 10, seed) * 1.1) if industrial else (0.7 + _pseudo(point.x, point.y, 10, seed) * 0.7)
+	var profile: Dictionary = building.get("profile", {})
+	var roof_height := maxf(2.8, float(profile.get("heightMeters", 3.2 * maxi(1, int(profile.get("floors", 1))))))
+	var base_y := ground + roof_height + 0.18 if rooftop else ground
 	var basis := Basis(Vector3.UP, -angle).scaled(Vector3(size_x, size_y, size_z))
-	transforms.append(Transform3D(basis, Vector3(point.x, ground + size_y * 0.5, point.y)))
+	transforms.append(Transform3D(basis, Vector3(point.x, base_y + size_y * 0.5, point.y)))
 	custom_data.append(Color(
 		_pseudo(point.x, point.y, 11, seed),
 		_pseudo(point.x, point.y, 12, seed),
