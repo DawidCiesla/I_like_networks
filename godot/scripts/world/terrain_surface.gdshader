@@ -95,13 +95,9 @@ void fragment() {
 	vec3 soil_variation = vec3(0.050, 0.020, -0.018) * broad_noise * soil_mask;
 	surface_color += grass_variation + soil_variation;
 
-	// Damp ground is darker and slightly more saturated, creating visually
-	// readable floodplains and river-adjacent soil without a texture atlas.
 	vec3 damp_color = surface_color * vec3(0.76, 0.82, 0.80);
 	surface_color = mix(surface_color, damp_color, wet_mask * wetness_strength);
 
-	// Procedural close-range micro-normal on flatter surfaces. The world-space
-	// gradient is transformed to view space before feeding Godot's lighting model.
 	float normal_scale = 0.43;
 	float normal_step = 0.36;
 	float center_h = value_noise(world_xz * normal_scale);
@@ -125,7 +121,7 @@ void fragment() {
 		0.98
 	);
 	METALLIC = 0.0;
-	SPECULAR_IOR_LEVEL = mix(0.26, 0.42, wet_mask);
+	SPECULAR = mix(0.26, 0.42, wet_mask);
 	AO = clamp(1.0 - cavity, 0.68, 1.0);
 	AO_LIGHT_AFFECT = 0.72;
 }
