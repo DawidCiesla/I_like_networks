@@ -182,7 +182,8 @@ static func _build_settlement_morphology(
 			even_angle + jitter,
 			radius * length_factor,
 			"%s:%d" % [settlement_id, street_index],
-			candidate_blockers
+			candidate_blockers,
+			settlement_id
 		)
 		if road_points.size() < 2:
 			continue
@@ -231,7 +232,14 @@ static func _build_settlement_morphology(
 			var ring_blockers: Array[Dictionary] = []
 			ring_blockers.append_array(blocking_edges)
 			ring_blockers.append_array(streets)
-			if _path_conflicts(ring_points, ring_blockers, [a, b]):
+			if _path_conflicts(
+				ring_points,
+				ring_blockers,
+				str(first["node_id"]),
+				str(second["node_id"]),
+				a,
+				b
+			):
 				continue
 			var ring_id := "local-road-%s-ring-%02d" % [settlement_id, ring_index]
 			streets.append(_make_local_street(
@@ -350,14 +358,18 @@ static func _best_radial_points(
 	angle: float,
 	length: float,
 	key: String,
-	blocking_edges: Array[Dictionary]
+	blocking_edges: Array[Dictionary],
+	start_node_id: String
 ) -> Array[Vector2]:
 	var safe_padding := minf(220.0, minf(bounds.size.x, bounds.size.y) * 0.03)
 	var safe_bounds := Rect2(bounds.position + Vector2.ONE * safe_padding, bounds.size - Vector2.ONE * safe_padding * 2.0)
 	var best_points: Array[Vector2] = []
 	var best_score := INF
-	var angle_offsets := [-0.34, -0.24, -0.14, -0.07, 0.0, 0.07, 0.14, 0.24, 0.34]
-	var length_factors := [0.72, 0.82, 0.92, 1.0, 1.08]
+	# Compact maps can contain dense regional corridors around a settlement.
+	# Search both shorter neighbourhood streets and full-radius radials so the
+	# settlement retains a useful local skeleton without creating fake crossings.
+	var angle_offsets := [-0.52, -0.42, -0.34, -0.24, -0.14, -0.07, 0.0, 0.07, 0.14, 0.24, 0.34, 0.42, 0.52]
+	var length_factors := [0.20, 0.28, 0.38, 0.50, 0.62, 0.72, 0.82, 0.92, 1.0, 1.08]
 	for angle_offset_value in angle_offsets:
 		var candidate_angle := angle + float(angle_offset_value)
 		var direction := Vector2(cos(candidate_angle), sin(candidate_angle))
@@ -365,16 +377,28 @@ static func _best_radial_points(
 		for factor_value in length_factors:
 			var candidate_length := length * float(factor_value)
 			var endpoint := _clamp_to_rect(center + direction * candidate_length, safe_bounds)
+			if endpoint.distance_to(center) < 72.0:
+				continue
 			var curve := lerpf(-0.08, 0.08, _unit_random(seed, "%s:curve:%.2f:%.2f" % [key, candidate_angle, candidate_length]))
 			var midpoint := center.lerp(endpoint, 0.52) + side * candidate_length * curve
 			var candidate_points: Array[Vector2] = [center, midpoint, endpoint]
-			if _path_conflicts(candidate_points, blocking_edges, [center]):
+			if _path_conflicts(
+				candidate_points,
+				blocking_edges,
+				start_node_id,
+				"",
+				center,
+				endpoint
+			):
 				continue
 			var endpoint_sample := _terrain_sample(seed, endpoint)
 			var midpoint_sample := _terrain_sample(seed, midpoint)
 			var score := _terrain_score(endpoint_sample) + _terrain_score(midpoint_sample) * 0.75
 			score += absf(float(angle_offset_value)) * 9.0
 			score += absf(float(factor_value) - 1.0) * 4.0
+			# Prefer full neighbourhood streets when topology permits, but let
+			# shorter stubs win when they are the only conflict-free option.
+			score += maxf(0.0, 0.62 - float(factor_value)) * 3.5
 			if score < best_score:
 				best_score = score
 				best_points = candidate_points
@@ -384,12 +408,22 @@ static func _best_radial_points(
 static func _path_conflicts(
 	candidate: Array[Vector2],
 	blocking_edges: Array[Dictionary],
-	allowed_points: Array[Vector2]
+	start_node_id: String,
+	end_node_id: String,
+	start_position: Vector2,
+	end_position: Vector2
 ) -> bool:
 	for edge in blocking_edges:
 		var other_points: Array[Vector2] = _edge_points(edge)
 		if other_points.size() < 2:
 			continue
+		var allowed_points: Array[Vector2] = []
+		var edge_a := str(edge.get("a", ""))
+		var edge_b := str(edge.get("b", ""))
+		if not start_node_id.is_empty() and (edge_a == start_node_id or edge_b == start_node_id):
+			allowed_points.append(start_position)
+		if not end_node_id.is_empty() and (edge_a == end_node_id or edge_b == end_node_id):
+			allowed_points.append(end_position)
 		if _paths_cross_away_from_allowed_points(candidate, other_points, allowed_points):
 			return true
 	return false
