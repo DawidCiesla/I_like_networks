@@ -2,11 +2,13 @@ extends Node3D
 
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
+const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 
 @onready var _environment_controller: Node3D = $WorldEnvironmentController
 @onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
 
 var _building_detail_renderer: BuildingDetailRenderer
+var _regional_roadside_renderer: RegionalRoadsideRenderer
 
 
 func _ready() -> void:
@@ -21,11 +23,14 @@ func _setup_regional_visual_detail() -> void:
 	var map_definition := MapDefinition.active_definition()
 	if str(map_definition.get("id", MapDefinition.LEGACY_CITY_MAP_ID)) == MapDefinition.LEGACY_CITY_MAP_ID:
 		return
-	if _building_detail_renderer != null:
-		return
-	_building_detail_renderer = BuildingDetailRenderer.new()
-	_building_detail_renderer.name = "BuildingDetails"
-	add_child(_building_detail_renderer)
+	if _regional_roadside_renderer == null:
+		_regional_roadside_renderer = RegionalRoadsideRenderer.new()
+		_regional_roadside_renderer.name = "RegionalRoadsideDetail"
+		add_child(_regional_roadside_renderer)
+	if _building_detail_renderer == null:
+		_building_detail_renderer = BuildingDetailRenderer.new()
+		_building_detail_renderer.name = "BuildingDetails"
+		add_child(_building_detail_renderer)
 
 
 func _process(_delta: float) -> void:
