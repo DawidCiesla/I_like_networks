@@ -71,16 +71,22 @@ func _run_tests() -> void:
 		)
 		if colors[index].a > 0.0:
 			visible_water_vertices += 1
-		_expect(colors[index].a >= 0.0 and colors[index].a <= 0.68, "water alpha remains transparent and bounded")
+		_expect(colors[index].a >= 0.0 and colors[index].a <= 0.66, "water alpha remains transparent and bounded")
 	_expect(visible_water_vertices > 0, "water samples receive visible transparent vertices")
 
 	var renderer := WaterSurfaceRenderer.new()
 	renderer.rebuild(seed, bounds, Vector2i(8, 8))
 	_expect(renderer.mesh != null, "renderer can rebuild its mesh")
-	_expect(
-		(renderer.material_override as StandardMaterial3D).transparency == BaseMaterial3D.TRANSPARENCY_ALPHA,
-		"renderer material enables alpha transparency"
-	)
+	var material := renderer.material_override as ShaderMaterial
+	_expect(material != null, "renderer uses the animated procedural water material")
+	if material != null:
+		_expect(material.shader != null, "water shader resource loads")
+		if material.shader != null:
+			_expect(
+				material.shader.resource_path.ends_with("water_surface.gdshader"),
+				"renderer material references the dedicated water shader"
+			)
+		_expect(float(material.get_shader_parameter("wave_strength")) > 0.0, "water exposes animated wave strength")
 	renderer.free()
 
 	var invalid_mesh := WaterSurfaceRenderer.build_mesh(seed, Rect2(Vector2.ZERO, Vector2.ZERO))
