@@ -10,7 +10,9 @@ const VISIBILITY_END := 18000.0
 
 var _store: Node
 var _instance: MultiMeshInstance3D
+var _material: ShaderMaterial
 var _signature := ""
+var _last_night_strength := -1.0
 
 
 func _ready() -> void:
@@ -22,6 +24,11 @@ func _ready() -> void:
 		if _store.has_signal("terrain_changed"):
 			_store.terrain_changed.connect(_force_sync)
 	_sync()
+	_update_night_strength()
+
+
+func _process(_delta: float) -> void:
+	_update_night_strength()
 
 
 func _create_instance() -> void:
@@ -115,9 +122,9 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3.ONE
-	var material := ShaderMaterial.new()
-	material.shader = HlodShader
-	mesh.material = material
+	_material = ShaderMaterial.new()
+	_material.shader = HlodShader
+	mesh.material = _material
 
 	var multi := MultiMesh.new()
 	multi.transform_format = MultiMesh.TRANSFORM_3D
@@ -128,6 +135,8 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 		multi.set_instance_transform(index, transforms[index])
 		multi.set_instance_custom_data(index, custom_data[index])
 	_instance.multimesh = multi
+	_last_night_strength = -1.0
+	_update_night_strength()
 
 
 func _building_color(building: Dictionary, profile: Dictionary) -> Color:
@@ -154,3 +163,21 @@ func _building_color(building: Dictionary, profile: Dictionary) -> Color:
 		clampf(base.b * brightness, 0.05, 1.0),
 		variation
 	)
+
+
+func _update_night_strength() -> void:
+	if _material == null or _store == null:
+		return
+	var city_value: Variant = _store.get("city")
+	if typeof(city_value) != TYPE_DICTIONARY:
+		return
+	var city: Dictionary = city_value
+	var simulation_seconds := maxf(0.0, float(city.get("time_seconds", 0.0)))
+	var hour := fposmod(8.0 + simulation_seconds / 3600.0, 24.0)
+	var evening := smoothstep(18.0, 20.5, hour)
+	var morning := 1.0 - smoothstep(5.4, 7.4, hour)
+	var strength := clampf(maxf(evening, morning), 0.0, 1.0)
+	if absf(strength - _last_night_strength) < 0.01:
+		return
+	_last_night_strength = strength
+	_material.set_shader_parameter("night_strength", strength)
