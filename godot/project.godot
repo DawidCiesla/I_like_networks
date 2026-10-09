@@ -3,7 +3,7 @@
 ; since the parameters that go here are not all obvious.
 ;
 ; Format:
-;   [section] ; section goes between []
+;   [section] ; section between []
 ;   param=value ; assign values to parameters
 
 config_version=5
@@ -12,7 +12,7 @@ config_version=5
 
 config/name="I Like Transit"
 run/main_scene="res://scenes/ui/main_menu.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
+config/features=PackedStringArray("4.7", "Forward Plus")
 
 [autoload]
 
@@ -48,6 +48,7 @@ reset_camera={
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"
+textures/default_filters/use_nearest_mipmap_filter=false
 environment/defaults/default_clear_color=Color(0.055, 0.075, 0.065, 1)
