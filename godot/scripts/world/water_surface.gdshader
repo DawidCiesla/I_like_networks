@@ -77,7 +77,7 @@ void fragment() {
 	ALBEDO = water_color;
 	ROUGHNESS = clamp(0.105 + broad * 0.09 + shallow * 0.11 + foam * 0.18, 0.08, 0.34);
 	METALLIC = 0.0;
-	SPECULAR_IOR_LEVEL = 0.48;
+	SPECULAR = 0.48;
 	ALPHA = clamp(COLOR.a + fresnel * 0.14 + foam * 0.11, 0.0, 0.86);
 	EMISSION = shore_foam_color * foam * 0.035;
 }
