@@ -5,8 +5,9 @@ const TerrainModel = preload("res://scripts/world/terrain_model.gd")
 
 const HASH_MASK := 0xffffffff
 const HASH_NORMALIZER := 4294967295.0
-const RIVER_CHANNEL_SCALE := 1100.0
-const LAKE_FIELD_SCALE := 1900.0
+const LAKE_FIELD_SCALE := 2350.0
+const MAX_RIVER_DEPTH := 7.5
+const MAX_LAKE_DEPTH := 9.0
 
 
 ## Samples the existing terrain and the natural world layers at a world-space point.
@@ -40,7 +41,7 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 		sampled_forest_potential
 		* (0.65 + sampled_moisture * 0.35)
 		* (1.0 - minf(sampled_slope / 50.0, 1.0) * 0.45)
-		* (1.0 - river_mask * 0.3),
+		* (1.0 - river_mask * 0.18),
 		0.0,
 		1.0
 	)
@@ -73,8 +74,8 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 	}
 
 
-## Lightweight samples for route costs and the water renderer. Avoids calculating
-## resource, soil, and biome data when a caller only needs terrain friction.
+## Lightweight samples for route costs and renderers. Avoids calculating
+## resources when a caller only needs terrain friction and vegetation context.
 static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
 	var x := point.x
 	var z := point.y
@@ -93,44 +94,77 @@ static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
 static func sample_water(seed: int, point: Vector2) -> Dictionary:
 	var slope := TerrainModel.slope_degrees(seed, point.x, point.y)
 	var water := _water_masks(seed, point.x, point.y, slope)
-	return {"water_depth": water["depth"], "water_kind": water["kind"]}
+	return {
+		"water_depth": water["depth"],
+		"water_kind": water["kind"],
+		"river_scale": water.get("river_scale", 0.0),
+	}
 
 
 static func _water_masks(seed: int, x: float, z: float, slope: float) -> Dictionary:
-	# A warped, smooth contour makes connected river reaches instead of independent
-	# per-cell patches. The fixed octave count keeps each point query bounded.
-	var warp_x := _fbm(seed, x + 341.0, z - 707.0, 1500.0, 3, "river-warp-x") * 300.0
-	var warp_z := _fbm(seed, x - 919.0, z + 503.0, 1500.0, 3, "river-warp-z") * 300.0
-	var channel_value := _fbm(
-		seed,
-		x + warp_x,
-		z + warp_z,
-		RIVER_CHANNEL_SCALE,
-		4,
-		"river-channel"
-	)
-	var contour_distance := absf(channel_value - 0.06)
-	var slope_factor := 1.0 - _smoothstep(24.0, 42.0, slope)
-	var river_mask := (1.0 - _smoothstep(0.014, 0.046, contour_distance)) * slope_factor
-	var river_depth := maxf(0.0, (river_mask - 0.06) / 0.94) * 4.2
+	var channels := TerrainModel.river_profile(seed, x, z)
+	var major := float(channels.get("major", 0.0))
+	var minor := float(channels.get("minor", 0.0))
+	var major_size := float(channels.get("major_size", 0.5))
+	var minor_size := float(channels.get("minor_size", 0.5))
+	var slope_factor := 1.0 - _smoothstep(23.0, 39.0, slope)
+	major *= slope_factor
+	minor *= slope_factor
+	var river_mask := maxf(major, minor)
+	var major_depth := major * lerpf(3.7, MAX_RIVER_DEPTH, major_size)
+	var minor_depth := minor * lerpf(0.75, 2.5, minor_size)
+	var river_depth := maxf(major_depth, minor_depth)
+	var river_scale := major if major >= minor else minor * 0.45
 
-	# Broad basins form contiguous lakes; slope suppresses water on steep ground.
-	var lake_field := _fbm(
+	# Lakes use a broad basin field plus a smaller structure field. Seed-specific
+	# thresholds create a mix of occasional large lakes and smaller irregular ones.
+	var lake_broad := _fbm(
 		seed,
 		x + 1783.0,
 		z - 239.0,
 		LAKE_FIELD_SCALE,
-		3,
+		4,
 		"lake-basins"
 	) * 0.5 + 0.5
-	var lake_mask := _smoothstep(0.74, 0.84, lake_field) * (1.0 - _smoothstep(17.0, 34.0, slope))
-	var lake_depth := maxf(0.0, (lake_mask - 0.04) / 0.96) * 9.0
+	var lake_detail := _fbm(
+		seed,
+		x - 491.0,
+		z + 1311.0,
+		760.0,
+		3,
+		"lake-detail"
+	) * 0.5 + 0.5
+	var lake_field := lake_broad * 0.82 + lake_detail * 0.18
+	var threshold_shift := (_random01(seed, "lake-threshold", 0, 0) - 0.5) * 0.035
+	var lake_mask := _smoothstep(0.735 + threshold_shift, 0.845 + threshold_shift, lake_field)
+	lake_mask *= 1.0 - _smoothstep(15.0, 30.0, slope)
+	# Strong river channels cut through lake masks instead of producing hard seams.
+	lake_mask = maxf(lake_mask, major * 0.16)
+	var lake_depth := clampf(maxf(0.0, (lake_mask - 0.035) / 0.965) * MAX_LAKE_DEPTH, 0.0, MAX_LAKE_DEPTH)
 
-	if lake_depth > 0.0:
-		return {"river": river_mask, "lake": lake_mask, "depth": lake_depth, "kind": "lake"}
+	if lake_depth > river_depth and lake_depth > 0.0:
+		return {
+			"river": river_mask,
+			"lake": lake_mask,
+			"depth": lake_depth,
+			"kind": "lake",
+			"river_scale": river_scale,
+		}
 	if river_depth > 0.0:
-		return {"river": river_mask, "lake": lake_mask, "depth": river_depth, "kind": "river"}
-	return {"river": river_mask, "lake": lake_mask, "depth": 0.0, "kind": "none"}
+		return {
+			"river": river_mask,
+			"lake": lake_mask,
+			"depth": clampf(river_depth, 0.0, MAX_RIVER_DEPTH),
+			"kind": "river",
+			"river_scale": river_scale,
+		}
+	return {
+		"river": river_mask,
+		"lake": lake_mask,
+		"depth": 0.0,
+		"kind": "none",
+		"river_scale": river_scale,
+	}
 
 
 static func _deposit_mask(
