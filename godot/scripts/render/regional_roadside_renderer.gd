@@ -71,12 +71,12 @@ func _rebuild(roads: Array, seed: int) -> void:
 		var road: Dictionary = road_value
 		if not _uses_natural_shoulder(road):
 			continue
-		var points := _road_points(road)
+		var points: Array[Vector2] = _road_points(road)
 		if points.size() < 2:
 			continue
 		var road_class := str(road.get("class", "local"))
 		var shoulder_width := float(SHOULDER_WIDTH.get(road_class, 25.0))
-		var mesh := RoadGeometry.create_ribbon_mesh(
+		var mesh: Mesh = RoadGeometry.create_ribbon_mesh(
 			seed,
 			points,
 			shoulder_width,
