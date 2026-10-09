@@ -2,6 +2,7 @@ extends MeshInstance3D
 
 const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GroundCoverRenderer = preload("res://scripts/world/ground_cover_renderer.gd")
 const PremiumTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
 
@@ -25,7 +26,7 @@ func _ready() -> void:
 
 
 func _setup_ground_cover() -> void:
-	if _ground_cover != null:
+	if _ground_cover != null or not _is_regional_map():
 		return
 	_ground_cover = GroundCoverRenderer.new()
 	_ground_cover.name = "GroundCover"
@@ -38,6 +39,12 @@ func rebuild() -> void:
 		return
 	bounds = _world_bounds()
 	mesh = _build_mesh(bounds, int(game_store.get("city_seed")))
+	if _is_regional_map():
+		_setup_ground_cover()
+
+
+func _is_regional_map() -> bool:
+	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 func _world_bounds() -> Rect2:
@@ -57,11 +64,9 @@ func _build_mesh(rect: Rect2, seed: int) -> ArrayMesh:
 			var x1 := rect.position.x + rect.size.x * float(x_index + 1) / float(x_steps)
 			var z0 := rect.position.y + rect.size.y * float(z_index) / float(z_steps)
 			var z1 := rect.position.y + rect.size.y * float(z_index + 1) / float(z_steps)
-
 			_add_vertex(tool, x0, z0, seed)
 			_add_vertex(tool, x1, z0, seed)
 			_add_vertex(tool, x1, z1, seed)
-
 			_add_vertex(tool, x0, z0, seed)
 			_add_vertex(tool, x1, z1, seed)
 			_add_vertex(tool, x0, z1, seed)
@@ -86,5 +91,6 @@ static func create_premium_material() -> ShaderMaterial:
 
 func _add_vertex(tool: SurfaceTool, x: float, z: float, seed: int) -> void:
 	var y := TerrainSurface.height(seed, x, z)
-	tool.set_color(Terrain.terrain_color(seed, x, z))
+	var color := Terrain.regional_terrain_color(seed, x, z) if _is_regional_map() else Terrain.terrain_color(seed, x, z)
+	tool.set_color(color)
 	tool.add_vertex(Vector3(x, y, z))
