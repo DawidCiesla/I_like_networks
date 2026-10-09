@@ -10,14 +10,17 @@ const ROAD_HALF_WIDTH := {
 	"local": 7.5,
 	"service": 6.0,
 }
-const DELINEATOR_SPACING := 52.0
+const DELINEATOR_SPACING := 56.0
 const DELINEATOR_CLEARANCE := 4.2
-const GUARDRAIL_SAMPLE_SPACING := 13.0
+# Guardrails are long continuous visual elements. Sampling every ~24 m is
+# sufficient for terrain-drop classification and halves the terrain-query cost
+# compared with the first 13 m prototype.
+const GUARDRAIL_SAMPLE_SPACING := 24.0
 const GUARDRAIL_CLEARANCE := 3.2
 const GUARDRAIL_DROP_THRESHOLD := 1.35
-const MAX_POSTS := 6200
-const MAX_REFLECTORS := 6200
-const MAX_RAILS := 2600
+const MAX_POSTS := 5800
+const MAX_REFLECTORS := 5800
+const MAX_RAILS := 1800
 
 var _store: Node
 var _posts: MultiMeshInstance3D
@@ -170,7 +173,7 @@ func _append_guardrails(
 			if road_ground - outside_ground < GUARDRAIL_DROP_THRESHOLD:
 				continue
 			var local_ground := TerrainSurface.height(seed, rail_point.x, rail_point.y)
-			var rail_basis := Basis(Vector3.UP, yaw).scaled(Vector3(length + 0.4, 0.34, 0.18))
+			var rail_basis := Basis(Vector3.UP, yaw).scaled(Vector3(length + 0.5, 0.34, 0.18))
 			rails.append(Transform3D(rail_basis, Vector3(rail_point.x, local_ground + 0.76, rail_point.y)))
 
 
