@@ -39,6 +39,7 @@ static func create_initial_city(
 	if map_id != MapDefinition.LEGACY_CITY_MAP_ID:
 		_materialize_existing_region(city)
 		RegionalGrowth.ensure(city)
+		_clear_legacy_corridor_upgrade_hints(city)
 		RegionalHighwayPlanner.ensure(city)
 	return city
 
@@ -51,6 +52,8 @@ static func ensure_city(store: Node) -> void:
 	# not repeated from the per-frame simulation hot path.
 	if _is_regional_city(store.city) and not store.city.has("organic_growth"):
 		RegionalGrowth.ensure(store.city)
+	if _is_regional_city(store.city):
+		_clear_legacy_corridor_upgrade_hints(store.city)
 	if _is_regional_city(store.city) and not store.city.has("highway_planning"):
 		RegionalHighwayPlanner.ensure(store.city)
 
@@ -65,6 +68,11 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 	var changed := CoreRuntime.advance(store, delta_seconds)
 	if _is_regional_city(store.city):
 		changed = _advance_regional_growth(store, delta_seconds) or changed
+		# RegionalGrowth still carries an old compatibility pressure calculator.
+		# Never expose its in-place road-upgrade hints to gameplay: all motorway,
+		# expressway and bypass demand belongs to RegionalHighwayPlanner, which
+		# creates a separate outer alignment and preserves the historic road.
+		_clear_legacy_corridor_upgrade_hints(store.city)
 		changed = RegionalHighwayPlanner.advance(store, delta_seconds) or changed
 	return changed
 
@@ -92,6 +100,18 @@ static func _advance_regional_growth(store: Node, delta_seconds: float) -> bool:
 		else:
 			road["settlementId"] = previous
 	return changed
+
+
+static func _clear_legacy_corridor_upgrade_hints(city: Dictionary) -> void:
+	for road_value in city.get("roads", []):
+		if typeof(road_value) != TYPE_DICTIONARY:
+			continue
+		var road: Dictionary = road_value
+		if str(road.get("regionalRole", "")) not in ["spine", "loop", "external_branch", "city_connector"]:
+			continue
+		road.erase("upgradePressure")
+		road.erase("upgradeRecommendation")
+		road["preserveExistingRoad"] = true
 
 
 static func _materialize_existing_region(city: Dictionary) -> void:
