@@ -18,14 +18,22 @@ const DELINEATOR_CLEARANCE := 4.2
 const GUARDRAIL_SAMPLE_SPACING := 24.0
 const GUARDRAIL_CLEARANCE := 3.2
 const GUARDRAIL_DROP_THRESHOLD := 1.35
+# Sparse regional direction boards break up long road corridors without
+# introducing text-heavy per-node signage or a meaningful draw-call cost.
+const SIGN_SPACING := 720.0
+const SIGN_CLEARANCE := 7.0
 const MAX_POSTS := 5800
 const MAX_REFLECTORS := 5800
 const MAX_RAILS := 1800
+const MAX_SIGN_POSTS := 180
+const MAX_SIGN_PANELS := 180
 
 var _store: Node
 var _posts: MultiMeshInstance3D
 var _reflectors: MultiMeshInstance3D
 var _rails: MultiMeshInstance3D
+var _sign_posts: MultiMeshInstance3D
+var _sign_panels: MultiMeshInstance3D
 var _signature := ""
 
 
@@ -44,6 +52,8 @@ func _create_renderers() -> void:
 	_posts = _new_instance("RoadsideDelineators", 5200.0)
 	_reflectors = _new_instance("RoadsideReflectors", 4200.0)
 	_rails = _new_instance("RoadsideGuardrails", 5200.0)
+	_sign_posts = _new_instance("RoadsideSignPosts", 4500.0)
+	_sign_panels = _new_instance("RoadsideSignPanels", 4500.0)
 
 
 func _new_instance(instance_name: String, visibility_end: float) -> MultiMeshInstance3D:
@@ -95,6 +105,8 @@ func _rebuild(roads: Array, seed: int) -> void:
 	var post_transforms: Array[Transform3D] = []
 	var reflector_transforms: Array[Transform3D] = []
 	var rail_transforms: Array[Transform3D] = []
+	var sign_post_transforms: Array[Transform3D] = []
+	var sign_panel_transforms: Array[Transform3D] = []
 
 	for road_value in roads:
 		if typeof(road_value) != TYPE_DICTIONARY:
@@ -109,10 +121,13 @@ func _rebuild(roads: Array, seed: int) -> void:
 		var half_width := float(ROAD_HALF_WIDTH.get(road_class, 8.0))
 		_append_delineators(points, half_width, seed, post_transforms, reflector_transforms)
 		_append_guardrails(points, half_width, seed, rail_transforms)
+		_append_regional_signs(points, half_width, seed, sign_post_transforms, sign_panel_transforms)
 
 	_apply_multimesh(_posts, _post_mesh(), post_transforms)
 	_apply_multimesh(_reflectors, _reflector_mesh(), reflector_transforms)
 	_apply_multimesh(_rails, _rail_mesh(), rail_transforms)
+	_apply_multimesh(_sign_posts, _sign_post_mesh(), sign_post_transforms)
+	_apply_multimesh(_sign_panels, _sign_panel_mesh(), sign_panel_transforms)
 
 
 func _append_delineators(
@@ -152,7 +167,7 @@ func _append_guardrails(
 ) -> void:
 	var samples := RoadGeometry.resample_polyline(points, GUARDRAIL_SAMPLE_SPACING)
 	for index in range(samples.size() - 1):
-		if rails.size() + 2 > MAX_RAILS:
+		if trails.size() + 2 > MAX_RAILS:
 			return
 		var start: Vector2 = samples[index]
 		var finish: Vector2 = samples[index + 1]
@@ -174,7 +189,36 @@ func _append_guardrails(
 				continue
 			var local_ground := TerrainSurface.height(seed, rail_point.x, rail_point.y)
 			var rail_basis := Basis(Vector3.UP, yaw).scaled(Vector3(length + 0.5, 0.34, 0.18))
-			rails.append(Transform3D(rail_basis, Vector3(rail_point.x, local_ground + 0.76, rail_point.y)))
+			trails.append(Transform3D(rail_basis, Vector3(rail_point.x, local_ground + 0.76, rail_point.y)))
+
+
+func _append_regional_signs(
+	points: Array[Vector2],
+	half_width: float,
+	seed: int,
+	posts: Array[Transform3D],
+	panels: Array[Transform3D]
+) -> void:
+	if posts.size() >= MAX_SIGN_POSTS or panels.size() >= MAX_SIGN_PANELS:
+		return
+	var samples := RoadGeometry.resample_polyline(points, SIGN_SPACING)
+	if samples.size() < 3:
+		return
+	for index in range(1, samples.size() - 1):
+		if posts.size() >= MAX_SIGN_POSTS or panels.size() >= MAX_SIGN_PANELS:
+			return
+		var tangent := (samples[index + 1] - samples[index - 1]).normalized()
+		if tangent.length_squared() <= 0.000001:
+			continue
+		var normal := Vector2(-tangent.y, tangent.x)
+		var side := -1.0 if index % 2 == 0 else 1.0
+		var point := samples[index] + normal * (half_width + SIGN_CLEARANCE) * side
+		var ground := TerrainSurface.height(seed, point.x, point.y)
+		var yaw := -atan2(tangent.y, tangent.x) + PI * 0.5
+		var post_basis := Basis(Vector3.UP, yaw).scaled(Vector3(0.16, 2.45, 0.16))
+		posts.append(Transform3D(post_basis, Vector3(point.x, ground + 1.225, point.y)))
+		var panel_basis := Basis(Vector3.UP, yaw).scaled(Vector3(2.9, 1.35, 0.12))
+		panels.append(Transform3D(panel_basis, Vector3(point.x, ground + 2.65, point.y)))
 
 
 func _eligible_road(road: Dictionary) -> bool:
@@ -225,6 +269,28 @@ func _rail_mesh() -> Mesh:
 	material.albedo_color = Color(0.54, 0.56, 0.54)
 	material.roughness = 0.48
 	material.metallic = 0.72
+	mesh.material = material
+	return mesh
+
+
+func _sign_post_mesh() -> Mesh:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.47, 0.50, 0.49)
+	material.roughness = 0.42
+	material.metallic = 0.78
+	mesh.material = material
+	return mesh
+
+
+func _sign_panel_mesh() -> Mesh:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.08, 0.28, 0.39)
+	material.roughness = 0.38
+	material.metallic = 0.08
 	mesh.material = material
 	return mesh
 
