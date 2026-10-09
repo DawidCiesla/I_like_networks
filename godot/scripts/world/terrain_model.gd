@@ -2,13 +2,19 @@ extends RefCounted
 class_name TerrainModel
 
 const TAU := PI * 2.0
-const GRASSLAND_COLOR := Color(0.235, 0.355, 0.155)
-const MEADOW_COLOR := Color(0.31, 0.455, 0.20)
-const FOREST_COLOR := Color(0.105, 0.225, 0.095)
-const HILLSIDE_COLOR := Color(0.31, 0.305, 0.245)
-const ROCK_COLOR := Color(0.39, 0.385, 0.35)
-const RIPARIAN_COLOR := Color(0.17, 0.35, 0.145)
-const DRY_GRASS_COLOR := Color(0.355, 0.365, 0.19)
+const GRASSLAND_COLOR := Color(0.26, 0.38, 0.22)
+const MEADOW_COLOR := Color(0.34, 0.46, 0.24)
+const FOREST_COLOR := Color(0.18, 0.31, 0.18)
+const HILLSIDE_COLOR := Color(0.31, 0.34, 0.25)
+
+const REGIONAL_GRASSLAND_COLOR := Color(0.235, 0.355, 0.155)
+const REGIONAL_MEADOW_COLOR := Color(0.31, 0.455, 0.20)
+const REGIONAL_FOREST_COLOR := Color(0.105, 0.225, 0.095)
+const REGIONAL_HILLSIDE_COLOR := Color(0.31, 0.305, 0.245)
+const REGIONAL_ROCK_COLOR := Color(0.39, 0.385, 0.35)
+const REGIONAL_RIPARIAN_COLOR := Color(0.17, 0.35, 0.145)
+const REGIONAL_DRY_GRASS_COLOR := Color(0.355, 0.365, 0.19)
+
 const RANDOM_CACHE_CAPACITY := 32768
 
 static var _random_cache_seed := 0
@@ -108,6 +114,81 @@ static func _fbm(
 	return 0.0 if amplitude_total <= 0.0 else value / amplitude_total
 
 
+static func _seed_phase(seed: int, channel: String) -> float:
+	return _random01(seed, "phase:%s" % channel) * TAU
+
+
+# -----------------------------------------------------------------------------
+# Legacy Bus Era terrain. These functions intentionally retain the exact
+# historical algorithm because old saves and regression tests depend on it.
+# -----------------------------------------------------------------------------
+static func height(seed: int, x: float, z: float) -> float:
+	var broad := _fbm(seed, x, z, 1050.0, 4, "height-broad")
+	var detail := _fbm(seed, x, z, 340.0, 3, "height-detail")
+	var ridge := sin(x * 0.00125 + z * 0.00072 + _seed_phase(seed, "ridge"))
+	return broad * 36.0 + detail * 9.0 + ridge * 5.0
+
+
+static func slope_degrees(seed: int, x: float, z: float, sample_distance: float = 12.0) -> float:
+	var left := height(seed, x - sample_distance, z)
+	var right := height(seed, x + sample_distance, z)
+	var back := height(seed, x, z - sample_distance)
+	var front := height(seed, x, z + sample_distance)
+	var dx := (right - left) / (sample_distance * 2.0)
+	var dz := (front - back) / (sample_distance * 2.0)
+	return rad_to_deg(atan(sqrt(dx * dx + dz * dz)))
+
+
+static func moisture(seed: int, x: float, z: float) -> float:
+	return _fbm(seed, x + 791.0, z - 433.0, 720.0, 4, "moisture") * 0.5 + 0.5
+
+
+static func forest_potential(seed: int, x: float, z: float) -> float:
+	var wet := moisture(seed, x, z)
+	var slope := slope_degrees(seed, x, z)
+	return _forest_score(seed, x, z, wet, slope)
+
+
+static func _forest_score(seed: int, x: float, z: float, wet: float, slope: float) -> float:
+	var noise := _fbm(seed, x - 311.0, z + 907.0, 610.0, 4, "forest") * 0.5 + 0.5
+	var slope_bonus: float = minf(0.18, slope / 90.0)
+	return clamp(noise * 0.68 + wet * 0.32 + slope_bonus, 0.0, 1.0)
+
+
+static func biome(seed: int, x: float, z: float) -> String:
+	var slope := slope_degrees(seed, x, z)
+	var wet := moisture(seed, x, z)
+	var forest := _forest_score(seed, x, z, wet, slope)
+	if slope >= 18.0:
+		return "hillside"
+	if forest >= 0.61:
+		return "forest"
+	if wet >= 0.64:
+		return "meadow"
+	return "grassland"
+
+
+static func terrain_color(seed: int, x: float, z: float) -> Color:
+	var slope := slope_degrees(seed, x, z)
+	var wet := moisture(seed, x, z)
+	var forest := _forest_score(seed, x, z, wet, slope)
+	var hillside_weight := _transition_weight(slope, 10.0, 24.0)
+	var forest_weight := _transition_weight(forest, 0.45, 0.76) * (1.0 - hillside_weight * 0.8)
+	var meadow_weight := _transition_weight(wet, 0.52, 0.76) * (1.0 - forest_weight)
+	var color := GRASSLAND_COLOR.lerp(MEADOW_COLOR, meadow_weight)
+	color = color.lerp(FOREST_COLOR, forest_weight)
+	color = color.lerp(HILLSIDE_COLOR, hillside_weight)
+	var surface_tint := _lattice_value(seed, x, z, 260.0, "terrain-tint") * 0.018
+	color.r += surface_tint
+	color.g += surface_tint * 0.92
+	color.b += surface_tint * 0.68
+	return color
+
+
+# -----------------------------------------------------------------------------
+# Regional sandbox terrain. This profile is free to evolve independently from
+# the old Bus Era world and is tuned for the 24 x 24 km procedural region.
+# -----------------------------------------------------------------------------
 static func _ridged_fbm(
 	seed: int,
 	x: float,
@@ -137,13 +218,6 @@ static func _ridged_fbm(
 	return 0.0 if amplitude_total <= 0.0 else value / amplitude_total
 
 
-static func _seed_phase(seed: int, channel: String) -> float:
-	return _random01(seed, "phase:%s" % channel) * TAU
-
-
-## Deterministic drainage skeleton shared by terrain carving, moisture and water.
-## It deliberately exposes broad floodplain masks in addition to narrow channel
-## masks, so rivers influence the landscape before any water mesh is rendered.
 static func river_profile(seed: int, x: float, z: float) -> Dictionary:
 	var warp_scale := 3400.0
 	var warp_strength := 520.0
@@ -168,12 +242,9 @@ static func river_profile(seed: int, x: float, z: float) -> Dictionary:
 	var minor := 1.0 - _transition_weight(minor_distance, minor_width * 0.55, minor_width * 1.60)
 	var minor_floodplain := 1.0 - _transition_weight(minor_distance, minor_width * 1.20, minor_width * 4.2)
 
-	# Tributaries become less dominant far from broader wet corridors. This keeps
-	# the region readable while still yielding different river sizes.
 	var tributary_gate := 0.58 + major_floodplain * 0.42
 	minor *= tributary_gate
 	minor_floodplain *= tributary_gate
-
 	return {
 		"major": clampf(major, 0.0, 1.0),
 		"minor": clampf(minor, 0.0, 1.0),
@@ -184,101 +255,80 @@ static func river_profile(seed: int, x: float, z: float) -> Dictionary:
 	}
 
 
-static func height(seed: int, x: float, z: float) -> float:
-	# Domain warp breaks up the obvious grid/fBm look and creates broad landscape
-	# regions before smaller hills are layered on top.
-	var macro_warp_x := _fbm(seed, x + 711.0, z - 509.0, 7200.0, 3, "height-warp-x") * 1050.0
-	var macro_warp_z := _fbm(seed, x - 381.0, z + 923.0, 7200.0, 3, "height-warp-z") * 1050.0
+static func regional_height(seed: int, x: float, z: float) -> float:
+	var macro_warp_x := _fbm(seed, x + 711.0, z - 509.0, 7200.0, 3, "height-regional-warp-x") * 1050.0
+	var macro_warp_z := _fbm(seed, x - 381.0, z + 923.0, 7200.0, 3, "height-regional-warp-z") * 1050.0
 	var wx := x + macro_warp_x
 	var wz := z + macro_warp_z
-
-	var continental := _fbm(seed, wx, wz, 6800.0, 5, "height-continental")
-	var rolling := _fbm(seed, wx + 970.0, wz - 430.0, 2350.0, 5, "height-rolling")
-	var ridge_field := _ridged_fbm(seed, wx - 1200.0, wz + 620.0, 3200.0, 4, "height-ridges")
+	var continental := _fbm(seed, wx, wz, 6800.0, 5, "height-regional-continental")
+	var rolling := _fbm(seed, wx + 970.0, wz - 430.0, 2350.0, 5, "height-regional-rolling")
+	var ridge_field := _ridged_fbm(seed, wx - 1200.0, wz + 620.0, 3200.0, 4, "height-regional-ridges")
 	var highland_mask := _transition_weight(continental, -0.05, 0.48)
-	var detail := _fbm(seed, x, z, 620.0, 4, "height-detail")
-	var micro := _fbm(seed, x + 97.0, z - 181.0, 185.0, 2, "height-micro")
-
-	var relief := continental * 58.0
-	relief += rolling * 29.0
-	relief += (ridge_field - 0.47) * 33.0 * highland_mask
-	relief += detail * 6.5
-	relief += micro * 1.4
-
+	var detail := _fbm(seed, x, z, 620.0, 4, "height-regional-detail")
+	var micro := _fbm(seed, x + 97.0, z - 181.0, 185.0, 2, "height-regional-micro")
 	var rivers := river_profile(seed, x, z)
-	var major := float(rivers["major"])
-	var minor := float(rivers["minor"])
 	var floodplain := maxf(float(rivers["major_floodplain"]), float(rivers["minor_floodplain"]) * 0.58)
-	# Broad valleys are gently flattened and the actual channel is carved below
-	# them. This gives roads/settlements realistic lowland corridors to follow.
-	var valley_detail_damping := lerpf(1.0, 0.62, floodplain)
 	var broad_relief := continental * 58.0 + rolling * 29.0 + (ridge_field - 0.47) * 33.0 * highland_mask
-	var fine_relief := detail * 6.5 + micro * 1.4
-	relief = broad_relief + fine_relief * valley_detail_damping
-	relief -= major * lerpf(4.0, 10.0, float(rivers["major_size"]))
-	relief -= minor * lerpf(1.2, 3.8, float(rivers["minor_size"]))
+	var fine_relief := (detail * 6.5 + micro * 1.4) * lerpf(1.0, 0.62, floodplain)
+	var relief := broad_relief + fine_relief
+	relief -= float(rivers["major"]) * lerpf(4.0, 10.0, float(rivers["major_size"]))
+	relief -= float(rivers["minor"]) * lerpf(1.2, 3.8, float(rivers["minor_size"]))
 	return relief
 
 
-static func slope_degrees(seed: int, x: float, z: float, sample_distance: float = 12.0) -> float:
-	var left := height(seed, x - sample_distance, z)
-	var right := height(seed, x + sample_distance, z)
-	var back := height(seed, x, z - sample_distance)
-	var front := height(seed, x, z + sample_distance)
+static func regional_slope_degrees(seed: int, x: float, z: float, sample_distance: float = 12.0) -> float:
+	var left := regional_height(seed, x - sample_distance, z)
+	var right := regional_height(seed, x + sample_distance, z)
+	var back := regional_height(seed, x, z - sample_distance)
+	var front := regional_height(seed, x, z + sample_distance)
 	var dx := (right - left) / (sample_distance * 2.0)
 	var dz := (front - back) / (sample_distance * 2.0)
 	return rad_to_deg(atan(sqrt(dx * dx + dz * dz)))
 
 
-static func moisture(seed: int, x: float, z: float) -> float:
-	var broad := _fbm(seed, x + 791.0, z - 433.0, 1600.0, 4, "moisture-broad") * 0.5 + 0.5
-	var local := _fbm(seed, x - 233.0, z + 619.0, 540.0, 3, "moisture-local") * 0.5 + 0.5
+static func regional_moisture(seed: int, x: float, z: float) -> float:
+	var broad := _fbm(seed, x + 791.0, z - 433.0, 1600.0, 4, "moisture-regional-broad") * 0.5 + 0.5
+	var local := _fbm(seed, x - 233.0, z + 619.0, 540.0, 3, "moisture-regional-local") * 0.5 + 0.5
 	var rivers := river_profile(seed, x, z)
 	var riparian := maxf(float(rivers["major_floodplain"]), float(rivers["minor_floodplain"]) * 0.72)
 	return clampf(broad * 0.66 + local * 0.22 + riparian * 0.20, 0.0, 1.0)
 
 
-static func forest_potential(seed: int, x: float, z: float) -> float:
-	var wet := moisture(seed, x, z)
-	var slope := slope_degrees(seed, x, z)
-	return _forest_score(seed, x, z, wet, slope)
+static func regional_forest_potential(seed: int, x: float, z: float) -> float:
+	var wet := regional_moisture(seed, x, z)
+	var slope := regional_slope_degrees(seed, x, z)
+	return regional_forest_score(seed, x, z, wet, slope)
 
 
-static func _forest_score(seed: int, x: float, z: float, wet: float, slope: float) -> float:
-	var broad := _fbm(seed, x - 311.0, z + 907.0, 1250.0, 4, "forest-broad") * 0.5 + 0.5
-	var local := _fbm(seed, x + 121.0, z - 277.0, 380.0, 3, "forest-local") * 0.5 + 0.5
+static func regional_forest_score(seed: int, x: float, z: float, wet: float, slope: float) -> float:
+	var broad := _fbm(seed, x - 311.0, z + 907.0, 1250.0, 4, "forest-regional-broad") * 0.5 + 0.5
+	var local := _fbm(seed, x + 121.0, z - 277.0, 380.0, 3, "forest-regional-local") * 0.5 + 0.5
 	var rivers := river_profile(seed, x, z)
 	var riparian := maxf(float(rivers["major_floodplain"]), float(rivers["minor_floodplain"]) * 0.8)
 	var slope_bonus := minf(0.12, slope / 130.0)
 	var steep_penalty := _transition_weight(slope, 27.0, 42.0) * 0.55
 	return clampf(
-		broad * 0.50
-		+ local * 0.18
-		+ wet * 0.25
-		+ riparian * 0.17
-		+ slope_bonus
-		- steep_penalty,
+		broad * 0.50 + local * 0.18 + wet * 0.25 + riparian * 0.17 + slope_bonus - steep_penalty,
 		0.0,
 		1.0
 	)
 
 
-static func ground_cover_potential(seed: int, x: float, z: float) -> float:
-	var wet := moisture(seed, x, z)
-	var slope := slope_degrees(seed, x, z)
-	var forest := _forest_score(seed, x, z, wet, slope)
-	var patch := _fbm(seed, x + 517.0, z - 733.0, 420.0, 3, "ground-cover") * 0.5 + 0.5
+static func regional_ground_cover_potential(seed: int, x: float, z: float) -> float:
+	var wet := regional_moisture(seed, x, z)
+	var slope := regional_slope_degrees(seed, x, z)
+	var forest := regional_forest_score(seed, x, z, wet, slope)
+	var patch := _fbm(seed, x + 517.0, z - 733.0, 420.0, 3, "ground-cover-regional") * 0.5 + 0.5
 	var moisture_preference := 1.0 - absf(wet - 0.57) * 1.25
 	var slope_factor := 1.0 - _transition_weight(slope, 15.0, 30.0)
 	var forest_opening := 1.0 - _transition_weight(forest, 0.62, 0.86) * 0.72
 	return clampf((0.28 + patch * 0.42 + moisture_preference * 0.30) * slope_factor * forest_opening, 0.0, 1.0)
 
 
-static func biome(seed: int, x: float, z: float) -> String:
-	var slope := slope_degrees(seed, x, z)
-	var wet := moisture(seed, x, z)
-	var forest := _forest_score(seed, x, z, wet, slope)
-
+static func regional_biome(seed: int, x: float, z: float) -> String:
+	var slope := regional_slope_degrees(seed, x, z)
+	var wet := regional_moisture(seed, x, z)
+	var forest := regional_forest_score(seed, x, z, wet, slope)
 	if slope >= 20.0:
 		return "hillside"
 	if forest >= 0.62:
@@ -288,30 +338,27 @@ static func biome(seed: int, x: float, z: float) -> String:
 	return "grassland"
 
 
-static func terrain_color(seed: int, x: float, z: float) -> Color:
-	var elevation := height(seed, x, z)
-	var slope := slope_degrees(seed, x, z)
-	var wet := moisture(seed, x, z)
-	var forest := _forest_score(seed, x, z, wet, slope)
+static func regional_terrain_color(seed: int, x: float, z: float) -> Color:
+	var elevation := regional_height(seed, x, z)
+	var slope := regional_slope_degrees(seed, x, z)
+	var wet := regional_moisture(seed, x, z)
+	var forest := regional_forest_score(seed, x, z, wet, slope)
 	var rivers := river_profile(seed, x, z)
 	var riparian := maxf(float(rivers["major_floodplain"]), float(rivers["minor_floodplain"]) * 0.72)
-
 	var hillside_weight := _transition_weight(slope, 10.0, 25.0)
 	var rock_weight := _transition_weight(slope, 24.0, 39.0) * _transition_weight(elevation, 18.0, 95.0)
 	var forest_weight := _transition_weight(forest, 0.43, 0.78) * (1.0 - rock_weight * 0.85)
 	var meadow_weight := _transition_weight(wet, 0.49, 0.74) * (1.0 - forest_weight)
 	var dry_weight := _transition_weight(0.43 - wet, 0.02, 0.30) * (1.0 - forest_weight)
 	var riparian_weight := riparian * (1.0 - rock_weight) * 0.58
-
-	var color := GRASSLAND_COLOR.lerp(MEADOW_COLOR, meadow_weight)
-	color = color.lerp(DRY_GRASS_COLOR, dry_weight * 0.62)
-	color = color.lerp(FOREST_COLOR, forest_weight)
-	color = color.lerp(RIPARIAN_COLOR, riparian_weight)
-	color = color.lerp(HILLSIDE_COLOR, hillside_weight * 0.58)
-	color = color.lerp(ROCK_COLOR, rock_weight)
-
-	var macro_tint := _lattice_value(seed, x, z, 720.0, "terrain-macro-tint") * 0.028
-	var local_tint := _lattice_value(seed, x, z, 170.0, "terrain-local-tint") * 0.016
+	var color := REGIONAL_GRASSLAND_COLOR.lerp(REGIONAL_MEADOW_COLOR, meadow_weight)
+	color = color.lerp(REGIONAL_DRY_GRASS_COLOR, dry_weight * 0.62)
+	color = color.lerp(REGIONAL_FOREST_COLOR, forest_weight)
+	color = color.lerp(REGIONAL_RIPARIAN_COLOR, riparian_weight)
+	color = color.lerp(REGIONAL_HILLSIDE_COLOR, hillside_weight * 0.58)
+	color = color.lerp(REGIONAL_ROCK_COLOR, rock_weight)
+	var macro_tint := _lattice_value(seed, x, z, 720.0, "terrain-regional-macro-tint") * 0.028
+	var local_tint := _lattice_value(seed, x, z, 170.0, "terrain-regional-local-tint") * 0.016
 	var tint := macro_tint + local_tint
 	color.r += tint * 0.88
 	color.g += tint
