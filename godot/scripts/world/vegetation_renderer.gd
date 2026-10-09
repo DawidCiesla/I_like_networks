@@ -12,6 +12,8 @@ const TREE_MODEL_SCALE := {
 	"small": 20.0,
 	"large": 28.0,
 }
+const REGIONAL_TREE_GRID_DIVISOR := 228.0
+const REGIONAL_MIN_SPACING := 82.0
 
 @export var spacing := 78.0
 @export var margin := 560.0
@@ -36,24 +38,29 @@ func rebuild() -> void:
 	_tree_multimeshes.clear()
 	_tree_model_transforms.clear()
 	var bounds := _world_bounds()
-	var tree_spacing := maxf(spacing, minf(bounds.size.x, bounds.size.y) / 112.0)
+	var regional := _is_regional_map()
+	var tree_spacing := (
+		maxf(REGIONAL_MIN_SPACING, minf(bounds.size.x, bounds.size.y) / REGIONAL_TREE_GRID_DIVISOR)
+		if regional
+		else maxf(spacing, minf(bounds.size.x, bounds.size.y) / 112.0)
+	)
 	var x := bounds.position.x
 	while x <= bounds.end.x:
 		var z := bounds.position.y
 		while z <= bounds.end.y:
-			var jitter_x := (_pseudo(x, z, 1) - 0.5) * tree_spacing * 0.82
-			var jitter_z := (_pseudo(x, z, 2) - 0.5) * tree_spacing * 0.82
+			var jitter_x := (_pseudo(x, z, 1) - 0.5) * tree_spacing * 0.88
+			var jitter_z := (_pseudo(x, z, 2) - 0.5) * tree_spacing * 0.88
 			var px := x + jitter_x
 			var pz := z + jitter_z
 			if _should_place_tree(px, pz):
 				var forest := _forest_potential(px, pz)
-				var large_threshold := lerpf(0.66, 0.44, clampf((forest - 0.52) / 0.38, 0.0, 1.0))
+				var large_threshold := lerpf(0.68, 0.39, clampf((forest - 0.46) / 0.46, 0.0, 1.0))
 				var tree_type := "large" if _pseudo(px, pz, 6) > large_threshold else "small"
 				_tree_data.append({
 					"x": px,
 					"z": pz,
 					"type": tree_type,
-					"scale": 0.72 + _pseudo(px, pz, 4) * 0.68,
+					"scale": (0.62 + _pseudo(px, pz, 4) * 0.94) if regional else (0.72 + _pseudo(px, pz, 4) * 0.68),
 					"rotation": _pseudo(px, pz, 5) * TAU,
 					"ground": TerrainSurface.height(GameStore.city_seed, px, pz),
 				})
@@ -84,7 +91,7 @@ func rebuild() -> void:
 		tree_instances.name = "KenneyTrees%s" % tree_type.capitalize()
 		tree_instances.multimesh = multi
 		tree_instances.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		tree_instances.visibility_range_end = 5200.0
+		tree_instances.visibility_range_end = 6800.0 if regional else 5200.0
 		tree_instances.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		add_child(tree_instances)
 		source_root.free()
@@ -213,13 +220,13 @@ func _forest_potential(x: float, z: float) -> float:
 
 func _should_place_tree(x: float, z: float) -> bool:
 	var forest := _forest_potential(x, z)
-	var threshold := 0.52 if _is_regional_map() else 0.59
+	var threshold := 0.49 if _is_regional_map() else 0.59
 	if forest < threshold:
 		return false
-	var grove_threshold := 0.37 if _is_regional_map() else 0.45
+	var grove_threshold := 0.34 if _is_regional_map() else 0.45
 	if _grove_noise(x, z) < grove_threshold:
 		return false
-	if _pseudo(x, z, 3) < (0.055 if _is_regional_map() else 0.09):
+	if _pseudo(x, z, 3) < (0.035 if _is_regional_map() else 0.09):
 		return false
 	for line_key in ["line1", "line2", "line3", "line4"]:
 		for segment_index in range(Layout.BASE_SEGMENTS[line_key].size()):
@@ -231,7 +238,7 @@ func _should_place_tree(x: float, z: float) -> bool:
 
 
 func _grove_noise(x: float, z: float) -> float:
-	var grove_scale := 620.0 if _is_regional_map() else 430.0
+	var grove_scale := 720.0 if _is_regional_map() else 430.0
 	var grid_x := floori(x / grove_scale)
 	var grid_z := floori(z / grove_scale)
 	var fraction_x := _smoothstep(x / grove_scale - float(grid_x))
