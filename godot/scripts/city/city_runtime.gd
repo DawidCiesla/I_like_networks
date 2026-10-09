@@ -12,7 +12,10 @@ const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const CITY_VERSION := 1
 const MAX_ACTIVE_PROJECTS := 2
 const STEP_SECONDS := 0.2
+# Legacy constants remain public for compatibility with old tools/tests, but
+# the realistic regional profile is advanced by RegionalGrowthSystem only.
 const REGIONAL_GROWTH_INTERVAL_SECONDS := 180.0
+const REGIONAL_ORGANIC_GROWTH_INTERVAL_SECONDS := 300.0
 const MAX_REGIONAL_AUTONOMOUS_BUILDINGS := 36
 const REGIONAL_STARTER_SERVICE_CAPACITY_SHARE := 0.72
 const REGIONAL_TRANSIT_ACCESS_PRIORITY_WEIGHT := 20.0
@@ -65,8 +68,18 @@ static func sync_with_transport(store: Node) -> bool:
 
 static func advance(store: Node, delta_seconds: float) -> bool:
 	ensure_city(store)
+	var regional := _is_regional_city(store.city)
+	# CityRuntimeCore still contains the first-generation regional auto-growth
+	# implementation for save/tool compatibility. Freeze only that accumulator
+	# while Core advances projects/services, then restore it unchanged. This
+	# prevents two independent systems from developing the same parcels.
+	var legacy_growth_state: Dictionary = {}
+	if regional and store.city.has("organic_growth"):
+		legacy_growth_state = _suspend_legacy_regional_growth(store.city)
 	var changed := CoreRuntime.advance(store, delta_seconds)
-	if _is_regional_city(store.city):
+	if not legacy_growth_state.is_empty():
+		_restore_legacy_regional_growth(store.city, legacy_growth_state)
+	if regional:
 		changed = _advance_regional_growth(store, delta_seconds) or changed
 		# RegionalGrowth still carries an old compatibility pressure calculator.
 		# Never expose its in-place road-upgrade hints to gameplay: all motorway,
@@ -75,6 +88,29 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 		_clear_legacy_corridor_upgrade_hints(store.city)
 		changed = RegionalHighwayPlanner.advance(store, delta_seconds) or changed
 	return changed
+
+
+static func _suspend_legacy_regional_growth(city: Dictionary) -> Dictionary:
+	var state := {
+		"had_accumulator": city.has("regional_growth_accumulator_seconds"),
+		"accumulator": city.get("regional_growth_accumulator_seconds", 0.0),
+		"had_count": city.has("regional_auto_growth_count"),
+		"count": city.get("regional_auto_growth_count", 0),
+	}
+	city["regional_growth_accumulator_seconds"] = 0.0
+	city["regional_auto_growth_count"] = MAX_REGIONAL_AUTONOMOUS_BUILDINGS
+	return state
+
+
+static func _restore_legacy_regional_growth(city: Dictionary, state: Dictionary) -> void:
+	if bool(state.get("had_accumulator", false)):
+		city["regional_growth_accumulator_seconds"] = float(state.get("accumulator", 0.0))
+	else:
+		city.erase("regional_growth_accumulator_seconds")
+	if bool(state.get("had_count", false)):
+		city["regional_auto_growth_count"] = int(state.get("count", 0))
+	else:
+		city.erase("regional_auto_growth_count")
 
 
 static func _advance_regional_growth(store: Node, delta_seconds: float) -> bool:
