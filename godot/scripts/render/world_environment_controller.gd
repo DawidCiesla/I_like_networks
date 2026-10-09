@@ -115,6 +115,7 @@ var _fill_light: DirectionalLight3D
 var _world_environment: WorldEnvironment
 var _environment: Environment
 var _sky_material: ProceduralSkyMaterial
+var _environment_properties: Dictionary = {}
 
 
 func _ready() -> void:
@@ -127,17 +128,22 @@ func _ready() -> void:
 	_sky_material = ProceduralSkyMaterial.new()
 	var sky := Sky.new()
 	sky.sky_material = _sky_material
+	if RenderingServer.get_current_rendering_method() == "forward_plus":
+		sky.process_mode = Sky.PROCESS_MODE_REALTIME
 	_environment.background_mode = Environment.BG_SKY
 	_environment.background_sky = sky
 	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	_environment.tonemap_exposure = 1.0
+	_environment.tonemap_exposure = 1.03
 	_environment.fog_enabled = true
 	_environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	_environment.fog_aerial_perspective = 0.28
-	_environment.fog_sky_affect = 0.12
+	_environment.fog_aerial_perspective = 0.34
+	_environment.fog_sky_affect = 0.10
 	_world_environment.environment = _environment
 	add_child(_world_environment)
+	_cache_environment_properties()
+	_configure_high_end_rendering()
+	_configure_directional_lighting()
 	_apply_profile(profile_for_hour(time_of_day_hours))
 
 
@@ -194,6 +200,94 @@ static func profile_for_hour(hour: float) -> Dictionary:
 	}
 
 
+func _configure_high_end_rendering() -> void:
+	if RenderingServer.get_current_rendering_method() != "forward_plus":
+		return
+	_set_environment_property("ssao_enabled", true)
+	_set_environment_property("ssao_radius", 3.25)
+	_set_environment_property("ssao_intensity", 2.1)
+	_set_environment_property("ssao_power", 1.35)
+	_set_environment_property("ssao_detail", 0.72)
+	_set_environment_property("ssao_horizon", 0.05)
+	_set_environment_property("ssao_sharpness", 0.92)
+	_set_environment_property("ssao_light_affect", 0.08)
+	_set_environment_property("ssao_ao_channel_affect", 0.75)
+
+	_set_environment_property("ssil_enabled", true)
+	_set_environment_property("ssil_radius", 4.5)
+	_set_environment_property("ssil_intensity", 0.82)
+	_set_environment_property("ssil_sharpness", 0.88)
+	_set_environment_property("ssil_normal_rejection", 1.15)
+
+	_set_environment_property("sdfgi_enabled", true)
+	_set_environment_property("sdfgi_cascades", 4)
+	_set_environment_property("sdfgi_min_cell_size", 3.0)
+	_set_environment_property("sdfgi_use_occlusion", true)
+	_set_environment_property("sdfgi_bounce_feedback", 0.48)
+	_set_environment_property("sdfgi_read_sky_light", true)
+	_set_environment_property("sdfgi_energy", 0.82)
+	_set_environment_property("sdfgi_normal_bias", 1.0)
+	_set_environment_property("sdfgi_probe_bias", 1.1)
+
+	_set_environment_property("glow_enabled", true)
+	_set_environment_property("glow_intensity", 0.055)
+	_set_environment_property("glow_strength", 0.32)
+	_set_environment_property("glow_bloom", 0.02)
+
+	_set_environment_property("volumetric_fog_enabled", true)
+	_set_environment_property("volumetric_fog_density", 0.0065)
+	_set_environment_property("volumetric_fog_albedo", Color(0.91, 0.94, 0.96))
+	_set_environment_property("volumetric_fog_emission", Color(0.0, 0.0, 0.0))
+	_set_environment_property("volumetric_fog_emission_energy", 0.0)
+	_set_environment_property("volumetric_fog_anisotropy", 0.42)
+	_set_environment_property("volumetric_fog_length", 4200.0)
+	_set_environment_property("volumetric_fog_detail_spread", 1.9)
+	_set_environment_property("volumetric_fog_gi_inject", 0.75)
+	_set_environment_property("volumetric_fog_ambient_inject", 0.55)
+	_set_environment_property("volumetric_fog_sky_affect", 0.12)
+
+	_set_environment_property("ssr_enabled", true)
+	_set_environment_property("ssr_max_steps", 96)
+	_set_environment_property("ssr_fade_in", 0.12)
+	_set_environment_property("ssr_fade_out", 1.7)
+	_set_environment_property("ssr_depth_tolerance", 0.18)
+	_set_environment_property("tonemap_white", 1.15)
+	_set_environment_property("fog_sun_scatter", 0.18)
+	_set_environment_property("fog_height", 18.0)
+	_set_environment_property("fog_height_density", 0.065)
+
+
+func _configure_directional_lighting() -> void:
+	if not is_instance_valid(_sun):
+		return
+	_sun.shadow_enabled = true
+	_sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	_sun.directional_shadow_max_distance = 6200.0
+	_sun.directional_shadow_split_1 = 0.075
+	_sun.directional_shadow_split_2 = 0.20
+	_sun.directional_shadow_split_3 = 0.46
+	_sun.directional_shadow_blend_splits = true
+	_sun.directional_shadow_fade_start = 0.88
+	_sun.directional_shadow_pancake_size = 28.0
+	_sun.shadow_normal_bias = 1.25
+	_sun.shadow_bias = 0.05
+	_sun.shadow_blur = 1.25
+
+
+func _cache_environment_properties() -> void:
+	_environment_properties.clear()
+	if not is_instance_valid(_environment):
+		return
+	for property_data in _environment.get_property_list():
+		_environment_properties[str(property_data.get("name", ""))] = true
+
+
+func _set_environment_property(property_name: String, value: Variant) -> void:
+	if not _environment_properties.has(property_name):
+		return
+	_environment.set(property_name, value)
+
+
 func _apply_profile(profile: Dictionary) -> void:
 	var sun_color: Color = profile["sun_color"]
 	var fill_color: Color = profile["fill_color"]
@@ -214,6 +308,10 @@ func _apply_profile(profile: Dictionary) -> void:
 	_environment.ambient_light_energy = float(profile["ambient_energy"])
 	_environment.fog_light_color = profile["fog_color"]
 	_environment.fog_density = float(profile["fog_density"])
+	if RenderingServer.get_current_rendering_method() == "forward_plus":
+		var fog_color: Color = profile["fog_color"]
+		_set_environment_property("volumetric_fog_albedo", fog_color.lerp(Color.WHITE, 0.38))
+		_set_environment_property("volumetric_fog_density", 0.0048 + float(profile["fog_density"]) * 7.5)
 
 
 static func _normalize_hour(hour: float) -> float:
