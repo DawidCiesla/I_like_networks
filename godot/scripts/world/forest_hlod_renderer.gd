@@ -5,10 +5,13 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const ForestHlodShader = preload("res://scripts/world/forest_hlod.gdshader")
 
-const GRID_SPACING := 220.0
+# Far forest is a massing layer, not another tree-by-tree population. A coarse
+# grid keeps regional startup affordable while larger crowns preserve a solid
+# wooded silhouette beyond the full-detail Kenney tree range.
+const GRID_SPACING := 340.0
 const VISIBILITY_BEGIN := 4700.0
 const VISIBILITY_END := 22000.0
-const MAX_INSTANCES := 6200
+const MAX_INSTANCES := 3800
 
 var _store: Node
 var _instance: MultiMeshInstance3D
@@ -49,17 +52,17 @@ func rebuild() -> void:
 	while x < bounds.end.x and transforms.size() < MAX_INSTANCES:
 		var z := bounds.position.y + GRID_SPACING * 0.5
 		while z < bounds.end.y and transforms.size() < MAX_INSTANCES:
-			var jitter_x := (_pseudo(x, z, 1, seed) - 0.5) * GRID_SPACING * 0.72
-			var jitter_z := (_pseudo(x, z, 2, seed) - 0.5) * GRID_SPACING * 0.72
+			var jitter_x := (_pseudo(x, z, 1, seed) - 0.5) * GRID_SPACING * 0.68
+			var jitter_z := (_pseudo(x, z, 2, seed) - 0.5) * GRID_SPACING * 0.68
 			var px := x + jitter_x
 			var pz := z + jitter_z
 			var forest := Terrain.regional_forest_potential(seed, px, pz)
 			var accept := _pseudo(px, pz, 3, seed)
-			var probability := clampf((forest - 0.50) * 2.15, 0.0, 0.95)
-			if forest >= 0.52 and accept < probability:
+			var probability := clampf((forest - 0.47) * 2.35, 0.0, 0.96)
+			if forest >= 0.50 and accept < probability:
 				var ground := TerrainSurface.height(seed, px, pz)
-				var width := lerpf(24.0, 52.0, forest) * lerpf(0.80, 1.25, _pseudo(px, pz, 4, seed))
-				var height := lerpf(30.0, 64.0, forest) * lerpf(0.82, 1.18, _pseudo(px, pz, 5, seed))
+				var width := lerpf(42.0, 86.0, forest) * lerpf(0.82, 1.22, _pseudo(px, pz, 4, seed))
+				var height := lerpf(34.0, 70.0, forest) * lerpf(0.84, 1.16, _pseudo(px, pz, 5, seed))
 				var basis := Basis(Vector3.UP, _pseudo(px, pz, 6, seed) * TAU).scaled(Vector3(width, height, width))
 				transforms.append(Transform3D(basis, Vector3(px, ground + height * 0.5, pz)))
 				custom_data.append(_forest_color(forest, px, pz, seed))
