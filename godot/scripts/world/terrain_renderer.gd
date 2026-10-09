@@ -55,21 +55,31 @@ func _build_mesh(rect: Rect2, seed: int) -> ArrayMesh:
 	var steps := TerrainSurface.grid_steps(rect)
 	var x_steps := steps.x
 	var z_steps := steps.y
+	var stride := x_steps + 1
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 
+	# The old mesh emitted six fully sampled vertices per cell. This indexed grid
+	# samples each world vertex once, which matters when the 24 km regional terrain
+	# uses multi-scale biome/hydrology noise.
+	for z_index in range(z_steps + 1):
+		var world_z := rect.position.y + rect.size.y * float(z_index) / float(z_steps)
+		for x_index in range(x_steps + 1):
+			var world_x := rect.position.x + rect.size.x * float(x_index) / float(x_steps)
+			_add_vertex(tool, world_x, world_z, seed)
+
 	for z_index in range(z_steps):
 		for x_index in range(x_steps):
-			var x0 := rect.position.x + rect.size.x * float(x_index) / float(x_steps)
-			var x1 := rect.position.x + rect.size.x * float(x_index + 1) / float(x_steps)
-			var z0 := rect.position.y + rect.size.y * float(z_index) / float(z_steps)
-			var z1 := rect.position.y + rect.size.y * float(z_index + 1) / float(z_steps)
-			_add_vertex(tool, x0, z0, seed)
-			_add_vertex(tool, x1, z0, seed)
-			_add_vertex(tool, x1, z1, seed)
-			_add_vertex(tool, x0, z0, seed)
-			_add_vertex(tool, x1, z1, seed)
-			_add_vertex(tool, x0, z1, seed)
+			var top_left := z_index * stride + x_index
+			var top_right := top_left + 1
+			var bottom_left := top_left + stride
+			var bottom_right := bottom_left + 1
+			tool.add_index(top_left)
+			tool.add_index(top_right)
+			tool.add_index(bottom_right)
+			tool.add_index(top_left)
+			tool.add_index(bottom_right)
+			tool.add_index(bottom_left)
 
 	tool.generate_normals()
 	var result := tool.commit()
