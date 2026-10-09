@@ -17,13 +17,20 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	var game_store := root.get_node_or_null("GameStore")
+	_expect(game_store != null, "GameStore autoload is available to renderer runtime tests")
+	if game_store == null:
+		push_error("REGIONAL VISUAL RENDERERS TEST: FAIL (GameStore unavailable)")
+		quit(1)
+		return
+
 	var previous_map := MapDefinition.active_definition()
-	var previous_suppress := bool(GameStore.suppress_persistence)
-	GameStore.suppress_persistence = true
+	var previous_suppress := bool(game_store.get("suppress_persistence"))
+	game_store.set("suppress_persistence", true)
 	var seed := 731945
 	MapDefinition.set_active(MapDefinition.create(MapDefinition.DEFAULT_MAP_ID, seed))
-	GameStore.city_seed = seed
-	GameStore.reset_state(false)
+	game_store.set("city_seed", seed)
+	game_store.call("reset_state", false)
 
 	var root_3d := Node3D.new()
 	root_3d.name = "RegionalVisualRendererTestRoot"
@@ -72,7 +79,9 @@ func _run() -> void:
 
 	_expect(shoulders.get_child_count() > 0, "regional roads produce blended shoulder meshes")
 
-	var bridge_count := _bridge_crossing_count(GameStore.city)
+	var city_value: Variant = game_store.get("city")
+	var city: Dictionary = city_value if typeof(city_value) == TYPE_DICTIONARY else {}
+	var bridge_count := _bridge_crossing_count(city)
 	var girders := bridges.get_node_or_null("BridgeGirders") as MultiMeshInstance3D
 	var abutments := bridges.get_node_or_null("BridgeAbutments") as MultiMeshInstance3D
 	_expect(girders != null and abutments != null, "bridge detail renderer creates structural MultiMeshes")
@@ -88,7 +97,7 @@ func _run() -> void:
 	root_3d.queue_free()
 	await process_frame
 	MapDefinition.set_active(previous_map)
-	GameStore.suppress_persistence = previous_suppress
+	game_store.set("suppress_persistence", previous_suppress)
 
 	if _failures == 0:
 		print("REGIONAL VISUAL RENDERERS TEST: PASS")
