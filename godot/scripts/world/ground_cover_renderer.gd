@@ -60,11 +60,15 @@ func _mark_dirty() -> void:
 func _rebuild(anchor: Vector2) -> void:
 	_dirty = false
 	_last_anchor = anchor
-	var mesh := _grass_mesh()
+	var mesh: ArrayMesh = _grass_mesh()
 	var transforms: Array[Transform3D] = []
 	var custom_data: Array[Color] = []
-	var roads := _active_roads()
-	var settlements := GameStore.city.get("regional_settlements", []) if not GameStore.city.is_empty() else []
+	var roads: Array = _active_roads()
+	var settlements: Array = []
+	if not GameStore.city.is_empty():
+		var settlement_value: Variant = GameStore.city.get("regional_settlements", [])
+		if typeof(settlement_value) == TYPE_ARRAY:
+			settlements = settlement_value
 	var snapped := Vector2(
 		round(anchor.x / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS,
 		round(anchor.y / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS
