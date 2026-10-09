@@ -15,6 +15,7 @@ const SETTLEMENT_CORE_FACTOR := 0.56
 const MAX_INSTANCES := 5200
 
 var _instance: MultiMeshInstance3D
+var _store: Node
 var _last_anchor := Vector2(INF, INF)
 var _dirty := true
 var _elapsed := 0.0
@@ -25,16 +26,20 @@ func _ready() -> void:
 	_instance.name = "ProceduralGrass"
 	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	add_child(_instance)
-	var store := get_node_or_null("/root/GameStore")
-	if store != null:
-		if store.has_signal("city_changed"):
-			store.city_changed.connect(_mark_dirty)
-		if store.has_signal("terrain_changed"):
-			store.terrain_changed.connect(_mark_dirty)
+	_store = get_node_or_null("/root/GameStore")
+	if _store != null:
+		if _store.has_signal("city_changed"):
+			_store.connect("city_changed", _mark_dirty)
+		if _store.has_signal("terrain_changed"):
+			_store.connect("terrain_changed", _mark_dirty)
 	_mark_dirty()
 
 
 func _process(delta: float) -> void:
+	if _store == null:
+		_store = get_node_or_null("/root/GameStore")
+		if _store == null:
+			return
 	_elapsed += delta
 	if _elapsed < 0.28:
 		return
@@ -43,7 +48,8 @@ func _process(delta: float) -> void:
 	if camera == null:
 		return
 	var ground_xz := Vector2(camera.global_position.x, camera.global_position.z)
-	var ground_height := TerrainSurface.height(GameStore.city_seed, ground_xz.x, ground_xz.y)
+	var seed := _city_seed()
+	var ground_height := TerrainSurface.height(seed, ground_xz.x, ground_xz.y)
 	var camera_height := camera.global_position.y - ground_height
 	if camera_height > MAX_CAMERA_HEIGHT_METERS:
 		_instance.visible = false
@@ -64,11 +70,12 @@ func _rebuild(anchor: Vector2) -> void:
 	var transforms: Array[Transform3D] = []
 	var custom_data: Array[Color] = []
 	var roads: Array = _active_roads()
+	var city := _city_state()
 	var settlements: Array = []
-	if not GameStore.city.is_empty():
-		var settlement_value: Variant = GameStore.city.get("regional_settlements", [])
-		if typeof(settlement_value) == TYPE_ARRAY:
-			settlements = settlement_value
+	var settlement_value: Variant = city.get("regional_settlements", [])
+	if typeof(settlement_value) == TYPE_ARRAY:
+		settlements = settlement_value
+	var seed := _city_seed()
 	var snapped := Vector2(
 		round(anchor.x / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS,
 		round(anchor.y / SAMPLE_SPACING_METERS) * SAMPLE_SPACING_METERS
@@ -82,35 +89,35 @@ func _rebuild(anchor: Vector2) -> void:
 			if base.distance_to(anchor) > PATCH_RADIUS_METERS:
 				continue
 			var jitter := Vector2(
-				(_pseudo(base.x, base.y, 1) - 0.5) * SAMPLE_SPACING_METERS * 0.72,
-				(_pseudo(base.x, base.y, 2) - 0.5) * SAMPLE_SPACING_METERS * 0.72
+				(_pseudo(base.x, base.y, 1, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.72,
+				(_pseudo(base.x, base.y, 2, seed) - 0.5) * SAMPLE_SPACING_METERS * 0.72
 			)
 			var point := base + jitter
 			if _inside_settlement_core(point, settlements):
 				continue
 			if _near_any_road(point, roads):
 				continue
-			var terrain_sample := WorldLayers.sample_route_terrain(GameStore.city_seed, point)
+			var terrain_sample := WorldLayers.sample_route_terrain(seed, point)
 			if float(terrain_sample.get("water_depth", 0.0)) > 0.01:
 				continue
 			if float(terrain_sample.get("slope_degrees", 0.0)) > 27.0:
 				continue
-			var potential := Terrain.regional_ground_cover_potential(GameStore.city_seed, point.x, point.y)
+			var potential := Terrain.regional_ground_cover_potential(seed, point.x, point.y)
 			if potential < 0.28:
 				continue
 			var acceptance := clampf((potential - 0.22) * 1.05, 0.0, 0.88)
-			if _pseudo(point.x, point.y, 3) > acceptance:
+			if _pseudo(point.x, point.y, 3, seed) > acceptance:
 				continue
-			var ground := TerrainSurface.height(GameStore.city_seed, point.x, point.y)
-			var rotation := _pseudo(point.x, point.y, 4) * TAU
-			var width_scale := lerpf(0.72, 1.52, _pseudo(point.x, point.y, 5))
-			var height_scale := lerpf(0.48, 1.18, _pseudo(point.x, point.y, 6))
+			var ground := TerrainSurface.height(seed, point.x, point.y)
+			var rotation := _pseudo(point.x, point.y, 4, seed) * TAU
+			var width_scale := lerpf(0.72, 1.52, _pseudo(point.x, point.y, 5, seed))
+			var height_scale := lerpf(0.48, 1.18, _pseudo(point.x, point.y, 6, seed))
 			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(width_scale, height_scale, width_scale))
 			transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.025, point.y)))
-			var moisture := Terrain.regional_moisture(GameStore.city_seed, point.x, point.y)
+			var moisture := Terrain.regional_moisture(seed, point.x, point.y)
 			custom_data.append(Color(
-				_pseudo(point.x, point.y, 7),
-				_pseudo(point.x, point.y, 8),
+				_pseudo(point.x, point.y, 7, seed),
+				_pseudo(point.x, point.y, 8, seed),
 				moisture,
 				1.0
 			))
@@ -151,11 +158,23 @@ static func _grass_mesh() -> ArrayMesh:
 	return result
 
 
+func _city_seed() -> int:
+	return int(_store.get("city_seed")) if _store != null else 0
+
+
+func _city_state() -> Dictionary:
+	if _store == null:
+		return {}
+	var value: Variant = _store.get("city")
+	return value if typeof(value) == TYPE_DICTIONARY else {}
+
+
 func _active_roads() -> Array:
 	var result: Array = []
-	if GameStore.city.is_empty():
+	var city := _city_state()
+	if city.is_empty():
 		return result
-	for road_value in GameStore.city.get("roads", []):
+	for road_value in city.get("roads", []):
 		if typeof(road_value) != TYPE_DICTIONARY:
 			continue
 		var road: Dictionary = road_value
@@ -211,11 +230,11 @@ static func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> floa
 	return point.distance_to(a + ab * t)
 
 
-func _pseudo(x: float, z: float, channel: int) -> float:
+static func _pseudo(x: float, z: float, channel: int, seed: int) -> float:
 	var value := sin(
 		x * 12.9898
 		+ z * 78.233
-		+ float(GameStore.city_seed) * 0.00317
+		+ float(seed) * 0.00317
 		+ float(channel) * 19.19
 	) * 43758.5453
 	return value - floor(value)
