@@ -17,6 +17,7 @@ const MAX_VISUAL_BUILDINGS_PER_SETTLEMENT := 420
 const DEVELOPMENT_RESERVE_MULTIPLIER := 1.20
 const MAX_LOCAL_STREETS_PER_SETTLEMENT := 16
 const MAX_SLOTS_PER_STREET := 18
+const ROAD_INTERSECTION_TOLERANCE_METERS := 0.75
 
 # The region deliberately begins with one clear service centre and a rural
 # constellation around it. The satellites are villages, not additional towns;
@@ -117,14 +118,19 @@ static func _rebuild_local_morphology(plan: Dictionary, seed: int, bounds: Rect2
 	var local_streets: Array[Dictionary] = []
 	var parcels: Array[Dictionary] = []
 	var buildings: Array[Dictionary] = []
+	var occupied_edges: Array[Dictionary] = []
+	occupied_edges.append_array(regional_edges)
 
 	for settlement_value in plan.get("settlements", []):
 		var settlement: Dictionary = settlement_value
-		var morphology := _build_settlement_morphology(seed, bounds, settlement)
+		var morphology := _build_settlement_morphology(seed, bounds, settlement, occupied_edges)
+		var settlement_streets: Array[Dictionary] = []
+		settlement_streets.append_array(morphology.get("streets", []))
 		local_nodes.append_array(morphology.get("nodes", []))
-		local_streets.append_array(morphology.get("streets", []))
+		local_streets.append_array(settlement_streets)
 		parcels.append_array(morphology.get("parcels", []))
 		buildings.append_array(morphology.get("buildings", []))
+		occupied_edges.append_array(settlement_streets)
 
 	graph_nodes.append_array(local_nodes)
 	var all_edges: Array[Dictionary] = regional_edges.duplicate(true)
@@ -137,7 +143,12 @@ static func _rebuild_local_morphology(plan: Dictionary, seed: int, bounds: Rect2
 	plan["building_anchors"] = buildings
 
 
-static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: Dictionary) -> Dictionary:
+static func _build_settlement_morphology(
+	seed: int,
+	bounds: Rect2,
+	settlement: Dictionary,
+	blocking_edges: Array[Dictionary]
+) -> Dictionary:
 	var settlement_id := str(settlement.get("id", "settlement"))
 	var center: Vector2 = settlement.get("position", Vector2.ZERO)
 	var population := maxi(350, int(settlement.get("population", 350)))
@@ -161,13 +172,17 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 		var even_angle := base_angle + TAU * float(street_index) / float(street_count)
 		var jitter := lerpf(-0.16, 0.16, _unit_random(seed, "%s:angle:%d" % [settlement_id, street_index]))
 		var length_factor := lerpf(0.76, 1.02, _unit_random(seed, "%s:length:%d" % [settlement_id, street_index]))
-		var road_points := _best_radial_points(
+		var candidate_blockers: Array[Dictionary] = []
+		candidate_blockers.append_array(blocking_edges)
+		candidate_blockers.append_array(streets)
+		var road_points: Array[Vector2] = _best_radial_points(
 			seed,
 			bounds,
 			center,
 			even_angle + jitter,
 			radius * length_factor,
-			"%s:%d" % [settlement_id, street_index]
+			"%s:%d" % [settlement_id, street_index],
+			candidate_blockers
 		)
 		if road_points.size() < 2:
 			continue
@@ -197,7 +212,8 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 		})
 
 	# An irregular outer loop turns the radial access roads into actual blocks
-	# instead of a pure star. Segments over unsuitable terrain are omitted.
+	# instead of a pure star. Segments over unsuitable terrain or intersecting
+	# existing roads away from graph nodes are omitted.
 	if terminals.size() >= 4:
 		terminals.sort_custom(func(a, b): return float(a.get("angle", 0.0)) < float(b.get("angle", 0.0)))
 		for ring_index in range(terminals.size()):
@@ -211,13 +227,19 @@ static func _build_settlement_morphology(seed: int, bounds: Rect2, settlement: D
 			var ring_mid := midpoint + inward * curve_strength
 			if not _point_is_buildable(seed, ring_mid, 19.0):
 				continue
+			var ring_points: Array[Vector2] = [a, ring_mid, b]
+			var ring_blockers: Array[Dictionary] = []
+			ring_blockers.append_array(blocking_edges)
+			ring_blockers.append_array(streets)
+			if _path_conflicts(ring_points, ring_blockers, [a, b]):
+				continue
 			var ring_id := "local-road-%s-ring-%02d" % [settlement_id, ring_index]
 			streets.append(_make_local_street(
 				ring_id,
 				settlement_id,
 				str(first["node_id"]),
 				str(second["node_id"]),
-				[a, ring_mid, b],
+				ring_points,
 				"ring-%02d" % ring_index,
 				100 + ring_index
 			))
@@ -327,14 +349,15 @@ static func _best_radial_points(
 	center: Vector2,
 	angle: float,
 	length: float,
-	key: String
+	key: String,
+	blocking_edges: Array[Dictionary]
 ) -> Array[Vector2]:
 	var safe_padding := minf(220.0, minf(bounds.size.x, bounds.size.y) * 0.03)
 	var safe_bounds := Rect2(bounds.position + Vector2.ONE * safe_padding, bounds.size - Vector2.ONE * safe_padding * 2.0)
 	var best_points: Array[Vector2] = []
 	var best_score := INF
-	var angle_offsets := [-0.20, -0.10, 0.0, 0.10, 0.20]
-	var length_factors := [0.88, 1.0, 1.10]
+	var angle_offsets := [-0.34, -0.24, -0.14, -0.07, 0.0, 0.07, 0.14, 0.24, 0.34]
+	var length_factors := [0.72, 0.82, 0.92, 1.0, 1.08]
 	for angle_offset_value in angle_offsets:
 		var candidate_angle := angle + float(angle_offset_value)
 		var direction := Vector2(cos(candidate_angle), sin(candidate_angle))
@@ -344,6 +367,9 @@ static func _best_radial_points(
 			var endpoint := _clamp_to_rect(center + direction * candidate_length, safe_bounds)
 			var curve := lerpf(-0.08, 0.08, _unit_random(seed, "%s:curve:%.2f:%.2f" % [key, candidate_angle, candidate_length]))
 			var midpoint := center.lerp(endpoint, 0.52) + side * candidate_length * curve
+			var candidate_points: Array[Vector2] = [center, midpoint, endpoint]
+			if _path_conflicts(candidate_points, blocking_edges, [center]):
+				continue
 			var endpoint_sample := _terrain_sample(seed, endpoint)
 			var midpoint_sample := _terrain_sample(seed, midpoint)
 			var score := _terrain_score(endpoint_sample) + _terrain_score(midpoint_sample) * 0.75
@@ -351,8 +377,101 @@ static func _best_radial_points(
 			score += absf(float(factor_value) - 1.0) * 4.0
 			if score < best_score:
 				best_score = score
-				best_points = [center, midpoint, endpoint]
+				best_points = candidate_points
 	return best_points
+
+
+static func _path_conflicts(
+	candidate: Array[Vector2],
+	blocking_edges: Array[Dictionary],
+	allowed_points: Array[Vector2]
+) -> bool:
+	for edge in blocking_edges:
+		var other_points: Array[Vector2] = _edge_points(edge)
+		if other_points.size() < 2:
+			continue
+		if _paths_cross_away_from_allowed_points(candidate, other_points, allowed_points):
+			return true
+	return false
+
+
+static func _edge_points(edge: Dictionary) -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	for point_value in edge.get("points", []):
+		if point_value is Vector2:
+			result.append(point_value)
+		elif typeof(point_value) == TYPE_DICTIONARY:
+			var point: Dictionary = point_value
+			result.append(Vector2(float(point.get("x", 0.0)), float(point.get("y", 0.0))))
+	return result
+
+
+static func _paths_cross_away_from_allowed_points(
+	first: Array[Vector2],
+	second: Array[Vector2],
+	allowed_points: Array[Vector2]
+) -> bool:
+	for first_index in range(1, first.size()):
+		var first_a: Vector2 = first[first_index - 1]
+		var first_b: Vector2 = first[first_index]
+		for second_index in range(1, second.size()):
+			var second_a: Vector2 = second[second_index - 1]
+			var second_b: Vector2 = second[second_index]
+			var crossings: Array[Vector2] = _segment_intersections(first_a, first_b, second_a, second_b)
+			for crossing in crossings:
+				if _is_allowed_crossing(crossing, allowed_points):
+					continue
+				return true
+	return false
+
+
+static func _is_allowed_crossing(crossing: Vector2, allowed_points: Array[Vector2]) -> bool:
+	for allowed in allowed_points:
+		if crossing.distance_to(allowed) <= ROAD_INTERSECTION_TOLERANCE_METERS:
+			return true
+	return false
+
+
+static func _segment_intersections(a: Vector2, b: Vector2, c: Vector2, d: Vector2) -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	var first_direction := b - a
+	var second_direction := d - c
+	var denominator := first_direction.cross(second_direction)
+	var offset := c - a
+	if absf(denominator) > 0.00001:
+		var t := offset.cross(second_direction) / denominator
+		var u := offset.cross(first_direction) / denominator
+		if t >= -0.00001 and t <= 1.00001 and u >= -0.00001 and u <= 1.00001:
+			result.append(a + first_direction * clampf(t, 0.0, 1.0))
+		return result
+
+	# Parallel non-collinear segments never meet. For collinear roads collect
+	# overlap endpoints as intersection witnesses so accidental shared corridors
+	# are rejected as well as ordinary X crossings.
+	if absf(offset.cross(first_direction)) > 0.001:
+		return result
+	for point in [a, b, c, d]:
+		var candidate: Vector2 = point
+		if _point_on_segment(candidate, a, b) and _point_on_segment(candidate, c, d):
+			var duplicate := false
+			for existing in result:
+				if existing.distance_to(candidate) <= 0.001:
+					duplicate = true
+					break
+			if not duplicate:
+				result.append(candidate)
+	return result
+
+
+static func _point_on_segment(point: Vector2, start: Vector2, finish: Vector2) -> bool:
+	var segment := finish - start
+	var relative := point - start
+	if absf(segment.cross(relative)) > 0.01:
+		return false
+	var dot := relative.dot(segment)
+	if dot < -0.01:
+		return false
+	return dot <= segment.length_squared() + 0.01
 
 
 static func _building_anchor(
