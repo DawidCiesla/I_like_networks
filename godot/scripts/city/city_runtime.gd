@@ -5,6 +5,7 @@ extends RefCounted
 # regional world-generation tuning to the legacy Bus Era lifecycle code.
 const CoreRuntime = preload("res://scripts/city/city_runtime_core.gd")
 const RegionalGrowth = preload("res://scripts/city/regional_growth_system.gd")
+const RegionalHighwayPlanner = preload("res://scripts/city/regional_highway_planner.gd")
 const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 
@@ -38,6 +39,7 @@ static func create_initial_city(
 	if map_id != MapDefinition.LEGACY_CITY_MAP_ID:
 		_materialize_existing_region(city)
 		RegionalGrowth.ensure(city)
+		RegionalHighwayPlanner.ensure(city)
 	return city
 
 
@@ -49,6 +51,8 @@ static func ensure_city(store: Node) -> void:
 	# not repeated from the per-frame simulation hot path.
 	if _is_regional_city(store.city) and not store.city.has("organic_growth"):
 		RegionalGrowth.ensure(store.city)
+	if _is_regional_city(store.city) and not store.city.has("highway_planning"):
+		RegionalHighwayPlanner.ensure(store.city)
 
 
 static func sync_with_transport(store: Node) -> bool:
@@ -61,6 +65,7 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 	var changed := CoreRuntime.advance(store, delta_seconds)
 	if _is_regional_city(store.city):
 		changed = _advance_regional_growth(store, delta_seconds) or changed
+		changed = RegionalHighwayPlanner.advance(store, delta_seconds) or changed
 	return changed
 
 
