@@ -32,6 +32,15 @@ jobs:
           chmod +x /tmp/godot/Godot_v4.7-stable_linux.x86_64
           /tmp/godot/Godot_v4.7-stable_linux.x86_64 --version
 
+      - name: Import Godot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+            --headless \
+            --path godot \
+            --import
+
       - name: Parse project
         shell: bash
         run: |
