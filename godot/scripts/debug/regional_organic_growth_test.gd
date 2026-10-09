@@ -27,12 +27,12 @@ func _init() -> void:
 
 func _test_unserved_region_stays_slow() -> void:
 	var store := _make_store()
-	var roads_before := store.city.get("roads", []).size()
-	var parcels_before := store.city.get("parcels", []).size()
-	var population_before := _total_population(store.city)
+	var roads_before: int = (store.city.get("roads", []) as Array).size()
+	var parcels_before: int = (store.city.get("parcels", []) as Array).size()
+	var population_before: int = _total_population(store.city)
 	RegionalGrowth.advance(store, RegionalGrowth.TICK_SECONDS)
-	_expect(store.city.get("roads", []).size() == roads_before, "an unserved region does not immediately sprawl")
-	_expect(store.city.get("parcels", []).size() == parcels_before, "an unserved region keeps its initial footprint after one tick")
+	_expect((store.city.get("roads", []) as Array).size() == roads_before, "an unserved region does not immediately sprawl")
+	_expect((store.city.get("parcels", []) as Array).size() == parcels_before, "an unserved region keeps its initial footprint after one tick")
 	_expect(_total_population(store.city) == population_before, "baseline growth is deliberately slow without transit")
 	store.free()
 
@@ -41,12 +41,12 @@ func _test_transit_drives_physical_expansion() -> void:
 	var store := _make_store()
 	_add_served_stop_to_hub(store)
 	var hub_id := str(store.city.get("regional_settlements", [])[0].get("id", ""))
-	var roads_before := store.city.get("roads", []).size()
-	var parcels_before := store.city.get("parcels", []).size()
-	var population_before := _settlement_population(store.city, hub_id)
+	var roads_before: int = (store.city.get("roads", []) as Array).size()
+	var parcels_before: int = (store.city.get("parcels", []) as Array).size()
+	var population_before: int = _settlement_population(store.city, hub_id)
 	RegionalGrowth.advance(store, RegionalGrowth.TICK_SECONDS * 2.0)
-	_expect(store.city.get("roads", []).size() > roads_before, "served hub creates a new edge street when historical reserve is tight")
-	_expect(store.city.get("parcels", []).size() > parcels_before, "physical expansion creates new developable lots")
+	_expect((store.city.get("roads", []) as Array).size() > roads_before, "served hub creates a new edge street when historical reserve is tight")
+	_expect((store.city.get("parcels", []) as Array).size() > parcels_before, "physical expansion creates new developable lots")
 	var organic_roads := 0
 	for road in store.city.get("roads", []):
 		if str(road.get("source", "")) == "organic-growth":
