@@ -14,6 +14,7 @@ var _failures := 0
 
 
 func _init() -> void:
+	_test_starter_hierarchy()
 	_test_unserved_region_stays_slow()
 	_test_transit_drives_physical_expansion()
 	_test_growth_is_deterministic()
@@ -23,6 +24,31 @@ func _init() -> void:
 		return
 	print("REGIONAL ORGANIC GROWTH TEST: PASS")
 	quit(0)
+
+
+func _test_starter_hierarchy() -> void:
+	var store := _make_store()
+	var settlements: Array = store.city.get("regional_settlements", [])
+	_expect(settlements.size() >= 5, "starter region contains one town and several surrounding villages")
+	var town_count := 0
+	var village_count := 0
+	for settlement_value in settlements:
+		var settlement: Dictionary = settlement_value
+		var population := int(settlement.get("population", 0))
+		var role := str(settlement.get("starter_role", ""))
+		if role == "town":
+			town_count += 1
+			_expect(population >= 3000 and population <= 5000, "the single starter town stays in the intended 3-5k range")
+			_expect(str(settlement.get("tier", "")) == "market", "starter town uses the market-town morphology tier")
+		elif role == "village":
+			village_count += 1
+			_expect(population <= 1500, "every surrounding starter settlement is a village below 1.5k")
+			_expect(str(settlement.get("tier", "")) == "village", "satellites use village morphology rather than town morphology")
+		else:
+			_expect(false, "every starter settlement has an explicit town/village role")
+	_expect(town_count == 1, "starter region has exactly one town")
+	_expect(village_count == settlements.size() - 1, "all remaining starter settlements are villages")
+	store.free()
 
 
 func _test_unserved_region_stays_slow() -> void:
