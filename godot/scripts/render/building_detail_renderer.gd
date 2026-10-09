@@ -136,14 +136,14 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 			for side in [-1.0, 1.0]:
 				if shrub_transforms.size() >= MAX_SHRUBS:
 					break
-				var shrub_point := rear + lateral * parcel_width * 0.29 * side + frontage * 1.3
+				var shrub_point: Vector2 = rear + lateral * parcel_width * 0.29 * float(side) + frontage * 1.3
 				_append_shrub(shrub_transforms, shrub_custom, shrub_point, building, seed)
 		elif kind in ["apartment", "midrise", "tower", "shop", "civic", "campus"]:
 			if shrub_transforms.size() < MAX_SHRUBS:
-				var planter := center + frontage * parcel_depth * 0.30 + lateral * parcel_width * 0.26
+				var planter: Vector2 = center + frontage * parcel_depth * 0.30 + lateral * parcel_width * 0.26
 				_append_shrub(shrub_transforms, shrub_custom, planter, building, seed)
 			if utility_transforms.size() < MAX_UTILITY_DETAILS:
-				var roof_point := center + lateral * parcel_width * 0.10 - frontage * parcel_depth * 0.06
+				var roof_point: Vector2 = center + lateral * parcel_width * 0.10 - frontage * parcel_depth * 0.06
 				_append_utility(
 					utility_transforms,
 					utility_custom,
@@ -158,7 +158,7 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 			for side in [-1.0, 1.0]:
 				if utility_transforms.size() >= MAX_UTILITY_DETAILS:
 					break
-				var utility_point := rear + lateral * parcel_width * 0.20 * side
+				var utility_point: Vector2 = rear + lateral * parcel_width * 0.20 * float(side)
 				_append_utility(
 					utility_transforms,
 					utility_custom,
