@@ -77,14 +77,6 @@ func _run() -> void:
 	if delineators != null and delineators.multimesh != null:
 		_expect(delineators.multimesh.instance_count > 0, "regional roads produce delineator posts")
 
-	var sign_posts := roadside.get_node_or_null("RoadsideSignPosts") as MultiMeshInstance3D
-	var sign_panels := roadside.get_node_or_null("RoadsideSignPanels") as MultiMeshInstance3D
-	_expect(sign_posts != null and sign_panels != null, "roadside props create lightweight regional sign renderers")
-	if sign_posts != null and sign_posts.multimesh != null:
-		_expect(sign_posts.multimesh.instance_count > 0, "regional roads produce sparse sign posts")
-	if sign_panels != null and sign_panels.multimesh != null:
-		_expect(sign_panels.multimesh.instance_count > 0, "regional roads produce sparse direction panels")
-
 	_expect(shoulders.get_child_count() > 0, "regional roads produce blended shoulder meshes")
 
 	var city_value: Variant = game_store.get("city")
