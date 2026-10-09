@@ -1,6 +1,7 @@
 extends SceneTree
 
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
+const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
 const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
@@ -35,6 +36,8 @@ func _run() -> void:
 	root_3d.add_child(shoulders)
 	var roadside := RoadsidePropsRenderer.new()
 	root_3d.add_child(roadside)
+	var bridges := BridgeDetailRenderer.new()
+	root_3d.add_child(bridges)
 	var forest_hlod := ForestHlodRenderer.new()
 	root_3d.add_child(forest_hlod)
 
@@ -60,6 +63,14 @@ func _run() -> void:
 
 	_expect(shoulders.get_child_count() > 0, "regional roads produce blended shoulder meshes")
 
+	var bridge_count := _bridge_crossing_count(GameStore.city)
+	var girders := bridges.get_node_or_null("BridgeGirders") as MultiMeshInstance3D
+	var abutments := bridges.get_node_or_null("BridgeAbutments") as MultiMeshInstance3D
+	_expect(girders != null and abutments != null, "bridge detail renderer creates structural MultiMeshes")
+	if bridge_count > 0:
+		_expect(girders != null and girders.multimesh != null and girders.multimesh.instance_count > 0, "regional bridge crossings produce side girders")
+		_expect(abutments != null and abutments.multimesh != null and abutments.multimesh.instance_count > 0, "regional bridge crossings produce abutments")
+
 	var forest_instance := forest_hlod.get_node_or_null("ForestHLOD") as MultiMeshInstance3D
 	_expect(forest_instance != null, "forest HLOD creates its MultiMesh instance")
 	if forest_instance != null and forest_instance.multimesh != null:
@@ -76,6 +87,18 @@ func _run() -> void:
 		return
 	push_error("REGIONAL VISUAL RENDERERS TEST: FAIL (%d checks)" % _failures)
 	quit(1)
+
+
+func _bridge_crossing_count(city: Dictionary) -> int:
+	var count := 0
+	for road_value in city.get("roads", []):
+		if typeof(road_value) != TYPE_DICTIONARY:
+			continue
+		var road: Dictionary = road_value
+		if str(road.get("status", "")) != "built":
+			continue
+		count += (road.get("bridgeCrossings", []) as Array).size()
+	return count
 
 
 func _expect(condition: bool, message: String) -> void:
