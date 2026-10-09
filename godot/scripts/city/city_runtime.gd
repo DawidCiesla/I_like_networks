@@ -4,6 +4,7 @@ extends RefCounted
 # starter-world materialization contract at the boundary. This avoids coupling
 # regional world-generation tuning to the legacy Bus Era lifecycle code.
 const CoreRuntime = preload("res://scripts/city/city_runtime_core.gd")
+const RegionalGrowth = preload("res://scripts/city/regional_growth_system.gd")
 const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 
@@ -36,6 +37,7 @@ static func create_initial_city(
 	var city: Dictionary = CoreRuntime.create_initial_city(seed, map_id)
 	if map_id != MapDefinition.LEGACY_CITY_MAP_ID:
 		_materialize_existing_region(city)
+		RegionalGrowth.ensure(city)
 	return city
 
 
@@ -43,6 +45,8 @@ static func ensure_city(store: Node) -> void:
 	CoreRuntime.ensure_city(store)
 	if _is_regional_city(store.city) and str(store.city.get("starter_profile", "")) != STARTER_PROFILE:
 		_materialize_existing_region(store.city)
+	if _is_regional_city(store.city):
+		RegionalGrowth.ensure(store.city)
 
 
 static func sync_with_transport(store: Node) -> bool:
@@ -52,7 +56,10 @@ static func sync_with_transport(store: Node) -> bool:
 
 static func advance(store: Node, delta_seconds: float) -> bool:
 	ensure_city(store)
-	return CoreRuntime.advance(store, delta_seconds)
+	var changed := CoreRuntime.advance(store, delta_seconds)
+	if _is_regional_city(store.city):
+		changed = RegionalGrowth.advance(store, delta_seconds) or changed
+	return changed
 
 
 static func _materialize_existing_region(city: Dictionary) -> void:
