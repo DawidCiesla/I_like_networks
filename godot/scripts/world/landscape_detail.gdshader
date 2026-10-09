@@ -36,7 +36,7 @@ void fragment() {
 	ALBEDO = base_color * tint;
 	ROUGHNESS = clamp(roughness_value + variation * 0.035, 0.35, 1.0);
 	METALLIC = 0.0;
-	SPECULAR_IOR_LEVEL = 0.28;
+	SPECULAR = 0.28;
 	AO = 0.92;
 	AO_LIGHT_AFFECT = 0.65;
 }
