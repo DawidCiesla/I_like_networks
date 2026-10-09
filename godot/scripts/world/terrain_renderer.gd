@@ -4,6 +4,7 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GroundCoverRenderer = preload("res://scripts/world/ground_cover_renderer.gd")
+const LandscapeDetailRenderer = preload("res://scripts/world/landscape_detail_renderer.gd")
 const PremiumTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
 
 const DEFAULT_GRAIN_STRENGTH := 0.046
@@ -18,22 +19,28 @@ const DEFAULT_CAVITY_STRENGTH := 0.26
 
 var bounds := Rect2()
 var _ground_cover: GroundCoverRenderer
+var _landscape_detail: LandscapeDetailRenderer
 
 
 func _ready() -> void:
 	var game_store := get_node_or_null("/root/GameStore")
 	if game_store != null and game_store.has_signal("terrain_changed"):
 		game_store.terrain_changed.connect(rebuild)
-	_setup_ground_cover()
+	_setup_natural_detail()
 	rebuild()
 
 
-func _setup_ground_cover() -> void:
-	if _ground_cover != null or not _is_regional_map():
+func _setup_natural_detail() -> void:
+	if not _is_regional_map():
 		return
-	_ground_cover = GroundCoverRenderer.new()
-	_ground_cover.name = "GroundCover"
-	add_child(_ground_cover)
+	if _ground_cover == null:
+		_ground_cover = GroundCoverRenderer.new()
+		_ground_cover.name = "GroundCover"
+		add_child(_ground_cover)
+	if _landscape_detail == null:
+		_landscape_detail = LandscapeDetailRenderer.new()
+		_landscape_detail.name = "LandscapeDetail"
+		add_child(_landscape_detail)
 
 
 func rebuild() -> void:
@@ -43,7 +50,7 @@ func rebuild() -> void:
 	bounds = _world_bounds()
 	mesh = _build_mesh(bounds, int(game_store.get("city_seed")))
 	if _is_regional_map():
-		_setup_ground_cover()
+		_setup_natural_detail()
 
 
 func _is_regional_map() -> bool:
