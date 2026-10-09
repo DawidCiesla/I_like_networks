@@ -79,7 +79,7 @@ func _rebuild(roads: Array, seed: int) -> void:
 			continue
 		var road_class := str(road.get("class", "local"))
 		var shoulder_width := float(SHOULDER_WIDTH.get(road_class, 25.0))
-		var mesh := _create_shoulder_mesh(seed, points, shoulder_width)
+		var mesh: Mesh = _create_shoulder_mesh(seed, points, shoulder_width)
 		if mesh == null:
 			continue
 		var instance := MeshInstance3D.new()
@@ -89,7 +89,7 @@ func _rebuild(roads: Array, seed: int) -> void:
 		add_child(instance)
 
 
-func _create_shoulder_mesh(seed: int, source_points: Array[Vector2], width: float):
+func _create_shoulder_mesh(seed: int, source_points: Array[Vector2], width: float) -> Mesh:
 	var points := RoadGeometry.resample_polyline(source_points, SHOULDER_SAMPLE_SPACING)
 	if points.size() < 2:
 		return null
