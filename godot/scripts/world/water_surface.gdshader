@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_alpha_prepass, cull_disabled;
+render_mode blend_mix, depth_prepass_alpha, cull_disabled;
 
 uniform float wave_strength : hint_range(0.0, 0.35) = 0.085;
 uniform float wave_speed : hint_range(0.0, 4.0) = 0.72;
