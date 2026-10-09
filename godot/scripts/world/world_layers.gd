@@ -10,16 +10,16 @@ const MAX_RIVER_DEPTH := 7.5
 const MAX_LAKE_DEPTH := 9.0
 
 
-## Samples the existing terrain and the natural world layers at a world-space point.
+## Samples the regional natural world layers at a world-space point.
 ## The point's x/y coordinates map to the terrain model's x/z coordinates.
 static func sample(seed: int, point: Vector2) -> Dictionary:
 	var x := point.x
 	var z := point.y
-	var sampled_height: float = TerrainModel.height(seed, x, z)
-	var sampled_slope: float = TerrainModel.slope_degrees(seed, x, z)
-	var sampled_moisture: float = TerrainModel.moisture(seed, x, z)
-	var sampled_biome: String = TerrainModel.biome(seed, x, z)
-	var sampled_forest_potential: float = TerrainModel.forest_potential(seed, x, z)
+	var sampled_height: float = TerrainModel.regional_height(seed, x, z)
+	var sampled_slope: float = TerrainModel.regional_slope_degrees(seed, x, z)
+	var sampled_moisture: float = TerrainModel.regional_moisture(seed, x, z)
+	var sampled_biome: String = TerrainModel.regional_biome(seed, x, z)
+	var sampled_forest_potential: float = TerrainModel.regional_forest_potential(seed, x, z)
 
 	var water := _water_masks(seed, x, z, sampled_slope)
 	var river_mask: float = water["river"]
@@ -74,14 +74,12 @@ static func sample(seed: int, point: Vector2) -> Dictionary:
 	}
 
 
-## Lightweight samples for route costs and renderers. Avoids calculating
-## resources when a caller only needs terrain friction and vegetation context.
 static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
 	var x := point.x
 	var z := point.y
-	var sampled_slope := TerrainModel.slope_degrees(seed, x, z)
-	var sampled_moisture := TerrainModel.moisture(seed, x, z)
-	var forest := TerrainModel._forest_score(seed, x, z, sampled_moisture, sampled_slope)
+	var sampled_slope := TerrainModel.regional_slope_degrees(seed, x, z)
+	var sampled_moisture := TerrainModel.regional_moisture(seed, x, z)
+	var forest := TerrainModel.regional_forest_score(seed, x, z, sampled_moisture, sampled_slope)
 	var water := _water_masks(seed, x, z, sampled_slope)
 	return {
 		"slope_degrees": sampled_slope,
@@ -92,7 +90,7 @@ static func sample_route_terrain(seed: int, point: Vector2) -> Dictionary:
 
 
 static func sample_water(seed: int, point: Vector2) -> Dictionary:
-	var slope := TerrainModel.slope_degrees(seed, point.x, point.y)
+	var slope := TerrainModel.regional_slope_degrees(seed, point.x, point.y)
 	var water := _water_masks(seed, point.x, point.y, slope)
 	return {
 		"water_depth": water["depth"],
@@ -116,8 +114,6 @@ static func _water_masks(seed: int, x: float, z: float, slope: float) -> Diction
 	var river_depth := maxf(major_depth, minor_depth)
 	var river_scale := major if major >= minor else minor * 0.45
 
-	# Lakes use a broad basin field plus a smaller structure field. Seed-specific
-	# thresholds create a mix of occasional large lakes and smaller irregular ones.
 	var lake_broad := _fbm(
 		seed,
 		x + 1783.0,
@@ -138,7 +134,6 @@ static func _water_masks(seed: int, x: float, z: float, slope: float) -> Diction
 	var threshold_shift := (_random01(seed, "lake-threshold", 0, 0) - 0.5) * 0.035
 	var lake_mask := _smoothstep(0.735 + threshold_shift, 0.845 + threshold_shift, lake_field)
 	lake_mask *= 1.0 - _smoothstep(15.0, 30.0, slope)
-	# Strong river channels cut through lake masks instead of producing hard seams.
 	lake_mask = maxf(lake_mask, major * 0.16)
 	var lake_depth := clampf(maxf(0.0, (lake_mask - 0.035) / 0.965) * MAX_LAKE_DEPTH, 0.0, MAX_LAKE_DEPTH)
 
