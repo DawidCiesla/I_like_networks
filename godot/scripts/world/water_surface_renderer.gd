@@ -5,35 +5,37 @@ const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GameData = preload("res://scripts/core/game_data.gd")
+const WaterShader = preload("res://scripts/world/water_surface.gdshader")
 
-const DEFAULT_RESOLUTION := Vector2i(28, 28)
-const MAX_GRID_STEPS := 128
-const WATER_SURFACE_OFFSET := 0.22
-const RIVER_SHALLOWS_COLOR := Color(0.20, 0.62, 0.65, 1.0)
-const RIVER_DEEP_COLOR := Color(0.045, 0.20, 0.31, 1.0)
-const LAKE_SHALLOWS_COLOR := Color(0.26, 0.66, 0.71, 1.0)
-const LAKE_DEEP_COLOR := Color(0.035, 0.16, 0.32, 1.0)
-const RIVER_MAX_DEPTH := 4.2
+const DEFAULT_RESOLUTION := Vector2i(96, 96)
+const REGIONAL_RESOLUTION := Vector2i(176, 176)
+const MAX_GRID_STEPS := 192
+const WATER_SURFACE_OFFSET := 0.24
+const RIVER_SHALLOWS_COLOR := Color(0.19, 0.58, 0.60, 1.0)
+const RIVER_DEEP_COLOR := Color(0.035, 0.17, 0.27, 1.0)
+const LAKE_SHALLOWS_COLOR := Color(0.24, 0.62, 0.68, 1.0)
+const LAKE_DEEP_COLOR := Color(0.025, 0.13, 0.28, 1.0)
+const RIVER_MAX_DEPTH := 7.5
 const LAKE_MAX_DEPTH := 9.0
 
 
 func _ready() -> void:
-	# Keep the water extent tied to the active map definition and use the same
-	# world seed as the terrain, so legacy saves and new regions stay aligned.
 	var active_map := MapDefinition.active_definition()
 	var seed := int(active_map.get("seed", GameData.DEFAULT_CITY_SEED))
 	var store := get_node_or_null("/root/GameStore")
 	if store != null and store.has_signal("terrain_changed"):
 		store.terrain_changed.connect(_on_terrain_changed)
-	rebuild(seed, TerrainSurface.world_bounds(), Vector2i(64, 64))
+	var resolution := REGIONAL_RESOLUTION if str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID else DEFAULT_RESOLUTION
+	rebuild(seed, TerrainSurface.world_bounds(), resolution)
 
 
 func _on_terrain_changed() -> void:
 	var active_map := MapDefinition.active_definition()
+	var resolution := REGIONAL_RESOLUTION if str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID else DEFAULT_RESOLUTION
 	rebuild(
 		int(active_map.get("seed", GameData.DEFAULT_CITY_SEED)),
 		TerrainSurface.world_bounds(),
-		Vector2i(64, 64)
+		resolution
 	)
 
 
@@ -49,7 +51,8 @@ func rebuild(
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
-## Creates a bounded low-resolution transparent surface from point samples.
+## Creates a bounded transparent surface from point samples. Regional maps use
+## a denser grid so narrow tributaries do not disappear between 24 km map cells.
 static func build_mesh(
 	seed: int,
 	bounds: Rect2,
@@ -59,8 +62,8 @@ static func build_mesh(
 	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
 		return empty_mesh
 	var steps := Vector2i(
-	clampi(resolution.x, 1, MAX_GRID_STEPS),
-	clampi(resolution.y, 1, MAX_GRID_STEPS)
+		clampi(resolution.x, 1, MAX_GRID_STEPS),
+		clampi(resolution.y, 1, MAX_GRID_STEPS)
 	)
 	var point_count := (steps.x + 1) * (steps.y + 1)
 	var vertices := PackedVector3Array()
@@ -96,7 +99,6 @@ static func build_mesh(
 			var top_right := top_left + 1
 			var bottom_left := top_left + stride
 			var bottom_right := bottom_left + 1
-			# Winding faces upward in Godot's y-up world.
 			has_geometry = _append_triangle(tool, vertices, colors, top_left, bottom_left, top_right) or has_geometry
 			has_geometry = _append_triangle(tool, vertices, colors, top_right, bottom_left, bottom_right) or has_geometry
 
@@ -107,14 +109,12 @@ static func build_mesh(
 	return generated if generated != null else empty_mesh
 
 
-static func create_water_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_color = Color.WHITE
-	material.vertex_color_use_as_albedo = true
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.roughness = 0.22
-	material.metallic = 0.0
+static func create_water_material() -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = WaterShader
+	material.set_shader_parameter("wave_strength", 0.085)
+	material.set_shader_parameter("wave_speed", 0.72)
+	material.set_shader_parameter("fresnel_strength", 0.42)
 	return material
 
 
@@ -147,7 +147,7 @@ static func water_color_for_depth(kind: String, depth: float) -> Color:
 	var shallows := LAKE_SHALLOWS_COLOR if is_lake else RIVER_SHALLOWS_COLOR
 	var deep_water := LAKE_DEEP_COLOR if is_lake else RIVER_DEEP_COLOR
 	var water_color := shallows.lerp(deep_water, shade)
-	water_color.a = lerpf(0.32, 0.68, _smoothstep(0.04, 0.70, depth_ratio))
+	water_color.a = lerpf(0.30, 0.66, _smoothstep(0.04, 0.70, depth_ratio))
 	return water_color
 
 
