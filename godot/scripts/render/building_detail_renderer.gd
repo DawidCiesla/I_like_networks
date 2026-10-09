@@ -6,11 +6,15 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MAX_HEDGES := 1800
 const MAX_SHRUBS := 2600
 const MAX_UTILITY_DETAILS := 1400
+const MAX_CHIMNEYS := 1800
+const MAX_AWNINGS := 1000
 
 var _store: Node
 var _hedges: MultiMeshInstance3D
 var _shrubs: MultiMeshInstance3D
 var _utilities: MultiMeshInstance3D
+var _chimneys: MultiMeshInstance3D
+var _awnings: MultiMeshInstance3D
 var _signature := ""
 
 
@@ -26,26 +30,21 @@ func _ready() -> void:
 
 
 func _create_renderers() -> void:
-	_hedges = MultiMeshInstance3D.new()
-	_hedges.name = "ParcelHedges"
-	_hedges.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	_hedges.visibility_range_end = 2400.0
-	_hedges.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-	add_child(_hedges)
+	_hedges = _new_instance("ParcelHedges", 2400.0)
+	_shrubs = _new_instance("ParcelShrubs", 1900.0)
+	_utilities = _new_instance("BuildingUtilities", 2100.0)
+	_chimneys = _new_instance("BuildingChimneys", 2200.0)
+	_awnings = _new_instance("BuildingAwnings", 1700.0)
 
-	_shrubs = MultiMeshInstance3D.new()
-	_shrubs.name = "ParcelShrubs"
-	_shrubs.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	_shrubs.visibility_range_end = 1900.0
-	_shrubs.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-	add_child(_shrubs)
 
-	_utilities = MultiMeshInstance3D.new()
-	_utilities.name = "BuildingUtilities"
-	_utilities.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	_utilities.visibility_range_end = 2100.0
-	_utilities.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-	add_child(_utilities)
+func _new_instance(instance_name: String, visibility_end: float) -> MultiMeshInstance3D:
+	var instance := MultiMeshInstance3D.new()
+	instance.name = instance_name
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	instance.visibility_range_end = visibility_end
+	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	add_child(instance)
+	return instance
 
 
 func _force_sync() -> void:
@@ -106,6 +105,10 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 	var shrub_custom: Array[Color] = []
 	var utility_transforms: Array[Transform3D] = []
 	var utility_custom: Array[Color] = []
+	var chimney_transforms: Array[Transform3D] = []
+	var chimney_custom: Array[Color] = []
+	var awning_transforms: Array[Transform3D] = []
+	var awning_custom: Array[Color] = []
 
 	for building_value in buildings:
 		if typeof(building_value) != TYPE_DICTIONARY:
@@ -138,6 +141,9 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 					break
 				var shrub_point: Vector2 = rear + lateral * parcel_width * 0.29 * float(side) + frontage * 1.3
 				_append_shrub(shrub_transforms, shrub_custom, shrub_point, building, seed)
+			if chimney_transforms.size() < MAX_CHIMNEYS:
+				var chimney_point := center + lateral * parcel_width * 0.13 - frontage * parcel_depth * 0.08
+				_append_chimney(chimney_transforms, chimney_custom, chimney_point, angle, building, seed)
 		elif kind in ["apartment", "midrise", "tower", "shop", "civic", "campus"]:
 			if shrub_transforms.size() < MAX_SHRUBS:
 				var planter: Vector2 = center + frontage * parcel_depth * 0.30 + lateral * parcel_width * 0.26
@@ -154,6 +160,9 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 					false,
 					true
 				)
+			if kind == "shop" and awning_transforms.size() < MAX_AWNINGS:
+				var awning_point := center + frontage * parcel_depth * 0.31
+				_append_awning(awning_transforms, awning_custom, awning_point, angle, parcel_width, building, seed)
 		elif kind in ["workshop", "warehouse"]:
 			for side in [-1.0, 1.0]:
 				if utility_transforms.size() >= MAX_UTILITY_DETAILS:
@@ -173,6 +182,8 @@ func _rebuild(buildings: Array, parcels: Array, seed: int) -> void:
 	_apply_multimesh(_hedges, _hedge_mesh(), hedge_transforms, hedge_custom)
 	_apply_multimesh(_shrubs, _shrub_mesh(), shrub_transforms, shrub_custom)
 	_apply_multimesh(_utilities, _utility_mesh(), utility_transforms, utility_custom)
+	_apply_multimesh(_chimneys, _chimney_mesh(), chimney_transforms, chimney_custom)
+	_apply_multimesh(_awnings, _awning_mesh(), awning_transforms, awning_custom)
 
 
 func _append_hedge(
@@ -242,6 +253,48 @@ func _append_utility(
 	))
 
 
+func _append_chimney(
+	transforms: Array[Transform3D],
+	custom_data: Array[Color],
+	point: Vector2,
+	angle: float,
+	building: Dictionary,
+	seed: int
+) -> void:
+	var ground := TerrainSurface.height(seed, point.x, point.y)
+	var profile: Dictionary = building.get("profile", {})
+	var roof_height := maxf(3.2, float(profile.get("heightMeters", 3.2 * maxi(1, int(profile.get("floors", 1))))))
+	var width := 0.42 + _pseudo(point.x, point.y, 13, seed) * 0.22
+	var depth := 0.38 + _pseudo(point.x, point.y, 14, seed) * 0.20
+	var height := 0.85 + _pseudo(point.x, point.y, 15, seed) * 0.75
+	var basis := Basis(Vector3.UP, -angle).scaled(Vector3(width, height, depth))
+	transforms.append(Transform3D(basis, Vector3(point.x, ground + roof_height + height * 0.5, point.y)))
+	custom_data.append(Color(_pseudo(point.x, point.y, 16, seed), 0.0, 0.0, 1.0))
+
+
+func _append_awning(
+	transforms: Array[Transform3D],
+	custom_data: Array[Color],
+	point: Vector2,
+	angle: float,
+	parcel_width: float,
+	building: Dictionary,
+	seed: int
+) -> void:
+	var ground := TerrainSurface.height(seed, point.x, point.y)
+	var width := clampf(parcel_width * 0.46, 3.2, 9.0)
+	var depth := 1.15 + _pseudo(point.x, point.y, 17, seed) * 0.65
+	var height := 0.18
+	var basis := Basis(Vector3.UP, -angle).scaled(Vector3(width, height, depth))
+	transforms.append(Transform3D(basis, Vector3(point.x, ground + 2.75, point.y)))
+	custom_data.append(Color(
+		float(posmod(hash(str(building.get("id", ""))), 100)) / 100.0,
+		_pseudo(point.x, point.y, 18, seed),
+		0.0,
+		1.0
+	))
+
+
 func _hedge_mesh() -> Mesh:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3.ONE
@@ -272,6 +325,26 @@ func _utility_mesh() -> Mesh:
 	material.albedo_color = Color(0.33, 0.35, 0.34)
 	material.roughness = 0.74
 	material.metallic = 0.16
+	mesh.material = material
+	return mesh
+
+
+func _chimney_mesh() -> Mesh:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.34, 0.22, 0.17)
+	material.roughness = 0.90
+	mesh.material = material
+	return mesh
+
+
+func _awning_mesh() -> Mesh:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.43, 0.16, 0.12)
+	material.roughness = 0.72
 	mesh.material = material
 	return mesh
 
