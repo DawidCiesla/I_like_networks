@@ -17,7 +17,7 @@ func _init() -> void:
 	_expect((city.get("outside_connections", []) as Array).size() == 4, "starter region connects to four external gateways")
 
 	var total_population := int((city.get("demographics", {}) as Dictionary).get("residents", 0))
-	_expect(total_population >= 12000 and total_population <= 22000, "starter population is plausible for seven small settlements")
+	_expect(total_population >= 8000 and total_population <= 12000, "starter population matches one small town plus surrounding villages")
 	var largest_population := 0
 	var largest_radius := 0.0
 	for settlement in city.get("regional_settlements", []):
@@ -50,7 +50,7 @@ func _init() -> void:
 			if str(road.get("status", "")) == "built":
 				built_regional_road_count += 1
 			_expect(road.get("profile", {}).get("road_class", "") in ["local", "collector", "arterial"], "regional road has a semantic profile")
-	_expect(regional_road_count >= 60, "larger settlements create a substantial local and regional road network")
+	_expect(regional_road_count >= 60, "town and village morphology creates a substantial local and regional road network")
 	_expect(built_regional_road_count == regional_road_count, "historic starter roads exist before the player arrives")
 	if _failures > 0:
 		push_error("REGIONAL CITY INTEGRATION TEST: FAIL (%d checks)" % _failures)
