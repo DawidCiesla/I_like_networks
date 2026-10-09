@@ -12,7 +12,9 @@ const SHOULDER_WIDTH := {
 	"service": 21.0,
 }
 const SHOULDER_SURFACE_HEIGHT := 0.052
-const SHOULDER_SAMPLE_SPACING := 10.0
+# The shoulder is a low-frequency terrain transition, so sampling every ~16 m
+# remains visually smooth while avoiding thousands of redundant height queries.
+const SHOULDER_SAMPLE_SPACING := 16.0
 
 var _store: Node
 var _signature := ""
@@ -97,25 +99,31 @@ func _create_shoulder_mesh(seed: int, source_points: Array[Vector2], width: floa
 	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
 	var half_width := width * 0.5
 	var cumulative: Array[float] = [0.0]
-	for index in range(1, points.size()):
-		cumulative.append(cumulative.back() + points[index - 1].distance_to(points[index]))
+	var left_vertices: Array[Vector3] = []
+	var right_vertices: Array[Vector3] = []
+
+	# Compute both terrain-conforming edge vertices once per polyline sample.
+	# The old triangle-by-triangle path queried TerrainSurface up to three times
+	# for the same location, which made long regional roads expensive at startup.
+	for index in range(points.size()):
+		if index > 0:
+			cumulative.append(cumulative.back() + points[index - 1].distance_to(points[index]))
+		var tangent := _tangent(points, index)
+		var normal := Vector2(-tangent.y, tangent.x)
+		var left_point := points[index] + normal * half_width
+		var right_point := points[index] - normal * half_width
+		left_vertices.append(_terrain_vertex(seed, left_point))
+		right_vertices.append(_terrain_vertex(seed, right_point))
+
 	for index in range(points.size() - 1):
-		var tangent_a := _tangent(points, index)
-		var tangent_b := _tangent(points, index + 1)
-		var normal_a := Vector2(-tangent_a.y, tangent_a.x)
-		var normal_b := Vector2(-tangent_b.y, tangent_b.x)
-		var left_a := points[index] + normal_a * half_width
-		var right_a := points[index] - normal_a * half_width
-		var left_b := points[index + 1] + normal_b * half_width
-		var right_b := points[index + 1] - normal_b * half_width
 		var u0 := cumulative[index] / 18.0
 		var u1 := cumulative[index + 1] / 18.0
-		_add_vertex(mesh, seed, left_a, Vector2(u0, 0.0))
-		_add_vertex(mesh, seed, left_b, Vector2(u1, 0.0))
-		_add_vertex(mesh, seed, right_a, Vector2(u0, 1.0))
-		_add_vertex(mesh, seed, right_a, Vector2(u0, 1.0))
-		_add_vertex(mesh, seed, left_b, Vector2(u1, 0.0))
-		_add_vertex(mesh, seed, right_b, Vector2(u1, 1.0))
+		_add_cached_vertex(mesh, left_vertices[index], Vector2(u0, 0.0))
+		_add_cached_vertex(mesh, left_vertices[index + 1], Vector2(u1, 0.0))
+		_add_cached_vertex(mesh, right_vertices[index], Vector2(u0, 1.0))
+		_add_cached_vertex(mesh, right_vertices[index], Vector2(u0, 1.0))
+		_add_cached_vertex(mesh, left_vertices[index + 1], Vector2(u1, 0.0))
+		_add_cached_vertex(mesh, right_vertices[index + 1], Vector2(u1, 1.0))
 	mesh.surface_end()
 	return mesh
 
@@ -131,14 +139,18 @@ func _tangent(points: Array[Vector2], index: int) -> Vector2:
 	return tangent
 
 
-func _add_vertex(mesh: ImmediateMesh, seed: int, point: Vector2, uv: Vector2) -> void:
-	mesh.surface_set_normal(Vector3.UP)
-	mesh.surface_set_uv(uv)
-	mesh.surface_add_vertex(Vector3(
+func _terrain_vertex(seed: int, point: Vector2) -> Vector3:
+	return Vector3(
 		point.x,
 		TerrainSurface.height(seed, point.x, point.y) + SHOULDER_SURFACE_HEIGHT,
 		point.y
-	))
+	)
+
+
+func _add_cached_vertex(mesh: ImmediateMesh, vertex: Vector3, uv: Vector2) -> void:
+	mesh.surface_set_normal(Vector3.UP)
+	mesh.surface_set_uv(uv)
+	mesh.surface_add_vertex(vertex)
 
 
 func _uses_natural_shoulder(road: Dictionary) -> bool:
