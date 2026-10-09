@@ -1,6 +1,7 @@
 extends Node3D
 
 var tint := Color.WHITE
+var detail_visibility_end := 0.0
 
 func _ready() -> void:
 	var local_materials: Dictionary = {}
@@ -9,6 +10,9 @@ func _ready() -> void:
 func _apply_node_style(node: Node, local_materials: Dictionary) -> void:
 	if node is MeshInstance3D:
 		var mesh_instance := node as MeshInstance3D
+		if detail_visibility_end > 0.0:
+			mesh_instance.visibility_range_end = detail_visibility_end
+			mesh_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		if mesh_instance.material_override is StandardMaterial3D:
 			mesh_instance.material_override = _local_tinted_material(
 				mesh_instance.material_override as StandardMaterial3D,
