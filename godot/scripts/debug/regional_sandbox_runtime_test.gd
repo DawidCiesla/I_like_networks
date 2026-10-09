@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CityRuntime = preload("res://scripts/city/city_runtime.gd")
+const RegionalGrowth = preload("res://scripts/city/regional_growth_system.gd")
 const PlanGenerator = preload("res://scripts/city/city_plan_generator.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 
@@ -19,10 +20,8 @@ var _failures := 0
 
 func _init() -> void:
 	_test_starter_region_is_isolated_and_has_growth_capacity()
-	_test_growth_is_deterministic_without_transit()
-	_test_transit_changes_growth_priority_without_becoming_required()
+	_test_runtime_uses_only_organic_growth()
 	_test_mixed_use_growth_splits_population_and_jobs()
-	_test_inaccessible_sites_do_not_grow()
 	_test_legacy_city_uses_unchanged_plan()
 	if _failures > 0:
 		push_error("REGIONAL SANDBOX RUNTIME TEST: FAIL (%d checks)" % _failures)
@@ -73,121 +72,53 @@ func _test_starter_region_is_isolated_and_has_growth_capacity() -> void:
 	_expect(built_parcels > 0, "the regional settlements start lived in")
 	_expect(vacant_parcels > 0, "the region keeps vacant building capacity")
 	_expect(city.get("buildings", []).size() < city.get("parcels", []).size(), "not every parcel starts built")
-	for building in city.get("buildings", []):
-		_expect(building.has("source") and building.has("status"), "initial buildings record source and status")
-	for block in city.get("blocks", []):
-		_expect(block.has("source") and block.has("status"), "regional blocks record source and status")
+	_expect(city.has("organic_growth"), "regional starter initializes the organic growth controller")
+	_expect(city.has("highway_planning"), "regional starter initializes highway planning")
 
 
-func _test_growth_is_deterministic_without_transit() -> void:
-	var initial_city := CityRuntime.create_initial_city(731945, MapDefinition.DEFAULT_MAP_ID)
-	_enable_core_local_roads(initial_city)
-	var one_chunk := _make_store(initial_city)
-	var two_chunks := _make_store(initial_city)
-	var initial_built := _built_parcel_ids(one_chunk.city)
-	var initial_demographics: Dictionary = one_chunk.city.get("demographics", {}).duplicate(true)
-	var initial_settlement_totals := _settlement_totals(one_chunk.city)
-	var interval := CityRuntime.REGIONAL_GROWTH_INTERVAL_SECONDS
-	CityRuntime.advance(one_chunk, interval * 3.0)
-	CityRuntime.advance(two_chunks, interval)
-	CityRuntime.advance(two_chunks, interval)
-	CityRuntime.advance(two_chunks, interval)
-	_expect(one_chunk.transit_network.is_empty() and two_chunks.transit_network.is_empty(), "growth test has no transit service")
-	_expect(int(one_chunk.city.get("regional_auto_growth_count", 0)) > 0, "road-connected sites grow without transit")
-	_expect(_built_parcel_ids(one_chunk.city) != initial_built, "growth occupies a previously vacant parcel")
-	_expect(_built_parcel_ids(one_chunk.city) == _built_parcel_ids(two_chunks.city), "growth order is independent of frame delta chunks")
-	_expect(one_chunk.city.get("demographics", {}) == two_chunks.city.get("demographics", {}), "aggregate demographics are independent of frame delta chunks")
-	_expect(_settlement_totals(one_chunk.city) == _settlement_totals(two_chunks.city), "settlement totals are independent of frame delta chunks")
-	_expect(
-		int(one_chunk.city.get("demographics", {}).get("residents", 0)) > int(initial_demographics.get("residents", 0)),
-		"residential growth increases aggregate residents"
-	)
-	_expect(
-		int(one_chunk.city.get("demographics", {}).get("jobs", 0)) > int(initial_demographics.get("jobs", 0)),
-		"commercial growth increases aggregate jobs"
-	)
-	_expect(
-		int(one_chunk.city.get("demographics", {}).get("students", 0)) == int(round(float(one_chunk.city["demographics"]["residents"]) * 0.16)),
-		"student aggregate follows regional residents"
-	)
-	var center_id := str(one_chunk.city["regional_settlements"][0].get("id", ""))
-	var grown_center: Dictionary = _settlement_totals(one_chunk.city).get(center_id, {})
-	var initial_center: Dictionary = initial_settlement_totals.get(center_id, {})
-	_expect(int(grown_center.get("population", 0)) > int(initial_center.get("population", 0)), "growth updates the correct settlement population")
-	_expect(int(grown_center.get("jobs", 0)) > int(initial_center.get("jobs", 0)), "growth updates the correct settlement jobs")
-	_expect(int(one_chunk.city.get("regional_auto_growth_count", 0)) <= CityRuntime.MAX_REGIONAL_AUTONOMOUS_BUILDINGS, "autonomous growth stays capped")
-	for building in one_chunk.city.get("buildings", []):
-		if str(building.get("source", "")) == "city":
-			_expect(str(building.get("status", "")) == "built", "grown building uses an explicit completed status")
-	one_chunk.free()
-	two_chunks.free()
-
-
-func _test_transit_changes_growth_priority_without_becoming_required() -> void:
+func _test_runtime_uses_only_organic_growth() -> void:
 	var city := CityRuntime.create_initial_city(731945, MapDefinition.DEFAULT_MAP_ID)
-	var template: Dictionary = {}
-	for parcel in city.get("parcels", []):
-		if str(parcel.get("status", "")) == "vacant" and CityRuntime._regional_parcel_has_strategic_access(city, parcel):
-			template = parcel
-			break
-	_expect(not template.is_empty(), "priority test finds a road-connected growth site")
-	if template.is_empty():
-		return
-	for parcel in city.get("parcels", []):
-		if str(parcel.get("status", "")) == "vacant":
-			parcel["growthOrder"] = 1000
-			parcel["developmentOrder"] = 1000.0
-	var earlier_without_transit := template.duplicate(true)
-	earlier_without_transit["id"] = "priority-earlier-without-transit"
-	earlier_without_transit["growthOrder"] = 10
-	earlier_without_transit["developmentOrder"] = 10.0
-	earlier_without_transit["x"] = 1000.0
-	earlier_without_transit["y"] = 0.0
-	var later_with_transit := template.duplicate(true)
-	later_with_transit["id"] = "priority-later-with-transit"
-	later_with_transit["growthOrder"] = 15
-	later_with_transit["developmentOrder"] = 15.0
-	later_with_transit["x"] = 0.0
-	later_with_transit["y"] = 0.0
-	city["parcels"].append(earlier_without_transit)
-	city["parcels"].append(later_with_transit)
-	var no_transit_store := _make_store(city)
-	var transit_store := _make_store(city)
-	transit_store.transit_network = {
-		"stops": {
-			"growth-stop": {"status": "built", "served_line_ids": ["test-line"], "x": 0.0, "y": 0.0},
-		},
-	}
-	var no_transit_choice: Dictionary = CityRuntime._next_regional_growth_candidate(no_transit_store)
-	var transit_choice: Dictionary = CityRuntime._next_regional_growth_candidate(transit_store)
-	_expect(str(no_transit_choice.get("id", "")) == "priority-earlier-without-transit", "stable base priority applies without transit")
-	_expect(str(transit_choice.get("id", "")) == "priority-later-with-transit", "stop accessibility measurably raises a site's priority")
-	no_transit_store.free()
-	transit_store.free()
+	var store := _make_store(city)
+	_add_served_stop_to_hub(store)
+	var organic_before: Dictionary = store.city.get("organic_growth", {}).duplicate(true)
+	var tick_before := int(organic_before.get("tick", 0))
+	var legacy_count_before := int(store.city.get("regional_auto_growth_count", 0))
+	var legacy_accumulator_before := float(store.city.get("regional_growth_accumulator_seconds", 0.0))
+	var roads_before := _organic_road_ids(store.city)
+
+	CityRuntime.advance(store, CityRuntime.REGIONAL_ORGANIC_GROWTH_INTERVAL_SECONDS * 2.0)
+
+	var organic_after: Dictionary = store.city.get("organic_growth", {})
+	_expect(
+		int(organic_after.get("tick", 0)) == tick_before + 2,
+		"CityRuntime advances the organic regional controller exactly once per organic tick"
+	)
+	_expect(
+		int(store.city.get("regional_auto_growth_count", 0)) == legacy_count_before,
+		"legacy autonomous regional growth count stays frozen"
+	)
+	_expect(
+		is_equal_approx(float(store.city.get("regional_growth_accumulator_seconds", 0.0)), legacy_accumulator_before),
+		"legacy regional growth accumulator stays frozen"
+	)
+	_expect(_organic_road_ids(store.city) != roads_before, "served runtime growth creates physical organic infrastructure")
+	for building_value in store.city.get("buildings", []):
+		var building: Dictionary = building_value
+		_expect(
+			not (str(building.get("source", "")) == "city" and building.has("growthTick")),
+			"legacy auto-growth does not create a second competing growth building"
+		)
+	store.free()
 
 
 func _test_mixed_use_growth_splits_population_and_jobs() -> void:
-	var contribution := CityRuntime._regional_growth_contribution({"zone": "mixed"}, {"density": 2})
-	_expect(int(contribution.get("residents", 0)) == CityRuntime.REGIONAL_MIXED_RESIDENTS_PER_DENSITY * 2, "mixed use adds its documented resident share")
-	_expect(int(contribution.get("jobs", 0)) == CityRuntime.REGIONAL_MIXED_JOBS_PER_DENSITY * 2, "mixed use adds its documented job share")
-	var residential := CityRuntime._regional_growth_contribution({"zone": "residential"}, {"density": 1, "kind": "house"})
-	var commercial := CityRuntime._regional_growth_contribution({"zone": "commercial"}, {"density": 1, "kind": "shop"})
+	var contribution := RegionalGrowth._profile_contribution("mixed", {"kind": "apartment", "floors": 2, "density": 2})
+	_expect(int(contribution.get("residents", 0)) == 36, "mixed organic growth adds its resident share")
+	_expect(int(contribution.get("jobs", 0)) == 16, "mixed organic growth adds its job share")
+	var residential := RegionalGrowth._profile_contribution("residential", {"kind": "house", "floors": 1, "density": 1})
+	var commercial := RegionalGrowth._profile_contribution("commercial", {"kind": "shop", "floors": 1, "density": 1})
 	_expect(int(residential.get("residents", 0)) > 0 and int(residential.get("jobs", 0)) == 0, "residential profiles add inhabitants")
 	_expect(int(commercial.get("jobs", 0)) > 0 and int(commercial.get("residents", 0)) == 0, "commercial profiles add jobs")
-
-
-func _test_inaccessible_sites_do_not_grow() -> void:
-	var city := CityRuntime.create_initial_city(731945, MapDefinition.DEFAULT_MAP_ID)
-	for road in city.get("roads", []):
-		if str(road.get("regionalRole", "")) in ["spine", "loop", "external_branch", "city_connector"]:
-			road["status"] = "planned"
-			road["constructionProgress"] = 0.0
-	var store := _make_store(city)
-	var initial_built := _built_parcel_ids(store.city)
-	CityRuntime.advance(store, CityRuntime.REGIONAL_GROWTH_INTERVAL_SECONDS * 3.0)
-	_expect(_built_parcel_ids(store.city) == initial_built, "a site without completed strategic road access stays vacant")
-	_expect(int(store.city.get("regional_auto_growth_count", 0)) == 0, "inaccessible sites do not count as growth")
-	store.free()
 
 
 func _test_legacy_city_uses_unchanged_plan() -> void:
@@ -214,35 +145,41 @@ func _make_store(city: Dictionary) -> SandboxStore:
 		"line4": {"built": false, "stop_count": 0, "fleet_count": 0, "last_delivered_ppm": 0.0},
 	}
 	store.depot = {"built": false}
-	store.transit_network = {}
+	store.transit_network = {"stops": {}, "lines": {}}
 	return store
 
 
-func _built_parcel_ids(city: Dictionary) -> Array[String]:
+func _add_served_stop_to_hub(store: SandboxStore) -> void:
+	var hub: Dictionary = store.city.get("regional_settlements", [])[0]
+	var position: Vector2 = hub.get("position", Vector2.ZERO)
+	store.transit_network = {
+		"stops": {
+			"runtime-growth-stop": {
+				"id": "runtime-growth-stop",
+				"status": "built",
+				"served_line_ids": ["runtime-growth-line"],
+				"x": position.x,
+				"y": position.y,
+			},
+		},
+		"lines": {
+			"runtime-growth-line": {
+				"id": "runtime-growth-line",
+				"status": "active",
+				"stop_ids": ["runtime-growth-stop"],
+			},
+		},
+	}
+
+
+func _organic_road_ids(city: Dictionary) -> Array[String]:
 	var result: Array[String] = []
-	for parcel in city.get("parcels", []):
-		if str(parcel.get("status", "")) == "built":
-			result.append(str(parcel.get("id", "")))
+	for road_value in city.get("roads", []):
+		var road: Dictionary = road_value
+		if str(road.get("source", "")) == "organic-growth":
+			result.append(str(road.get("id", "")))
 	result.sort()
 	return result
-
-
-func _enable_core_local_roads(city: Dictionary) -> void:
-	var core_id := str(city.get("regional_settlements", [])[0].get("id", ""))
-	for road in city.get("roads", []):
-		if str(road.get("regionalRole", "")) == "local_street" and str(road.get("settlementId", "")) == core_id:
-			road["status"] = "built"
-			road["constructionProgress"] = 1.0
-
-
-func _settlement_totals(city: Dictionary) -> Dictionary:
-	var totals: Dictionary = {}
-	for settlement in city.get("regional_settlements", []):
-		totals[str(settlement.get("id", ""))] = {
-			"population": int(settlement.get("population", 0)),
-			"jobs": int(settlement.get("jobs", 0)),
-		}
-	return totals
 
 
 func _expect(condition: bool, message: String) -> void:
