@@ -6,6 +6,7 @@ const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_rendere
 const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
 const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
 const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
+const ForestHlodRenderer = preload("res://scripts/world/forest_hlod_renderer.gd")
 
 @onready var _environment_controller: Node3D = $WorldEnvironmentController
 @onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
@@ -15,6 +16,7 @@ var _building_hlod_renderer: BuildingHlodRenderer
 var _building_window_renderer: BuildingWindowRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
+var _forest_hlod_renderer: ForestHlodRenderer
 
 
 func _ready() -> void:
@@ -49,6 +51,10 @@ func _setup_regional_visual_detail() -> void:
 		_building_hlod_renderer = BuildingHlodRenderer.new()
 		_building_hlod_renderer.name = "BuildingHLOD"
 		add_child(_building_hlod_renderer)
+	if _forest_hlod_renderer == null:
+		_forest_hlod_renderer = ForestHlodRenderer.new()
+		_forest_hlod_renderer.name = "ForestHLOD"
+		add_child(_forest_hlod_renderer)
 
 
 func _process(_delta: float) -> void:
