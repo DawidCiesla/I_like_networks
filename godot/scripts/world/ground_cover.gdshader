@@ -46,7 +46,7 @@ void fragment() {
 	ALBEDO = color;
 	ROUGHNESS = clamp(0.96 - moisture * 0.10 + (micro - 0.5) * 0.025, 0.78, 1.0);
 	METALLIC = 0.0;
-	SPECULAR_IOR_LEVEL = 0.24;
+	SPECULAR = 0.24;
 	AO = mix(0.82, 0.98, blade_height_mask);
 	AO_LIGHT_AFFECT = 0.56;
 }
