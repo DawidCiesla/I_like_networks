@@ -8,13 +8,13 @@ const GameData = preload("res://scripts/core/game_data.gd")
 const WaterShader = preload("res://scripts/world/water_surface.gdshader")
 
 const DEFAULT_RESOLUTION := Vector2i(96, 96)
-const REGIONAL_RESOLUTION := Vector2i(176, 176)
+const REGIONAL_RESOLUTION := Vector2i(192, 192)
 const MAX_GRID_STEPS := 192
 const WATER_SURFACE_OFFSET := 0.24
-const RIVER_SHALLOWS_COLOR := Color(0.19, 0.58, 0.60, 1.0)
-const RIVER_DEEP_COLOR := Color(0.035, 0.17, 0.27, 1.0)
-const LAKE_SHALLOWS_COLOR := Color(0.24, 0.62, 0.68, 1.0)
-const LAKE_DEEP_COLOR := Color(0.025, 0.13, 0.28, 1.0)
+const RIVER_SHALLOWS_COLOR := Color(0.16, 0.53, 0.56, 1.0)
+const RIVER_DEEP_COLOR := Color(0.026, 0.14, 0.235, 1.0)
+const LAKE_SHALLOWS_COLOR := Color(0.20, 0.57, 0.64, 1.0)
+const LAKE_DEEP_COLOR := Color(0.018, 0.105, 0.245, 1.0)
 const RIVER_MAX_DEPTH := 7.5
 const LAKE_MAX_DEPTH := 9.0
 
@@ -52,7 +52,7 @@ func rebuild(
 
 
 ## Creates a bounded transparent surface from point samples. Regional maps use
-## a denser grid so narrow tributaries do not disappear between 24 km map cells.
+## the maximum practical grid resolution so narrow tributaries survive the 24 km scale.
 static func build_mesh(
 	seed: int,
 	bounds: Rect2,
@@ -112,9 +112,11 @@ static func build_mesh(
 static func create_water_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = WaterShader
-	material.set_shader_parameter("wave_strength", 0.085)
-	material.set_shader_parameter("wave_speed", 0.72)
-	material.set_shader_parameter("fresnel_strength", 0.42)
+	material.set_shader_parameter("wave_strength", 0.072)
+	material.set_shader_parameter("wave_speed", 0.68)
+	material.set_shader_parameter("fresnel_strength", 0.58)
+	material.set_shader_parameter("refraction_strength", 0.016)
+	material.set_shader_parameter("shore_foam_strength", 0.31)
 	return material
 
 
