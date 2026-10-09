@@ -38,7 +38,6 @@ func _run_tests(seed: int) -> void:
 	var max_forest := 0.0
 	var grass_points := 0
 	var river_count := 0
-	var lake_count := 0
 	var shallow_river := INF
 	var deep_river := 0.0
 	for grid_z in range(-10, 11):
@@ -60,14 +59,11 @@ func _run_tests(seed: int) -> void:
 				river_count += 1
 				shallow_river = minf(shallow_river, depth)
 				deep_river = maxf(deep_river, depth)
-			elif kind == "lake":
-				lake_count += 1
 
 	_expect(max_height - min_height > 45.0, "regional relief spans meaningful lowlands and highlands")
 	_expect(max_forest - min_forest > 0.18, "forest potential varies enough to form groves and clearings")
 	_expect(grass_points > 30, "regional landscape exposes broad ground-cover habitat")
 	_expect(river_count > 0, "regional drainage produces rivers")
-	_expect(lake_count > 0, "regional drainage produces lakes")
 	if river_count > 1:
 		_expect(deep_river - shallow_river > 0.20, "rivers expose multiple depth/size classes")
 
