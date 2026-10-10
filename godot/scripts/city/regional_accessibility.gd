@@ -37,6 +37,42 @@ static func evaluate(city: Dictionary, transport_metrics: Dictionary) -> Diction
 	return result
 
 
+## Stores one canonical snapshot for systems such as organic growth and UI.
+## The transport metrics are sampled outside the growth tick, so consumers read
+## a stable previous-period result instead of recursively recomputing OD choice.
+static func apply(store: Node) -> Dictionary:
+	if not store.has_method("resident_transport_metrics"):
+		return {}
+	var metrics_value: Variant = store.call("resident_transport_metrics")
+	if typeof(metrics_value) != TYPE_DICTIONARY:
+		return {}
+	var scores := evaluate(store.city, metrics_value)
+	var snapshot := {
+		"updated_at": float(store.city.get("time_seconds", 0.0)),
+		"settlements": scores,
+	}
+	store.city["regional_accessibility"] = snapshot
+	var settlements: Array = store.city.get("regional_settlements", [])
+	for index in range(settlements.size()):
+		if typeof(settlements[index]) != TYPE_DICTIONARY:
+			continue
+		var settlement: Dictionary = settlements[index]
+		var settlement_id := str(settlement.get("id", ""))
+		var row_value: Variant = scores.get(settlement_id, {})
+		if typeof(row_value) != TYPE_DICTIONARY:
+			continue
+		var row: Dictionary = row_value
+		settlement["mobilityAccessibilityAvailable"] = bool(row.get("available", false))
+		settlement["mobilityAccessibility"] = float(row.get("score", 0.0))
+		settlement["mobilityAverageCommuteMinutes"] = float(row.get("average_commute_minutes", 0.0))
+		settlement["mobilityUnservedShare"] = float(row.get("unserved_share", 0.0))
+		settlement["mobilityTransitShare"] = float(row.get("transit_share", 0.0))
+		settlement["mobilityLocalMaxVcRatio"] = float(row.get("local_max_vc_ratio", 0.0))
+		settlements[index] = settlement
+	store.city["regional_settlements"] = settlements
+	return snapshot
+
+
 static func settlement_score(
 	city: Dictionary,
 	transport_metrics: Dictionary,
@@ -47,6 +83,17 @@ static func settlement_score(
 		"score": 0.0,
 		"reason": "settlement_not_found",
 	})
+
+
+static func snapshot_row(city: Dictionary, settlement_id: String) -> Dictionary:
+	var snapshot_value: Variant = city.get("regional_accessibility", {})
+	if typeof(snapshot_value) != TYPE_DICTIONARY:
+		return {}
+	var rows_value: Variant = (snapshot_value as Dictionary).get("settlements", {})
+	if typeof(rows_value) != TYPE_DICTIONARY:
+		return {}
+	var row_value: Variant = (rows_value as Dictionary).get(settlement_id, {})
+	return row_value if typeof(row_value) == TYPE_DICTIONARY else {}
 
 
 static func _score_settlement(
