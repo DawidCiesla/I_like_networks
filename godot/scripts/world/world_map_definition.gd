@@ -13,9 +13,19 @@ const LEGACY_MARGIN := 620.0
 const REGION_HALF_EXTENT := 12000.0
 
 static var _active_definition: Dictionary = {}
+static var _active_revision := 0
 
 static func set_active(map_definition: Dictionary) -> void:
 	_active_definition = normalize(map_definition, int(map_definition.get("seed", 0)), true)
+	_active_revision += 1
+
+
+static func active_revision() -> int:
+	return _active_revision
+
+
+static func active_map_id() -> String:
+	return str(_active_definition.get("id", LEGACY_CITY_MAP_ID))
 
 static func active_definition() -> Dictionary:
 	return _active_definition.duplicate(true)

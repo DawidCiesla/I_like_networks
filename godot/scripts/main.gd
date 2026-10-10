@@ -50,15 +50,60 @@ var _selection_diagnostics_widget: RegionalSelectionDiagnosticsWidget
 var _settlement_mobility_widget: RegionalSettlementMobilityWidget
 var _last_traffic_elapsed_seconds := 0.0
 var _proposal_diagnostic_refresh_remaining := 0.0
+var startup_loading := true
+
+
+func _enter_tree() -> void:
+	# Child renderers read the world in _ready(), including when running F6.
+	GameStore.ensure_game_initialized()
+	GameStore.set_process(false)
+	set_process(false)
 
 
 func _ready() -> void:
+	await _wait_for_world_visuals()
+	startup_loading = false
+	GameStore.set_process(true)
+	set_process(true)
 	GameStore.toast_requested.connect(_on_toast)
 	if not GameStore.state_changed.is_connected(_on_state_changed):
 		GameStore.state_changed.connect(_on_state_changed)
 	_setup_regional_visual_detail()
 	_setup_regional_traffic()
 	_on_state_changed()
+
+
+func _wait_for_world_visuals() -> void:
+	var loading := CanvasLayer.new()
+	loading.layer = 100
+	var cover := ColorRect.new()
+	cover.color = Color("0b1319")
+	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	cover.focus_mode = Control.FOCUS_ALL
+	cover.gui_input.connect(func(_event: InputEvent) -> void: cover.accept_event())
+	loading.add_child(cover)
+	var label := Label.new()
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_size_override("font_size", 26)
+	cover.add_child(label)
+	add_child(loading)
+	cover.grab_focus()
+	var renderers := [get_node("Terrain"), get_node("Water"), get_node("Vegetation")]
+	while true:
+		var pending := false
+		var progress := 0.0
+		for renderer in renderers:
+			var busy := bool(renderer.get("startup_loading"))
+			pending = pending or busy
+			progress += float(renderer.get("startup_progress")) if busy else 1.0
+		label.text = "LOADING REGION · %d%%" % mini(99, int(progress / float(renderers.size()) * 100.0))
+		if not pending:
+			break
+		await get_tree().process_frame
+	loading.queue_free()
 
 
 func _setup_regional_visual_detail() -> void:
@@ -149,6 +194,8 @@ func _setup_regional_traffic() -> void:
 
 
 func _process(delta: float) -> void:
+	if startup_loading:
+		return
 	if is_instance_valid(_environment_controller):
 		var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
 		_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
@@ -208,6 +255,8 @@ func _toggle_growth_overlay() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if startup_loading:
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_ESCAPE:
 			if is_instance_valid(_pause_menu):

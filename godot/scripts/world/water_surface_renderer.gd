@@ -6,6 +6,8 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GameData = preload("res://scripts/core/game_data.gd")
 const WaterShader = preload("res://scripts/world/water_surface.gdshader")
+const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
+const GEOMETRY_REVISION := 1
 
 const DEFAULT_RESOLUTION := Vector2i(96, 96)
 const REGIONAL_RESOLUTION := Vector2i(192, 192)
@@ -17,6 +19,12 @@ const LAKE_SHALLOWS_COLOR := Color(0.20, 0.57, 0.64, 1.0)
 const LAKE_DEEP_COLOR := Color(0.018, 0.105, 0.245, 1.0)
 const RIVER_MAX_DEPTH := 7.5
 const LAKE_MAX_DEPTH := 9.0
+var startup_loading := true
+var startup_progress := 0.0
+var cache_directory := ""
+var cache_hit := false
+var build_duration_ms := 0
+var _build_request := 0
 
 
 func _ready() -> void:
@@ -26,7 +34,7 @@ func _ready() -> void:
 	if store != null and store.has_signal("terrain_changed"):
 		store.terrain_changed.connect(_on_terrain_changed)
 	var resolution := REGIONAL_RESOLUTION if str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID else DEFAULT_RESOLUTION
-	rebuild(seed, TerrainSurface.world_bounds(), resolution)
+	await rebuild(seed, TerrainSurface.world_bounds(), resolution, true)
 
 
 func _on_terrain_changed() -> void:
@@ -44,11 +52,34 @@ func _on_terrain_changed() -> void:
 func rebuild(
 	seed: int,
 	bounds: Rect2,
-	resolution: Vector2i = DEFAULT_RESOLUTION
+	resolution: Vector2i = DEFAULT_RESOLUTION,
+	progressive: bool = false
 ) -> void:
-	mesh = build_mesh(seed, bounds, resolution)
+	_build_request += 1
+	var request := _build_request
+	var started := Time.get_ticks_msec()
+	var map := MapDefinition.active_definition()
+	var key := VisualCache.create_key("water", {
+		"geometry_revision": GEOMETRY_REVISION,
+		"seed": seed,
+		"map_identity": {"id": map.get("id"), "generator_version": map.get("generator_version")},
+		"terrain_edits": map.get("terrain_edits", {}),
+		"bounds": bounds, "resolution": resolution,
+	})
+	var result := VisualCache.load_mesh(key, cache_directory)
+	cache_hit = result != null
+	if not cache_hit:
+		result = await build_mesh(seed, bounds, resolution, get_tree() if progressive else null, self if progressive else null)
+		if request != _build_request or not is_inside_tree() or result == null:
+			return
+		VisualCache.save_mesh(key, result, cache_directory)
+	mesh = result
 	material_override = create_water_material()
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	startup_progress = 1.0
+	startup_loading = false
+	build_duration_ms = Time.get_ticks_msec() - started
+	print("[RegionLoad] water cache=%s elapsed_ms=%d" % ["hit" if cache_hit else "miss", build_duration_ms])
 
 
 ## Creates a bounded transparent surface from point samples. Regional maps use
@@ -56,7 +87,9 @@ func rebuild(
 static func build_mesh(
 	seed: int,
 	bounds: Rect2,
-	resolution: Vector2i = DEFAULT_RESOLUTION
+	resolution: Vector2i = DEFAULT_RESOLUTION,
+	frame_tree: SceneTree = null,
+	progress_owner: Node = null
 ) -> ArrayMesh:
 	var empty_mesh := ArrayMesh.new()
 	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
@@ -71,6 +104,7 @@ static func build_mesh(
 	vertices.resize(point_count)
 	colors.resize(point_count)
 	var stride := steps.x + 1
+	var slice_start := Time.get_ticks_msec()
 
 	for grid_z in range(steps.y + 1):
 		var tz := float(grid_z) / float(steps.y)
@@ -89,6 +123,12 @@ static func build_mesh(
 				world_z
 			)
 			colors[vertex_index] = water_color_for_depth(water_kind, water_depth)
+			if frame_tree != null and Time.get_ticks_msec() - slice_start >= 8:
+				progress_owner.set("startup_progress", float(vertex_index + 1) / float(point_count))
+				await frame_tree.process_frame
+				if not is_instance_valid(progress_owner) or not progress_owner.is_inside_tree():
+					return null
+				slice_start = Time.get_ticks_msec()
 
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -101,6 +141,11 @@ static func build_mesh(
 			var bottom_right := bottom_left + 1
 			has_geometry = _append_triangle(tool, vertices, colors, top_left, bottom_left, top_right) or has_geometry
 			has_geometry = _append_triangle(tool, vertices, colors, top_right, bottom_left, bottom_right) or has_geometry
+			if frame_tree != null and Time.get_ticks_msec() - slice_start >= 8:
+				await frame_tree.process_frame
+				if not is_instance_valid(progress_owner) or not progress_owner.is_inside_tree():
+					return null
+				slice_start = Time.get_ticks_msec()
 
 	if not has_geometry:
 		return empty_mesh
@@ -156,3 +201,7 @@ static func water_color_for_depth(kind: String, depth: float) -> Color:
 static func _smoothstep(edge_low: float, edge_high: float, value: float) -> float:
 	var weight := clampf((value - edge_low) / (edge_high - edge_low), 0.0, 1.0)
 	return weight * weight * (3.0 - 2.0 * weight)
+
+
+func _exit_tree() -> void:
+	_build_request += 1

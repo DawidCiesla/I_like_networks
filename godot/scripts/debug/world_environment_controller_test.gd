@@ -73,6 +73,10 @@ func _run_tests() -> void:
 	var controller := WorldEnvironmentController.new()
 	controller.initial_time_of_day = 6.5
 	rig.add_child(controller)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 16000.0, 0.0)
+	rig.add_child(camera)
+	camera.make_current()
 	await process_frame
 	var world_environment := controller.get_node_or_null("WorldEnvironment") as WorldEnvironment
 	_expect(world_environment != null, "controller installs its environment inside the lighting rig")
@@ -82,6 +86,21 @@ func _run_tests() -> void:
 		"controller applies the dawn direction to the directional sun"
 	)
 	if world_environment != null:
+		var environment := world_environment.environment
+		_expect(environment.fog_density * 16000.0 <= 0.281, "overview fog preserves region contrast over 16 km")
+		_expect(environment.volumetric_fog_density * 4200.0 < 0.1, "overview volumetric fog cannot obscure the map")
+		_expect(environment.fog_height_density == 0.0, "below-zero terrain does not amplify height fog")
+		var overview_density := environment.fog_density
+		camera.position = Vector3(0.0, 180.0, 0.0)
+		await process_frame
+		await process_frame
+		_expect(environment.fog_density > overview_density, "zooming in restores the local atmosphere profile")
+		controller.set_time_of_day(0.0)
+		camera.position = Vector3(0.0, 16000.0, 0.0)
+		await process_frame
+		await process_frame
+		_expect(environment.fog_density * 16000.0 <= 0.281, "night fog also respects the overview contrast budget")
+		controller.set_time_of_day(6.5)
 		_expect(world_environment.environment.background_mode == Environment.BG_SKY, "controller installs a procedural sky")
 		_expect(world_environment.environment.tonemap_mode == Environment.TONE_MAPPER_FILMIC, "controller enables filmic tonemapping")
 		_expect(world_environment.environment.fog_enabled, "controller enables atmospheric fog")

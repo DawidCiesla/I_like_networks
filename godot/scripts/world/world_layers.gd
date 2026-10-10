@@ -176,7 +176,7 @@ static func _regional_water_masks(seed: int, x: float, z: float, slope: float) -
 
 
 static func _uses_regional_profile() -> bool:
-	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
+	return MapDefinition.active_map_id() != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 static func _deposit_mask(seed: int, x: float, z: float, channel: String, scale: float, threshold: float, full_abundance: float) -> float:

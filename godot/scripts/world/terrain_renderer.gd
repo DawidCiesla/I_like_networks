@@ -7,6 +7,9 @@ const GroundCoverRenderer = preload("res://scripts/world/ground_cover_renderer.g
 const LandscapeDetailRenderer = preload("res://scripts/world/landscape_detail_renderer.gd")
 const RiparianDetailRenderer = preload("res://scripts/world/riparian_detail_renderer.gd")
 const PremiumTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
+const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
+const TerrainMeshBuilder = preload("res://scripts/world/terrain_mesh_builder.gd")
+const GEOMETRY_REVISION := 1
 
 const DEFAULT_GRAIN_STRENGTH := 0.046
 const DEFAULT_HEIGHT_TINT_STRENGTH := 0.052
@@ -22,6 +25,14 @@ var bounds := Rect2()
 var _ground_cover: GroundCoverRenderer
 var _landscape_detail: LandscapeDetailRenderer
 var _riparian_detail: RiparianDetailRenderer
+var startup_loading := true
+var startup_progress := 0.0
+var cache_directory := ""
+var cache_hit := false
+var build_duration_ms := 0
+var worker_count := 0
+var _active_builder: RefCounted
+var _build_request := 0
 
 
 func _ready() -> void:
@@ -29,7 +40,7 @@ func _ready() -> void:
 	if game_store != null and game_store.has_signal("terrain_changed"):
 		game_store.terrain_changed.connect(rebuild)
 	_setup_natural_detail()
-	rebuild()
+	await rebuild(true)
 
 
 func _setup_natural_detail() -> void:
@@ -49,31 +60,77 @@ func _setup_natural_detail() -> void:
 		add_child(_riparian_detail)
 
 
-func rebuild() -> void:
+func rebuild(progressive: bool = false) -> void:
+	_build_request += 1
+	var request := _build_request
+	if _active_builder != null:
+		_active_builder.cancel_and_wait()
+		_active_builder = null
+	var started := Time.get_ticks_msec()
 	var game_store := get_node_or_null("/root/GameStore")
 	if game_store == null:
 		return
 	bounds = _world_bounds()
-	mesh = _build_mesh(bounds, int(game_store.get("city_seed")))
+	var seed := int(game_store.get("city_seed"))
+	var map := MapDefinition.active_definition()
+	var steps := TerrainSurface.grid_steps(bounds)
+	var key := VisualCache.create_key("terrain", {
+		"geometry_revision": GEOMETRY_REVISION,
+		"seed": seed,
+		"map_identity": {"id": map.get("id"), "generator_version": map.get("generator_version")},
+		"terrain_edits": map.get("terrain_edits", {}),
+		"bounds": bounds, "resolution": steps,
+	})
+	var result := VisualCache.load_mesh(key, cache_directory)
+	cache_hit = result != null and result.get_surface_count() > 0
+	worker_count = 0
+	if not cache_hit:
+		if progressive and _is_regional_map():
+			var builder := TerrainMeshBuilder.new()
+			_active_builder = builder
+			result = await builder.build(seed, bounds, steps, true, map.get("terrain_edits", {}), self)
+			if request != _build_request or not is_inside_tree():
+				return
+			worker_count = builder.worker_count
+			_active_builder = null
+		else:
+			result = await _build_mesh(bounds, seed, progressive)
+		if request != _build_request or not is_inside_tree() or result == null or result.get_surface_count() == 0:
+			return
+		VisualCache.save_mesh(key, result, cache_directory)
+	mesh = result
+	if mesh != null and mesh.get_surface_count() > 0:
+		mesh.surface_set_material(0, create_premium_material())
+	startup_progress = 1.0
+	startup_loading = false
+	build_duration_ms = Time.get_ticks_msec() - started
 	if _is_regional_map():
 		_setup_natural_detail()
+	print("[RegionLoad] terrain cache=%s workers=%d elapsed_ms=%d" % ["hit" if cache_hit else "miss", worker_count, build_duration_ms])
+
+
+func _exit_tree() -> void:
+	_build_request += 1
+	if _active_builder != null:
+		_active_builder.cancel_and_wait()
 
 
 func _is_regional_map() -> bool:
-	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
+	return MapDefinition.active_map_id() != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 func _world_bounds() -> Rect2:
 	return TerrainSurface.world_bounds()
 
 
-func _build_mesh(rect: Rect2, seed: int) -> ArrayMesh:
+func _build_mesh(rect: Rect2, seed: int, progressive: bool = false) -> ArrayMesh:
 	var steps := TerrainSurface.grid_steps(rect)
 	var x_steps := steps.x
 	var z_steps := steps.y
 	var stride := x_steps + 1
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var slice_start := Time.get_ticks_msec()
 
 	# Indexed world grid: expensive regional biome/hydrology sampling is done once
 	# per terrain vertex instead of once for every triangle corner.
@@ -82,6 +139,10 @@ func _build_mesh(rect: Rect2, seed: int) -> ArrayMesh:
 		for x_index in range(x_steps + 1):
 			var world_x := rect.position.x + rect.size.x * float(x_index) / float(x_steps)
 			_add_vertex(tool, world_x, world_z, seed)
+			if progressive and Time.get_ticks_msec() - slice_start >= 8:
+				startup_progress = float(z_index * stride + x_index + 1) / float(stride * (z_steps + 1))
+				await get_tree().process_frame
+				slice_start = Time.get_ticks_msec()
 
 	for z_index in range(z_steps):
 		for x_index in range(x_steps):
@@ -95,6 +156,9 @@ func _build_mesh(rect: Rect2, seed: int) -> ArrayMesh:
 			tool.add_index(top_left)
 			tool.add_index(bottom_right)
 			tool.add_index(bottom_left)
+			if progressive and Time.get_ticks_msec() - slice_start >= 8:
+				await get_tree().process_frame
+				slice_start = Time.get_ticks_msec()
 
 	tool.generate_normals()
 	var result := tool.commit()
@@ -120,9 +184,10 @@ static func create_premium_material() -> ShaderMaterial:
 func _add_vertex(tool: SurfaceTool, x: float, z: float, seed: int) -> void:
 	var y := TerrainSurface.height(seed, x, z)
 	var regional := _is_regional_map()
-	var color := Terrain.regional_terrain_color(seed, x, z) if regional else Terrain.terrain_color(seed, x, z)
-	var moisture := Terrain.regional_moisture(seed, x, z) if regional else 0.45
-	var ground_cover := Terrain.regional_ground_cover_potential(seed, x, z) if regional else 0.5
+	var sample: Dictionary = Terrain.regional_surface_sample(seed, x, z) if regional else {}
+	var color: Color = sample["color"] if regional else Terrain.terrain_color(seed, x, z)
+	var moisture := float(sample["moisture"]) if regional else 0.45
+	var ground_cover := float(sample["ground_cover"]) if regional else 0.5
 	tool.set_color(color)
 	# UV2 is used as compact material metadata rather than texture coordinates:
 	# x = local moisture, y = vegetation/ground-cover potential.

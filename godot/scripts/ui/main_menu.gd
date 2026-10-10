@@ -16,6 +16,7 @@ func _ready() -> void:
 	var store := get_node_or_null("/root/GameStore")
 	if is_instance_valid(store):
 		store.suppress_persistence = true
+		store.set_process(false)
 
 	if is_instance_valid(continue_button):
 		continue_button.disabled = not FileAccess.file_exists("user://save_godot_v2.json")

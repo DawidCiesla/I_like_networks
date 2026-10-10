@@ -4,6 +4,8 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
+const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
+const GEOMETRY_REVISION := 1
 const TREE_SCENES := {
 	"small": preload("res://assets/kenney/suburban/models/tree-small.glb"),
 	"large": preload("res://assets/kenney/suburban/models/tree-large.glb"),
@@ -22,16 +24,25 @@ var _tree_multimeshes: Dictionary = {}
 var _tree_model_transforms: Dictionary = {}
 var _tree_data: Array[Dictionary] = []
 var _occupancy_signature := ""
+var startup_loading := true
+var startup_progress := 0.0
+var cache_directory := ""
+var cache_hit := false
+var build_duration_ms := 0
+var _build_request := 0
 
 
 func _ready() -> void:
-	rebuild()
+	await rebuild(true)
 	GameStore.city_changed.connect(_sync_city_occupancy)
 	GameStore.state_changed.connect(_sync_city_occupancy)
 	GameStore.terrain_changed.connect(rebuild)
 
 
-func rebuild() -> void:
+func rebuild(progressive: bool = false) -> void:
+	_build_request += 1
+	var request := _build_request
+	var started := Time.get_ticks_msec()
 	for child in get_children():
 		child.queue_free()
 	_tree_data.clear()
@@ -44,28 +55,50 @@ func rebuild() -> void:
 		if regional
 		else maxf(spacing, minf(bounds.size.x, bounds.size.y) / 112.0)
 	)
-	var x := bounds.position.x
-	while x <= bounds.end.x:
-		var z := bounds.position.y
-		while z <= bounds.end.y:
-			var jitter_x := (_pseudo(x, z, 1) - 0.5) * tree_spacing * 0.88
-			var jitter_z := (_pseudo(x, z, 2) - 0.5) * tree_spacing * 0.88
-			var px := x + jitter_x
-			var pz := z + jitter_z
-			if _should_place_tree(px, pz):
+	var map := MapDefinition.active_definition()
+	var key := VisualCache.create_key("vegetation", {
+		"geometry_revision": GEOMETRY_REVISION,
+		"seed": GameStore.city_seed,
+		"map_identity": {"id": map.get("id"), "generator_version": map.get("generator_version")},
+		"terrain_edits": map.get("terrain_edits", {}),
+		"bounds": bounds, "resolution": Vector2(tree_spacing, tree_spacing),
+	})
+	var cached: Variant = VisualCache.load_data(key, cache_directory)
+	cache_hit = _valid_cached_trees(cached)
+	if cache_hit:
+		_tree_data.assign(cached)
+	else:
+		var x := bounds.position.x
+		var slice_start := Time.get_ticks_msec()
+		while x <= bounds.end.x:
+			var z := bounds.position.y
+			while z <= bounds.end.y:
+				var jitter_x := (_pseudo(x, z, 1) - 0.5) * tree_spacing * 0.88
+				var jitter_z := (_pseudo(x, z, 2) - 0.5) * tree_spacing * 0.88
+				var px := x + jitter_x
+				var pz := z + jitter_z
 				var forest := _forest_potential(px, pz)
-				var large_threshold := lerpf(0.68, 0.39, clampf((forest - 0.46) / 0.46, 0.0, 1.0))
-				var tree_type := "large" if _pseudo(px, pz, 6) > large_threshold else "small"
-				_tree_data.append({
-					"x": px,
-					"z": pz,
-					"type": tree_type,
-					"scale": (0.62 + _pseudo(px, pz, 4) * 0.94) if regional else (0.72 + _pseudo(px, pz, 4) * 0.68),
-					"rotation": _pseudo(px, pz, 5) * TAU,
-					"ground": TerrainSurface.height(GameStore.city_seed, px, pz),
-				})
-			z += tree_spacing
-		x += tree_spacing
+				if _should_place_tree(px, pz, forest):
+					var large_threshold := lerpf(0.68, 0.39, clampf((forest - 0.46) / 0.46, 0.0, 1.0))
+					var tree_type := "large" if _pseudo(px, pz, 6) > large_threshold else "small"
+					_tree_data.append({
+						"x": px,
+						"z": pz,
+						"type": tree_type,
+						"scale": (0.62 + _pseudo(px, pz, 4) * 0.94) if regional else (0.72 + _pseudo(px, pz, 4) * 0.68),
+						"rotation": _pseudo(px, pz, 5) * TAU,
+						"ground": TerrainSurface.height(GameStore.city_seed, px, pz),
+					})
+				z += tree_spacing
+				if progressive and Time.get_ticks_msec() - slice_start >= 8:
+					startup_progress = clampf((x - bounds.position.x) / bounds.size.x, 0.0, 1.0)
+					await get_tree().process_frame
+					if request != _build_request or not is_inside_tree():
+						return
+					slice_start = Time.get_ticks_msec()
+			x += tree_spacing
+
+		VisualCache.save_data(key, _tree_data, cache_directory)
 
 	var counts := {"small": 0, "large": 0}
 	for tree in _tree_data:
@@ -97,6 +130,10 @@ func rebuild() -> void:
 		source_root.free()
 	_occupancy_signature = ""
 	_sync_city_occupancy(true)
+	startup_progress = 1.0
+	startup_loading = false
+	build_duration_ms = Time.get_ticks_msec() - started
+	print("[RegionLoad] vegetation cache=%s elapsed_ms=%d" % ["hit" if cache_hit else "miss", build_duration_ms])
 
 
 func _sync_city_occupancy(force: bool = false) -> void:
@@ -207,7 +244,7 @@ func _point_in_parcel(point: Vector2, parcel: Dictionary, padding: float) -> boo
 
 
 func _is_regional_map() -> bool:
-	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
+	return MapDefinition.active_map_id() != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 func _forest_potential(x: float, z: float) -> float:
@@ -218,8 +255,9 @@ func _forest_potential(x: float, z: float) -> float:
 	)
 
 
-func _should_place_tree(x: float, z: float) -> bool:
-	var forest := _forest_potential(x, z)
+func _should_place_tree(x: float, z: float, forest: float = -1.0) -> bool:
+	if forest < 0.0:
+		forest = _forest_potential(x, z)
 	var threshold := 0.49 if _is_regional_map() else 0.59
 	if forest < threshold:
 		return false
@@ -285,3 +323,19 @@ func _world_bounds() -> Rect2:
 		Vector2(min_x - margin, min_z - margin),
 		Vector2(max_x - min_x + margin * 2.0, max_z - min_z + margin * 2.0)
 	)
+
+
+func _valid_cached_trees(value: Variant) -> bool:
+	if typeof(value) != TYPE_ARRAY or value.size() > 100000:
+		return false
+	for tree in value:
+		if typeof(tree) != TYPE_DICTIONARY or tree.get("type", "") not in ["small", "large"]:
+			return false
+		for field in ["x", "z", "scale", "rotation", "ground"]:
+			if typeof(tree.get(field)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(tree[field])):
+				return false
+	return true
+
+
+func _exit_tree() -> void:
+	_build_request += 1

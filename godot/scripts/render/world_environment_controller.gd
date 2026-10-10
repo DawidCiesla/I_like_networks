@@ -116,6 +116,12 @@ var _world_environment: WorldEnvironment
 var _environment: Environment
 var _sky_material: ProceduralSkyMaterial
 var _environment_properties: Dictionary = {}
+var _profile_fog_density := 0.0001
+var _last_fog_distance := -1.0
+
+# World units are metres; preserve map contrast over kilometre camera ranges.
+const MAX_VIEW_FOG_DEPTH := 0.28
+const VOLUMETRIC_DENSITY_RATIO := 0.35
 
 
 func _ready() -> void:
@@ -150,6 +156,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if auto_advance_hours_per_second > 0.0:
 		advance_time(auto_advance_hours_per_second * delta)
+	_update_atmosphere()
 
 
 func set_time_of_day(hour: float) -> void:
@@ -235,7 +242,7 @@ func _configure_high_end_rendering() -> void:
 	_set_environment_property("glow_bloom", 0.02)
 
 	_set_environment_property("volumetric_fog_enabled", true)
-	_set_environment_property("volumetric_fog_density", 0.0065)
+	_set_environment_property("volumetric_fog_density", 0.000035)
 	_set_environment_property("volumetric_fog_albedo", Color(0.91, 0.94, 0.96))
 	_set_environment_property("volumetric_fog_emission", Color(0.0, 0.0, 0.0))
 	_set_environment_property("volumetric_fog_emission_energy", 0.0)
@@ -254,7 +261,7 @@ func _configure_high_end_rendering() -> void:
 	_set_environment_property("tonemap_white", 1.15)
 	_set_environment_property("fog_sun_scatter", 0.18)
 	_set_environment_property("fog_height", 18.0)
-	_set_environment_property("fog_height_density", 0.065)
+	_set_environment_property("fog_height_density", 0.0)
 
 
 func _configure_directional_lighting() -> void:
@@ -307,11 +314,25 @@ func _apply_profile(profile: Dictionary) -> void:
 	_environment.ambient_light_color = profile["ambient_color"]
 	_environment.ambient_light_energy = float(profile["ambient_energy"])
 	_environment.fog_light_color = profile["fog_color"]
-	_environment.fog_density = float(profile["fog_density"])
+	_profile_fog_density = float(profile["fog_density"])
+	_update_atmosphere(true)
 	if RenderingServer.get_current_rendering_method() == "forward_plus":
 		var fog_color: Color = profile["fog_color"]
 		_set_environment_property("volumetric_fog_albedo", fog_color.lerp(Color.WHITE, 0.38))
-		_set_environment_property("volumetric_fog_density", 0.0048 + float(profile["fog_density"]) * 7.5)
+
+
+func _update_atmosphere(force: bool = false) -> void:
+	if not is_instance_valid(_environment):
+		return
+	var active_camera := get_viewport().get_camera_3d()
+	# The orbit camera's local position is its distance to the terrain target.
+	var view_distance := maxf(1.0, active_camera.position.length()) if active_camera != null else 1350.0
+	if not force and is_equal_approx(view_distance, _last_fog_distance):
+		return
+	_last_fog_distance = view_distance
+	var density := minf(_profile_fog_density, MAX_VIEW_FOG_DEPTH / view_distance)
+	_environment.fog_density = density
+	_set_environment_property("volumetric_fog_density", density * VOLUMETRIC_DENSITY_RATIO)
 
 
 static func _normalize_hour(hour: float) -> float:

@@ -16,6 +16,7 @@ const VERTEX_HEIGHT_CACHE_CAPACITY := 32768
 static var _world_bounds_cached := false
 static var _cached_world_bounds := Rect2()
 static var _cached_world_bounds_key := ""
+static var _cached_map_revision := -1
 static var _vertex_height_cache_seed := 0
 static var _vertex_height_cache_seed_initialized := false
 static var _vertex_height_cache_profile := ""
@@ -40,6 +41,10 @@ static func set_terrain_edit_payload(payload: Variant) -> void:
 
 
 static func world_bounds() -> Rect2:
+	var revision := MapDefinition.active_revision()
+	if _world_bounds_cached and revision == _cached_map_revision:
+		return _cached_world_bounds
+	_cached_map_revision = revision
 	var map_payload := MapDefinition.active_definition()
 	var map_id := str(map_payload.get("id", MapDefinition.LEGACY_CITY_MAP_ID))
 	var bounds_payload: Dictionary = map_payload.get("bounds", {})
@@ -130,7 +135,7 @@ static func _terrain_edit_delta(seed: int, x: float, z: float) -> float:
 
 
 static func _uses_regional_profile() -> bool:
-	return str(MapDefinition.active_definition().get("id", MapDefinition.LEGACY_CITY_MAP_ID)) != MapDefinition.LEGACY_CITY_MAP_ID
+	return MapDefinition.active_map_id() != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 static func _profile_key() -> String:

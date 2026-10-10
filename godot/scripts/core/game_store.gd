@@ -91,8 +91,16 @@ var _resident_health_snapshot_cache: Dictionary = {}
 var suppress_persistence := false
 
 func _ready() -> void:
-	reset_state(false)
-	load_game()
+	# The menu needs defaults, not a generated region or a running simulation.
+	reset_state(false, Data.DEFAULT_CITY_SEED, false)
+	set_process(false)
+
+func ensure_game_initialized() -> void:
+	if city.is_empty():
+		load_game()
+		if city.is_empty():
+			reset_state(false)
+	set_process(true)
 
 func _process(delta: float) -> void:
 	if simulation_speed > 0:
@@ -1326,7 +1334,7 @@ func _resident_point(value: Variant) -> Vector2:
 		return Vector2(float(point.get("x", 0.0)), float(point.get("y", 0.0)))
 	return Vector2.ZERO
 
-func reset_state(emit_signal: bool = true, new_city_seed: int = Data.DEFAULT_CITY_SEED) -> void:
+func reset_state(emit_signal: bool = true, new_city_seed: int = Data.DEFAULT_CITY_SEED, generate_city: bool = true) -> void:
 	elapsed_seconds = 0.0
 	simulation_speed = 1
 	city_seed = new_city_seed
@@ -1361,10 +1369,12 @@ func reset_state(emit_signal: bool = true, new_city_seed: int = Data.DEFAULT_CIT
 		"position": null,
 	}
 
-	city = CityRuntime.create_initial_city(city_seed, str(world_map.get("id", WorldMapDefinition.LEGACY_CITY_MAP_ID)))
-	_sync_world_map_external_connections()
+	city = {}
 	transit_network = _empty_transit_network()
-	CityRuntime.sync_with_transport(self)
+	if generate_city:
+		city = CityRuntime.create_initial_city(city_seed, str(world_map.get("id", WorldMapDefinition.LEGACY_CITY_MAP_ID)))
+		_sync_world_map_external_connections()
+		CityRuntime.sync_with_transport(self)
 
 	stats = {
 		"lifetime_revenue": 0.0,
@@ -1376,7 +1386,7 @@ func reset_state(emit_signal: bool = true, new_city_seed: int = Data.DEFAULT_CIT
 		"last_fare_line": "",
 		"last_fare_stop_index": -1,
 	}
-	if is_sandbox():
+	if generate_city and is_sandbox():
 		var initial_transport := _resident_transport_snapshot()
 		var initial_metrics: Dictionary = initial_transport.get("metrics", {})
 		var initial_health: Dictionary = ResidentHealth.advance(
@@ -5110,7 +5120,7 @@ func _request_toast(message: String) -> void:
 	toast_requested.emit(message)
 
 func save_game() -> void:
-	if suppress_persistence:
+	if suppress_persistence or city.is_empty():
 		return
 	_write_save_payload_atomically(SAVE_PATH, _current_save_payload())
 
@@ -5288,10 +5298,14 @@ func _apply_payload(parsed: Dictionary) -> void:
 	stations = parsed.get("stations", stations)
 	depot = parsed.get("depot", depot)
 	stats = parsed.get("stats", stats)
-	city = parsed.get("city", CityRuntime.create_initial_city(
-		city_seed,
-		str(world_map.get("id", WorldMapDefinition.LEGACY_CITY_MAP_ID))
-	))
+	# Dictionary.get evaluates its fallback even when the saved city exists.
+	if parsed.has("city"):
+		city = parsed["city"]
+	else:
+		city = CityRuntime.create_initial_city(
+			city_seed,
+			str(world_map.get("id", WorldMapDefinition.LEGACY_CITY_MAP_ID))
+		)
 	city["world_map_id"] = str(world_map.get("id", WorldMapDefinition.LEGACY_CITY_MAP_ID))
 	city["world_seed"] = int(world_map.get("seed", city_seed))
 	city["generator_version"] = int(world_map.get("generator_version", WorldMapDefinition.GENERATOR_VERSION))
