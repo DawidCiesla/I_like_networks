@@ -5,6 +5,7 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
+const RoadSpatialIndex = preload("res://scripts/world/detail_road_spatial_index.gd")
 const GEOMETRY_REVISION := 1
 const TREE_SCENES := {
 	"small": preload("res://assets/kenney/suburban/models/tree-small.glb"),
@@ -16,12 +17,16 @@ const TREE_MODEL_SCALE := {
 }
 const REGIONAL_TREE_GRID_DIVISOR := 228.0
 const REGIONAL_MIN_SPACING := 82.0
+const REGIONAL_TILE_SIZE := 900.0
+const REGIONAL_VISIBILITY_END := 2200.0
+const PARCEL_INDEX_CELL_SIZE := 220.0
 
 @export var spacing := 78.0
 @export var margin := 560.0
 
 var _tree_multimeshes: Dictionary = {}
 var _tree_model_transforms: Dictionary = {}
+var _tree_batch_origins: Dictionary = {}
 var _tree_data: Array[Dictionary] = []
 var _occupancy_signature := ""
 var startup_loading := true
@@ -48,6 +53,7 @@ func rebuild(progressive: bool = false) -> void:
 	_tree_data.clear()
 	_tree_multimeshes.clear()
 	_tree_model_transforms.clear()
+	_tree_batch_origins.clear()
 	var bounds := _world_bounds()
 	var regional := _is_regional_map()
 	var tree_spacing := (
@@ -91,49 +97,103 @@ func rebuild(progressive: bool = false) -> void:
 					})
 				z += tree_spacing
 				if progressive and Time.get_ticks_msec() - slice_start >= 8:
-					startup_progress = clampf((x - bounds.position.x) / bounds.size.x, 0.0, 1.0)
+					startup_progress = clampf((x - bounds.position.x) / bounds.size.x, 0.0, 1.0) * 0.86
 					await get_tree().process_frame
 					if request != _build_request or not is_inside_tree():
 						return
 					slice_start = Time.get_ticks_msec()
 			x += tree_spacing
-
 		VisualCache.save_data(key, _tree_data, cache_directory)
 
-	var counts := {"small": 0, "large": 0}
-	for tree in _tree_data:
-		var tree_type := str(tree["type"])
-		tree["instance_index"] = int(counts[tree_type])
-		counts[tree_type] = int(counts[tree_type]) + 1
-	for tree_type in counts:
-		var count := int(counts[tree_type])
-		if count <= 0:
-			continue
-		var source_root: Node = TREE_SCENES[tree_type].instantiate()
-		var mesh_data := _find_tree_mesh(source_root, Transform3D.IDENTITY)
-		if mesh_data.is_empty():
-			source_root.free()
-			continue
-		var multi := MultiMesh.new()
-		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = mesh_data["mesh"]
-		multi.instance_count = count
-		_tree_multimeshes[tree_type] = multi
-		_tree_model_transforms[tree_type] = mesh_data["transform"]
-		var tree_instances := MultiMeshInstance3D.new()
-		tree_instances.name = "KenneyTrees%s" % tree_type.capitalize()
-		tree_instances.multimesh = multi
-		tree_instances.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		tree_instances.visibility_range_end = 6800.0 if regional else 5200.0
-		tree_instances.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-		add_child(tree_instances)
-		source_root.free()
+	_build_tree_batches(regional)
+	if request != _build_request or not is_inside_tree():
+		return
 	_occupancy_signature = ""
 	_sync_city_occupancy(true)
 	startup_progress = 1.0
 	startup_loading = false
 	build_duration_ms = Time.get_ticks_msec() - started
-	print("[RegionLoad] vegetation cache=%s elapsed_ms=%d" % ["hit" if cache_hit else "miss", build_duration_ms])
+	print("[RegionLoad] vegetation cache=%s batches=%d elapsed_ms=%d" % [
+		"hit" if cache_hit else "miss", _tree_multimeshes.size(), build_duration_ms
+	])
+
+
+func _build_tree_batches(regional: bool) -> void:
+	var mesh_data_by_type: Dictionary = {}
+	for tree_type in TREE_SCENES.keys():
+		var source_root: Node = TREE_SCENES[tree_type].instantiate()
+		var mesh_data := _find_tree_mesh(source_root, Transform3D.IDENTITY)
+		source_root.free()
+		if not mesh_data.is_empty():
+			mesh_data_by_type[tree_type] = mesh_data
+			_tree_model_transforms[tree_type] = mesh_data["transform"]
+
+	var groups: Dictionary = {}
+	for tree_index in range(_tree_data.size()):
+		var tree: Dictionary = _tree_data[tree_index]
+		var tree_type := str(tree.get("type", "small"))
+		if not mesh_data_by_type.has(tree_type):
+			continue
+		var tile := Vector2i.ZERO
+		if regional:
+			tile = Vector2i(
+				floori(float(tree["x"]) / REGIONAL_TILE_SIZE),
+				floori(float(tree["z"]) / REGIONAL_TILE_SIZE)
+			)
+		var batch_key := "%d:%d:%s" % [tile.x, tile.y, tree_type]
+		var group: Dictionary = groups.get(batch_key, {
+			"type": tree_type,
+			"tile": tile,
+			"indices": [],
+		})
+		var indices: Array = group["indices"]
+		tree["batch_key"] = batch_key
+		tree["instance_index"] = indices.size()
+		indices.append(tree_index)
+		group["indices"] = indices
+		groups[batch_key] = group
+
+	var group_keys: Array = groups.keys()
+	group_keys.sort()
+	for batch_key_value in group_keys:
+		var batch_key := str(batch_key_value)
+		var group: Dictionary = groups[batch_key]
+		var tree_type := str(group["type"])
+		var tile: Vector2i = group["tile"]
+		var indices: Array = group["indices"]
+		if indices.is_empty():
+			continue
+		var origin := Vector2.ZERO
+		if regional:
+			origin = Vector2(float(tile.x) * REGIONAL_TILE_SIZE, float(tile.y) * REGIONAL_TILE_SIZE)
+		_tree_batch_origins[batch_key] = origin
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.mesh = (mesh_data_by_type[tree_type] as Dictionary)["mesh"]
+		multi.instance_count = indices.size()
+		_tree_multimeshes[batch_key] = multi
+		var tree_instances := MultiMeshInstance3D.new()
+		tree_instances.name = "TreeTile_%s" % batch_key.replace(":", "_")
+		tree_instances.position = Vector3(origin.x, 0.0, origin.y)
+		tree_instances.multimesh = multi
+		tree_instances.cast_shadow = (
+			GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			if regional else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		)
+		tree_instances.visibility_range_end = REGIONAL_VISIBILITY_END if regional else 5200.0
+		tree_instances.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+		add_child(tree_instances)
+
+		var model_transform: Transform3D = _tree_model_transforms[tree_type]
+		for tree_index_value in indices:
+			var tree: Dictionary = _tree_data[int(tree_index_value)]
+			var asset_scale := float(tree["scale"]) * float(TREE_MODEL_SCALE[tree_type])
+			var basis := Basis(Vector3.UP, float(tree["rotation"])).scaled(Vector3.ONE * asset_scale)
+			var local_transform := Transform3D(
+				basis,
+				Vector3(float(tree["x"]) - origin.x, float(tree["ground"]), float(tree["z"]) - origin.y)
+			)
+			multi.set_instance_transform(int(tree["instance_index"]), local_transform * model_transform)
 
 
 func _sync_city_occupancy(force: bool = false) -> void:
@@ -143,44 +203,76 @@ func _sync_city_occupancy(force: bool = false) -> void:
 	if not force and signature == _occupancy_signature:
 		return
 	_occupancy_signature = signature
+
 	var active_roads: Array = []
 	if not GameStore.city.is_empty():
 		for road in GameStore.city.get("roads", []):
 			if str(road.get("status", "")) in ["built", "constructing"]:
 				active_roads.append(road)
+	var road_index := RoadSpatialIndex.new()
+	road_index.rebuild(active_roads)
+
 	var parcel_lookup: Dictionary = {}
 	if not GameStore.city.is_empty():
 		for parcel in GameStore.city.get("parcels", []):
 			parcel_lookup[str(parcel["id"])] = parcel
-	var occupied_parcels: Array = []
+	var occupied_parcel_index: Dictionary = {}
 	if not GameStore.city.is_empty():
 		for building in GameStore.city.get("buildings", []):
 			var parcel: Dictionary = parcel_lookup.get(str(building.get("parcelId", "")), {})
 			if not parcel.is_empty():
-				occupied_parcels.append(parcel)
+				_index_occupied_parcel(occupied_parcel_index, parcel)
 
-	for index in range(_tree_data.size()):
-		var tree: Dictionary = _tree_data[index]
+	for tree_index in range(_tree_data.size()):
+		var tree: Dictionary = _tree_data[tree_index]
 		var point := Vector2(float(tree["x"]), float(tree["z"]))
-		var blocked := false
-		for road in active_roads:
-			if _point_near_road(point, road, 16.0):
-				blocked = true
-				break
+		var blocked := road_index.point_near_road(point, 16.0)
 		if not blocked:
-			for parcel in occupied_parcels:
-				if _point_in_parcel(point, parcel, 10.0):
-					blocked = true
-					break
+			blocked = _point_in_indexed_parcel(point, occupied_parcel_index, 10.0)
 		var scale := 0.0001 if blocked else float(tree["scale"])
 		var tree_type := str(tree["type"])
-		var multimesh: MultiMesh = _tree_multimeshes.get(tree_type)
+		var batch_key := str(tree.get("batch_key", ""))
+		var multimesh: MultiMesh = _tree_multimeshes.get(batch_key)
 		if multimesh == null:
 			continue
+		var origin: Vector2 = _tree_batch_origins.get(batch_key, Vector2.ZERO)
 		var asset_scale := scale * float(TREE_MODEL_SCALE[tree_type])
 		var basis := Basis(Vector3.UP, float(tree["rotation"])).scaled(Vector3.ONE * asset_scale)
-		var transform := Transform3D(basis, Vector3(float(tree["x"]), float(tree["ground"]), float(tree["z"])))
-		multimesh.set_instance_transform(int(tree["instance_index"]), transform * _tree_model_transforms[tree_type])
+		var transform := Transform3D(
+			basis,
+			Vector3(float(tree["x"]) - origin.x, float(tree["ground"]), float(tree["z"]) - origin.y)
+		)
+		multimesh.set_instance_transform(
+			int(tree["instance_index"]),
+			transform * (_tree_model_transforms[tree_type] as Transform3D)
+		)
+
+
+func _index_occupied_parcel(index: Dictionary, parcel: Dictionary) -> void:
+	var half_w := float(parcel.get("w", 0.0)) * 0.5 + 12.0
+	var half_h := float(parcel.get("h", 0.0)) * 0.5 + 12.0
+	var min_x := floori((float(parcel.get("x", 0.0)) - half_w) / PARCEL_INDEX_CELL_SIZE)
+	var max_x := floori((float(parcel.get("x", 0.0)) + half_w) / PARCEL_INDEX_CELL_SIZE)
+	var min_y := floori((float(parcel.get("y", 0.0)) - half_h) / PARCEL_INDEX_CELL_SIZE)
+	var max_y := floori((float(parcel.get("y", 0.0)) + half_h) / PARCEL_INDEX_CELL_SIZE)
+	for cell_y in range(min_y, max_y + 1):
+		for cell_x in range(min_x, max_x + 1):
+			var key := Vector2i(cell_x, cell_y)
+			var bucket: Array = index.get(key, [])
+			bucket.append(parcel)
+			index[key] = bucket
+
+
+func _point_in_indexed_parcel(point: Vector2, index: Dictionary, padding: float) -> bool:
+	var key := Vector2i(
+		floori(point.x / PARCEL_INDEX_CELL_SIZE),
+		floori(point.y / PARCEL_INDEX_CELL_SIZE)
+	)
+	for parcel_value in index.get(key, []):
+		var parcel: Dictionary = parcel_value
+		if _point_in_parcel(point, parcel, padding):
+			return true
+	return false
 
 
 func _find_tree_mesh(node: Node, parent_transform: Transform3D) -> Dictionary:
@@ -211,30 +303,6 @@ func _city_occupancy_signature() -> String:
 		building_parts.append(str(building["parcelId"]))
 	building_parts.sort()
 	return "%s::%s" % ["|".join(road_parts), "|".join(building_parts)]
-
-
-func _point_near_road(point: Vector2, road: Dictionary, extra: float) -> bool:
-	var width := 15.0
-	match str(road.get("class", "local")):
-		"arterial": width = 31.0
-		"collector": width = 21.0
-		"service": width = 12.0
-	var points: Array = road.get("points", [])
-	for index in range(points.size() - 1):
-		var a := _road_point(points[index])
-		var b := _road_point(points[index + 1])
-		if _distance_to_segment(point, a, b) < width * 0.5 + extra:
-			return true
-	return false
-
-
-static func _road_point(value: Variant) -> Vector2:
-	if value is Vector2:
-		return value
-	if typeof(value) == TYPE_DICTIONARY:
-		var point: Dictionary = value
-		return Vector2(float(point.get("x", 0.0)), float(point.get("y", 0.0)))
-	return Vector2.ZERO
 
 
 func _point_in_parcel(point: Vector2, parcel: Dictionary, padding: float) -> bool:
