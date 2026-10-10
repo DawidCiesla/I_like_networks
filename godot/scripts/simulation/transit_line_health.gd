@@ -7,6 +7,7 @@ const SEVERE_CONGESTION_FACTOR := 1.75
 const LOAD_WARNING_RATIO := 0.85
 const OVERLOAD_RATIO := 1.0
 const LONG_HEADWAY_MINUTES := 15.0
+const TARGET_HEADWAY_TOLERANCE := 1.15
 
 
 ## Converts raw line operations metrics into a stable gameplay-facing status.
@@ -24,6 +25,19 @@ static func evaluate(line: Dictionary) -> Dictionary:
 	var crowding_ratio := maxf(0.0, float(line.get("crowding_ratio", 0.0)))
 	var utilization := demand_ppm / capacity_ppm if capacity_ppm > EPSILON else (INF if demand_ppm > EPSILON else 0.0)
 	var effective_load := maxf(crowding_ratio, utilization if is_finite(utilization) else 0.0)
+	var stored_target := float(line.get("target_headway_minutes", 0.0))
+	var target_active := stored_target > EPSILON
+	var target_headway := stored_target if target_active else LONG_HEADWAY_MINUTES
+	var under_service_threshold := (
+		target_headway * TARGET_HEADWAY_TOLERANCE
+		if target_active
+		else LONG_HEADWAY_MINUTES
+	)
+	var target_ratio := (
+		headway / target_headway
+		if target_active and target_headway > EPSILON and is_finite(headway)
+		else 0.0
+	)
 
 	var status := "healthy"
 	var severity := 0
@@ -60,10 +74,10 @@ static func evaluate(line: Dictionary) -> Dictionary:
 		severity = 2
 		reason = "road_congestion"
 		recommended_action = "improve_corridor"
-	elif is_finite(headway) and headway >= LONG_HEADWAY_MINUTES and demand_ppm > EPSILON:
+	elif is_finite(headway) and headway >= under_service_threshold and demand_ppm > EPSILON:
 		status = "under_served"
 		severity = 1
-		reason = "long_headway"
+		reason = "headway_above_target" if target_active else "long_headway"
 		recommended_action = "add_vehicle"
 
 	return {
@@ -79,4 +93,8 @@ static func evaluate(line: Dictionary) -> Dictionary:
 		"traffic_delay_factor": delay_factor,
 		"headway_minutes": headway,
 		"crowding_ratio": crowding_ratio,
+		"target_headway_active": target_active,
+		"target_headway_minutes": target_headway,
+		"target_headway_tolerance": TARGET_HEADWAY_TOLERANCE,
+		"headway_target_ratio": target_ratio,
 	}
