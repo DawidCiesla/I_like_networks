@@ -2,12 +2,22 @@ extends SceneTree
 
 const RegionalAccessibility = preload("res://scripts/city/regional_accessibility.gd")
 
+class AccessibilityStore:
+	extends Node
+	var city: Dictionary = {}
+	var metrics: Dictionary = {}
+
+	func resident_transport_metrics() -> Dictionary:
+		return metrics
+
+
 var _failures := 0
 
 
 func _init() -> void:
 	_test_good_access_scores_above_poor_access()
 	_test_congestion_reduces_reliability()
+	_test_apply_persists_snapshot_and_settlement_fields()
 	_test_missing_metrics_stay_explicit()
 	if _failures > 0:
 		push_error("REGIONAL ACCESSIBILITY TEST: FAIL (%d checks)" % _failures)
@@ -19,22 +29,7 @@ func _init() -> void:
 
 func _test_good_access_scores_above_poor_access() -> void:
 	var city := _city()
-	var metrics := {
-		"districts": {
-			"good": {
-				"average_commute_minutes": 18.0,
-				"unserved_share": 0.02,
-				"transit_share": 0.32,
-				"car_share": 0.66,
-			},
-			"poor": {
-				"average_commute_minutes": 49.0,
-				"unserved_share": 0.24,
-				"transit_share": 0.03,
-				"car_share": 0.73,
-			},
-		},
-	}
+	var metrics := _metrics()
 	var scores := RegionalAccessibility.evaluate(city, metrics)
 	var good: Dictionary = scores.get("good", {})
 	var poor: Dictionary = scores.get("poor", {})
@@ -70,12 +65,50 @@ func _test_congestion_reduces_reliability() -> void:
 	_expect(float(congested.get("local_max_vc_ratio", 0.0)) > 1.0, "diagnostics expose the severe local V/C value")
 
 
+func _test_apply_persists_snapshot_and_settlement_fields() -> void:
+	var store := AccessibilityStore.new()
+	store.city = _city()
+	store.city["time_seconds"] = 1234.0
+	store.metrics = _metrics()
+	var snapshot := RegionalAccessibility.apply(store)
+	_expect(typeof(snapshot.get("settlements", null)) == TYPE_DICTIONARY, "apply returns the canonical settlement score table")
+	_expect(is_equal_approx(float(snapshot.get("updated_at", 0.0)), 1234.0), "accessibility snapshot records simulation time")
+	var stored: Dictionary = store.city.get("regional_accessibility", {})
+	_expect(not stored.is_empty(), "apply stores canonical accessibility under city state")
+	var good: Dictionary = RegionalAccessibility.snapshot_row(store.city, "good")
+	_expect(bool(good.get("available", false)), "snapshot row helper exposes available settlement accessibility")
+	var good_settlement: Dictionary = store.city["regional_settlements"][0]
+	_expect(bool(good_settlement.get("mobilityAccessibilityAvailable", false)), "settlement receives a lightweight availability field for inspectors/growth")
+	_expect(is_equal_approx(float(good_settlement.get("mobilityAccessibility", -1.0)), float(good.get("score", -2.0))), "settlement lightweight score matches canonical snapshot")
+	_expect(float(good_settlement.get("mobilityAverageCommuteMinutes", 0.0)) > 0.0, "settlement exposes commute diagnostic without recomputing OD")
+	store.free()
+
+
 func _test_missing_metrics_stay_explicit() -> void:
 	var result := RegionalAccessibility.evaluate(_city(), {"districts": {}})
 	for settlement_id in ["good", "poor"]:
 		var row: Dictionary = result.get(settlement_id, {})
 		_expect(not bool(row.get("available", true)), "missing resident metrics do not fabricate accessibility for %s" % settlement_id)
 		_expect(str(row.get("reason", "")) == "transport_metrics_unavailable", "missing-data reason remains explicit")
+
+
+func _metrics() -> Dictionary:
+	return {
+		"districts": {
+			"good": {
+				"average_commute_minutes": 18.0,
+				"unserved_share": 0.02,
+				"transit_share": 0.32,
+				"car_share": 0.66,
+			},
+			"poor": {
+				"average_commute_minutes": 49.0,
+				"unserved_share": 0.24,
+				"transit_share": 0.03,
+				"car_share": 0.73,
+			},
+		},
+	}
 
 
 func _city() -> Dictionary:
