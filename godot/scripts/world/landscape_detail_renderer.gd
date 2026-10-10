@@ -7,16 +7,16 @@ const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const DetailShader = preload("res://scripts/world/landscape_detail.gdshader")
 const RoadSpatialIndex = preload("res://scripts/world/detail_road_spatial_index.gd")
 
-const PATCH_RADIUS_METERS := 880.0
-const SAMPLE_SPACING_METERS := 38.0
-const REBUILD_DISTANCE_METERS := 210.0
-const MAX_CAMERA_HEIGHT_METERS := 1900.0
-const MAX_ROCKS := 1000
-const MAX_SHRUBS := 1700
+const PATCH_RADIUS_METERS := 620.0
+const SAMPLE_SPACING_METERS := 44.0
+const REBUILD_DISTANCE_METERS := 280.0
+const MAX_CAMERA_HEIGHT_METERS := 1250.0
+const MAX_ROCKS := 550
+const MAX_SHRUBS := 850
 const ROAD_CLEARANCE_METERS := 22.0
 const SETTLEMENT_CLEARANCE_FACTOR := 0.78
-const SLICE_BUDGET_USEC := 950
-const CAMERA_POLL_SECONDS := 0.15
+const SLICE_BUDGET_USEC := 550
+const CAMERA_POLL_SECONDS := 0.17
 
 var _store: Node
 var _rock_instance: MultiMeshInstance3D
@@ -27,7 +27,7 @@ var _last_anchor := Vector2(INF, INF)
 var _dirty := true
 var _elapsed := 0.0
 var _road_index := RoadSpatialIndex.new()
-var _road_count := -1
+var _road_signature := ""
 var _road_index_dirty := true
 
 var _build_active := false
@@ -60,7 +60,7 @@ func _ready() -> void:
 			_store.city_changed.connect(_on_city_changed)
 		if _store.has_signal("terrain_changed"):
 			_store.terrain_changed.connect(_mark_dirty)
-	_refresh_road_count()
+	_road_signature = _current_road_signature()
 	_mark_dirty()
 
 
@@ -94,29 +94,40 @@ func _process(delta: float) -> void:
 func _create_renderers() -> void:
 	_rock_instance = MultiMeshInstance3D.new()
 	_rock_instance.name = "ProceduralRocks"
-	_rock_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	_rock_instance.visibility_range_end = 2400.0
+	_rock_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_rock_instance.visibility_range_end = 1500.0
 	_rock_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(_rock_instance)
 
 	_shrub_instance = MultiMeshInstance3D.new()
 	_shrub_instance.name = "ProceduralShrubs"
 	_shrub_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_shrub_instance.visibility_range_end = 1700.0
+	_shrub_instance.visibility_range_end = 1150.0
 	_shrub_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(_shrub_instance)
 
 
 func _on_city_changed() -> void:
-	var previous := _road_count
-	_refresh_road_count()
-	if previous != _road_count:
-		_road_index_dirty = true
-		_dirty = true
+	var next_signature := _current_road_signature()
+	if next_signature == _road_signature:
+		return
+	_road_signature = next_signature
+	_road_index_dirty = true
+	_dirty = true
 
 
-func _refresh_road_count() -> void:
-	_road_count = _active_roads().size()
+func _current_road_signature() -> String:
+	var parts: Array[String] = []
+	for road_value in _active_roads():
+		var road: Dictionary = road_value
+		parts.append("%s:%s:%s:%d" % [
+			str(road.get("id", "")),
+			str(road.get("status", "")),
+			str(road.get("class", "")),
+			str(road.get("points", [])).hash(),
+		])
+	parts.sort()
+	return "|".join(parts)
 
 
 func _mark_dirty() -> void:
@@ -197,54 +208,68 @@ func _process_candidate(dx: int, dz: int) -> void:
 	if water_depth > 0.01 or slope > 38.0:
 		return
 	var moisture := Terrain.regional_moisture(_build_seed, point.x, point.y)
-	var cover := Terrain.regional_ground_cover_potential(_build_seed, point.x, point.y)
-	var forest := Terrain.regional_forest_potential(_build_seed, point.x, point.y)
+	var forest := float(sample.get("forest_potential", 0.0))
+	var cover := Terrain._regional_ground_cover_from_samples(
+		_build_seed,
+		point.x,
+		point.y,
+		moisture,
+		slope,
+		forest
+	)
+
+	var rock_likelihood := clampf(
+		0.08
+		+ clampf((slope - 6.0) / 26.0, 0.0, 1.0) * 0.52
+		+ (1.0 - cover) * 0.20
+		+ abs(_pseudo(point.x, point.y, 8, _build_seed) - 0.5) * 0.12,
+		0.0,
+		0.72
+	)
+	var rock_accepted := _rock_transforms.size() < MAX_ROCKS and rock_roll < rock_likelihood * 0.48
+	var shrub_likelihood := clampf(
+		(cover - 0.30) * 0.82
+		+ (forest - 0.36) * 0.38
+		+ moisture * 0.16,
+		0.0,
+		0.78
+	)
+	var shrub_accepted := (
+		_shrub_transforms.size() < MAX_SHRUBS
+		and slope < 28.0
+		and shrub_roll < shrub_likelihood * 0.58
+	)
+	if not rock_accepted and not shrub_accepted:
+		return
 	var ground := TerrainSurface.height(_build_seed, point.x, point.y)
 
-	if _rock_transforms.size() < MAX_ROCKS:
-		var rock_likelihood := clampf(
-			0.08
-			+ clampf((slope - 6.0) / 26.0, 0.0, 1.0) * 0.52
-			+ (1.0 - cover) * 0.20
-			+ abs(_pseudo(point.x, point.y, 8, _build_seed) - 0.5) * 0.12,
-			0.0,
-			0.72
-		)
-		if rock_roll < rock_likelihood * 0.48:
-			var sx := lerpf(0.45, 1.65, _pseudo(point.x, point.y, 4, _build_seed))
-			var sy := lerpf(0.38, 1.20, _pseudo(point.x, point.y, 5, _build_seed))
-			var sz := lerpf(0.48, 1.55, _pseudo(point.x, point.y, 6, _build_seed))
-			var rotation := _pseudo(point.x, point.y, 7, _build_seed) * TAU
-			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(sx, sy, sz))
-			_rock_transforms.append(Transform3D(basis, Vector3(point.x, ground + sy * 0.30, point.y)))
-			_rock_custom.append(Color(
-				_pseudo(point.x, point.y, 9, _build_seed),
-				_pseudo(point.x, point.y, 10, _build_seed),
-				_pseudo(point.x, point.y, 11, _build_seed),
-				1.0
-			))
+	if rock_accepted:
+		var sx := lerpf(0.45, 1.65, _pseudo(point.x, point.y, 4, _build_seed))
+		var sy := lerpf(0.38, 1.20, _pseudo(point.x, point.y, 5, _build_seed))
+		var sz := lerpf(0.48, 1.55, _pseudo(point.x, point.y, 6, _build_seed))
+		var rotation := _pseudo(point.x, point.y, 7, _build_seed) * TAU
+		var basis := Basis(Vector3.UP, rotation).scaled(Vector3(sx, sy, sz))
+		_rock_transforms.append(Transform3D(basis, Vector3(point.x, ground + sy * 0.30, point.y)))
+		_rock_custom.append(Color(
+			_pseudo(point.x, point.y, 9, _build_seed),
+			_pseudo(point.x, point.y, 10, _build_seed),
+			_pseudo(point.x, point.y, 11, _build_seed),
+			1.0
+		))
 
-	if _shrub_transforms.size() < MAX_SHRUBS and slope < 28.0:
-		var shrub_likelihood := clampf(
-			(cover - 0.30) * 0.82
-			+ (forest - 0.36) * 0.38
-			+ moisture * 0.16,
-			0.0,
-			0.78
-		)
-		if shrub_roll < shrub_likelihood * 0.58:
-			var shrub_scale := lerpf(0.62, 1.42, _pseudo(point.x, point.y, 13, _build_seed))
-			var shrub_width := shrub_scale * lerpf(0.82, 1.28, _pseudo(point.x, point.y, 14, _build_seed))
-			var shrub_height := shrub_scale * lerpf(0.65, 1.18, _pseudo(point.x, point.y, 15, _build_seed))
-			var rotation := _pseudo(point.x, point.y, 16, _build_seed) * TAU
-			var basis := Basis(Vector3.UP, rotation).scaled(Vector3(shrub_width, shrub_height, shrub_width))
-			_shrub_transforms.append(Transform3D(basis, Vector3(point.x, ground + shrub_height * 0.46, point.y)))
-			_shrub_custom.append(Color(
-				_pseudo(point.x, point.y, 17, _build_seed),
-				_pseudo(point.x, point.y, 18, _build_seed),
-				clampf(moisture, 0.0, 1.0),
-				1.0
-			))
+	if shrub_accepted:
+		var shrub_scale := lerpf(0.62, 1.42, _pseudo(point.x, point.y, 13, _build_seed))
+		var shrub_width := shrub_scale * lerpf(0.82, 1.28, _pseudo(point.x, point.y, 14, _build_seed))
+		var shrub_height := shrub_scale * lerpf(0.65, 1.18, _pseudo(point.x, point.y, 15, _build_seed))
+		var rotation := _pseudo(point.x, point.y, 16, _build_seed) * TAU
+		var basis := Basis(Vector3.UP, rotation).scaled(Vector3(shrub_width, shrub_height, shrub_width))
+		_shrub_transforms.append(Transform3D(basis, Vector3(point.x, ground + shrub_height * 0.46, point.y)))
+		_shrub_custom.append(Color(
+			_pseudo(point.x, point.y, 17, _build_seed),
+			_pseudo(point.x, point.y, 18, _build_seed),
+			clampf(moisture, 0.0, 1.0),
+			1.0
+		))
 
 
 func _finish_build() -> void:
@@ -268,8 +293,8 @@ func _rock_mesh() -> Mesh:
 	var mesh := SphereMesh.new()
 	mesh.radius = 0.72
 	mesh.height = 1.15
-	mesh.radial_segments = 8
-	mesh.rings = 5
+	mesh.radial_segments = 7
+	mesh.rings = 4
 	var material := ShaderMaterial.new()
 	material.shader = DetailShader
 	material.set_shader_parameter("base_color", Color(0.36, 0.37, 0.34))
@@ -284,8 +309,8 @@ func _shrub_mesh() -> Mesh:
 	var mesh := SphereMesh.new()
 	mesh.radius = 0.78
 	mesh.height = 1.42
-	mesh.radial_segments = 8
-	mesh.rings = 5
+	mesh.radial_segments = 7
+	mesh.rings = 4
 	var material := ShaderMaterial.new()
 	material.shader = DetailShader
 	material.set_shader_parameter("base_color", Color(0.16, 0.31, 0.12))
@@ -318,7 +343,10 @@ func _active_roads() -> Array:
 	var result: Array = []
 	if _store == null:
 		return result
-	var city: Dictionary = _store.get("city")
+	var city_value: Variant = _store.get("city")
+	if typeof(city_value) != TYPE_DICTIONARY:
+		return result
+	var city: Dictionary = city_value
 	for road_value in city.get("roads", []):
 		if typeof(road_value) != TYPE_DICTIONARY:
 			continue
@@ -331,7 +359,10 @@ func _active_roads() -> Array:
 func _settlements() -> Array:
 	if _store == null:
 		return []
-	var city: Dictionary = _store.get("city")
+	var city_value: Variant = _store.get("city")
+	if typeof(city_value) != TYPE_DICTIONARY:
+		return []
+	var city: Dictionary = city_value
 	return city.get("regional_settlements", [])
 
 
