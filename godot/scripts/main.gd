@@ -14,6 +14,7 @@ const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alert
 const RegionalInfrastructureProposalWidget = preload("res://scripts/ui/regional_infrastructure_proposal_widget.gd")
 const RegionalLineOperationsWidget = preload("res://scripts/ui/regional_line_operations_widget.gd")
 const RegionalProgressionWidget = preload("res://scripts/ui/regional_progression_widget.gd")
+const RegionalSelectionDiagnosticsWidget = preload("res://scripts/ui/regional_selection_diagnostics_widget.gd")
 const RegionalSettlementMobilityWidget = preload("res://scripts/ui/regional_settlement_mobility_widget.gd")
 const RegionalGrowthOverlayRenderer = preload("res://scripts/render/regional_growth_overlay_renderer.gd")
 const RegionalTrafficOverlayRenderer = preload("res://scripts/render/regional_traffic_overlay_renderer.gd")
@@ -45,6 +46,7 @@ var _gameplay_alerts: RegionalGameplayAlerts
 var _infrastructure_proposal_widget: RegionalInfrastructureProposalWidget
 var _line_operations_widget: RegionalLineOperationsWidget
 var _progression_widget: RegionalProgressionWidget
+var _selection_diagnostics_widget: RegionalSelectionDiagnosticsWidget
 var _settlement_mobility_widget: RegionalSettlementMobilityWidget
 var _last_traffic_elapsed_seconds := 0.0
 var _proposal_diagnostic_refresh_remaining := 0.0
@@ -136,6 +138,10 @@ func _setup_regional_traffic() -> void:
 		_settlement_mobility_widget = RegionalSettlementMobilityWidget.new()
 		_settlement_mobility_widget.name = "RegionalSettlementMobility"
 		add_child(_settlement_mobility_widget)
+	if _selection_diagnostics_widget == null:
+		_selection_diagnostics_widget = RegionalSelectionDiagnosticsWidget.new()
+		_selection_diagnostics_widget.name = "RegionalSelectionDiagnostics"
+		add_child(_selection_diagnostics_widget)
 	if _infrastructure_proposal_widget == null:
 		_infrastructure_proposal_widget = RegionalInfrastructureProposalWidget.new()
 		_infrastructure_proposal_widget.name = "RegionalInfrastructureProposal"
@@ -168,19 +174,12 @@ func _advance_regional_traffic() -> void:
 	_last_traffic_elapsed_seconds = elapsed
 	if traffic_delta <= 0.0 or not GameStore.is_sandbox():
 		return
-	# GameStore already accrues transit and service OPEX. Economy V1 adds only
-	# player-road maintenance here, using the same simulation-clock delta so
-	# pause and speed controls remain authoritative.
 	RegionalEconomy.advance(
 		GameStore,
 		traffic_delta * float(Data.GAME_MINUTES_PER_REAL_SECOND)
 	)
 	var traffic_changed := RegionalTrafficRuntime.advance(GameStore, traffic_delta)
 	if traffic_changed:
-		# Accessibility, parcel development pressure and highway proposal benefits
-		# sample the freshly-updated travel conditions once per traffic refresh.
-		# Growth consumes this stable previous-period snapshot rather than
-		# recalculating mode choice itself.
 		RegionalAccessibility.apply(GameStore)
 		RegionalDevelopmentPressure.apply(GameStore)
 		RegionalHighwayProposalRuntime.apply(GameStore.city)
@@ -218,11 +217,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_pause_menu.open()
 				get_viewport().set_input_as_handled()
 		elif event.physical_keycode == KEY_SPACE:
-			GameStore.set_speed(
-				0
-				if GameStore.simulation_speed > 0
-				else 1
-			)
+			GameStore.set_speed(0 if GameStore.simulation_speed > 0 else 1)
 		elif event.physical_keycode == KEY_T and GameStore.is_sandbox():
 			_toggle_traffic_overlay()
 			get_viewport().set_input_as_handled()
@@ -234,6 +229,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_state_changed() -> void:
 	if GameStore.is_sandbox():
 		GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
+		RegionalProgressionRuntime.apply(GameStore)
 
 
 func _on_toast(message: String) -> void:
