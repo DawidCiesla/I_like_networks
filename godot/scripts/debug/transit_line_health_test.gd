@@ -72,6 +72,7 @@ func _test_long_headway() -> void:
 	})
 	_expect(str(result.get("status", "")) == "under_served", "legacy low-frequency line with demand is still under-served at 15 minutes")
 	_expect(str(result.get("reason", "")) == "long_headway", "line without a player target keeps the legacy health reason")
+	_expect(int(result.get("severity", -1)) == 1, "legacy long-headway hint remains below Network Alerts priority")
 	_expect(str(result.get("recommended_action", "")) == "add_vehicle", "long headway suggests another vehicle")
 
 
@@ -86,6 +87,7 @@ func _test_player_headway_target() -> void:
 	})
 	_expect(str(missed.get("status", "")) == "under_served", "12 minute service misses a 10 minute player target beyond tolerance")
 	_expect(str(missed.get("reason", "")) == "headway_above_target", "target miss is distinct from the legacy long-headway warning")
+	_expect(int(missed.get("severity", 0)) == 2, "explicit player target miss is important enough for Network Alerts")
 	_expect(bool(missed.get("target_headway_active", false)), "health output exposes that a player target is active")
 	_expect(float(missed.get("headway_target_ratio", 0.0)) > 1.15, "health exposes the size of the target miss")
 
