@@ -80,6 +80,7 @@ func _mark_dirty() -> void:
 
 
 func _rebuild(anchor: Vector2, seed: int) -> void:
+	var perf_started_usec := Time.get_ticks_usec()
 	_dirty = false
 	_last_anchor = anchor
 	var roads := _active_roads()
@@ -167,6 +168,10 @@ func _rebuild(anchor: Vector2, seed: int) -> void:
 
 	_apply_multimesh(_rock_instance, _rock_mesh(), rock_transforms, rock_custom)
 	_apply_multimesh(_shrub_instance, _shrub_mesh(), shrub_transforms, shrub_custom)
+	PerformanceProbe.record_duration(
+		"landscape_detail_rebuild_ms",
+		float(Time.get_ticks_usec() - perf_started_usec) / 1000.0
+	)
 
 
 func _rock_mesh() -> Mesh:
