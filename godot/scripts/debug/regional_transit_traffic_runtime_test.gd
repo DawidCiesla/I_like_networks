@@ -15,6 +15,7 @@ var _failures := 0
 func _init() -> void:
 	_test_bus_segment_slowdown_preserves_progress()
 	_test_bus_duration_reacts_to_changed_congestion_without_compounding()
+	_test_bus_operations_kpis_reflect_congestion()
 	_test_reserved_modes_are_not_slowed()
 	_test_legacy_city_is_untouched()
 	if _failures > 0:
@@ -68,6 +69,27 @@ func _test_bus_duration_reacts_to_changed_congestion_without_compounding() -> vo
 	store.free()
 
 
+func _test_bus_operations_kpis_reflect_congestion() -> void:
+	var free_store := _store("bus", 1.0)
+	var congested_store := _store("bus", 3.0)
+	RegionalTransitTrafficRuntime.apply(free_store)
+	RegionalTransitTrafficRuntime.apply(congested_store)
+	var free_line := _line(free_store)
+	var congested_line := _line(congested_store)
+	var free_cycle := float(free_line.get("traffic_effective_cycle_minutes", 0.0))
+	var congested_cycle := float(congested_line.get("traffic_effective_cycle_minutes", 0.0))
+	var free_headway := float(free_line.get("traffic_effective_headway_minutes", 0.0))
+	var congested_headway := float(congested_line.get("traffic_effective_headway_minutes", 0.0))
+	var free_capacity := float(free_line.get("traffic_effective_capacity_ppm", 0.0))
+	var congested_capacity := float(congested_line.get("traffic_effective_capacity_ppm", 0.0))
+	_expect(free_cycle > 0.0, "bus runtime exposes an effective cycle time")
+	_expect(congested_cycle > free_cycle, "road congestion lengthens the effective bus cycle")
+	_expect(congested_headway > free_headway, "same fleet produces a worse headway in congestion")
+	_expect(congested_capacity < free_capacity, "congestion reduces effective passenger throughput per minute")
+	free_store.free()
+	congested_store.free()
+
+
 func _test_reserved_modes_are_not_slowed() -> void:
 	for mode in ["tram", "metro"]:
 		var store := _store(mode, 4.0)
@@ -104,12 +126,18 @@ func _store(mode: String, congestion_factor: float) -> TransitStore:
 		}],
 	}
 	store.transit_network = {
+		"stops": {
+			"stop-a": {"id": "stop-a", "level": 0, "status": "built"},
+			"stop-b": {"id": "stop-b", "level": 0, "status": "built"},
+		},
 		"lines": {
 			"line-a": {
 				"id": "line-a",
 				"source": "custom",
 				"status": "active",
 				"mode": mode,
+				"stop_ids": ["stop-a", "stop-b"],
+				"fleet_count": 1,
 				"route_segments": [{
 					"length_world": 1800.0,
 					"road_ids": ["road-a"],
