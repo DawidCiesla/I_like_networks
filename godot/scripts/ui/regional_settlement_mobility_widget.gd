@@ -34,7 +34,7 @@ func _build_ui() -> void:
 	_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	_panel.offset_left = -382.0
 	_panel.offset_right = -18.0
-	_panel.offset_top = -198.0
+	_panel.offset_top = -218.0
 	_panel.offset_bottom = -18.0
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_panel)
@@ -91,22 +91,29 @@ func _refresh() -> void:
 	var max_vc := maxf(0.0, float(settlement.get("mobilityLocalMaxVcRatio", 0.0)))
 	var growth_pressure := maxf(0.0, float(settlement.get("growthPressure", 0.0)))
 	var growth_source := str(settlement.get("growthMobilitySource", "legacy_proxy"))
+	var development_available := bool(settlement.get("developmentPressureAvailable", false))
+	var development_pressure := clampf(float(settlement.get("developmentPressure", 0.0)), 0.0, 1.0)
+	var development_peak := clampf(float(settlement.get("developmentPressurePeak", 0.0)), 0.0, 1.0)
 
 	_title.text = "MOBILITY & GROWTH · %s" % name
 	if not available:
 		_metrics.text = "Accessibility data is not available yet. The growth model is using its compatibility proxy."
 		_why.text = "WHY · Wait for the next traffic snapshot or establish a connected travel network."
 		return
-	_metrics.text = "Access %d/100 · commute %.1f min · transit %.0f%% · unserved %.0f%%\nRoad V/C max %.2f · growth pressure %.2f" % [
+	var development_text := "n/a"
+	if development_available:
+		development_text = "%d/%d" % [roundi(development_pressure * 100.0), roundi(development_peak * 100.0)]
+	_metrics.text = "Access %d/100 · commute %.1f min · transit %.0f%% · unserved %.0f%%\nRoad V/C max %.2f · growth pressure %.2f · parcel avg/peak %s" % [
 		roundi(access * 100.0),
 		commute,
 		transit * 100.0,
 		unserved * 100.0,
 		max_vc,
 		growth_pressure,
+		development_text,
 	]
 	_why.text = "WHY · %s · source: %s" % [
-		_explanation(access, commute, unserved, transit, max_vc, growth_pressure),
+		_explanation(access, commute, unserved, transit, max_vc, growth_pressure, development_pressure, development_available),
 		growth_source.replace("_", " "),
 	]
 
@@ -117,7 +124,9 @@ static func _explanation(
 	unserved: float,
 	transit: float,
 	max_vc: float,
-	growth_pressure: float
+	growth_pressure: float,
+	development_pressure: float,
+	development_available: bool
 ) -> String:
 	var reasons: Array[String] = []
 	if access >= 0.75:
@@ -140,6 +149,11 @@ static func _explanation(
 		reasons.append("current pressure supports outward expansion")
 	elif growth_pressure < 0.35:
 		reasons.append("current pressure favors slow or no expansion")
+	if development_available:
+		if development_pressure >= 0.70:
+			reasons.append("many vacant parcels are attractive to develop")
+		elif development_pressure < 0.35:
+			reasons.append("vacant parcels have weak development pressure")
 	if reasons.is_empty():
 		return "mobility conditions are broadly neutral"
 	return "; ".join(reasons)
