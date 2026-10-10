@@ -11,6 +11,7 @@ const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional
 const RegionalEconomy = preload("res://scripts/simulation/regional_economy.gd")
 const RegionalFleetManagement = preload("res://scripts/simulation/regional_fleet_management.gd")
 const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
+const RegionalInfrastructureProposalWidget = preload("res://scripts/ui/regional_infrastructure_proposal_widget.gd")
 const RegionalLineOperationsWidget = preload("res://scripts/ui/regional_line_operations_widget.gd")
 const RegionalProgressionWidget = preload("res://scripts/ui/regional_progression_widget.gd")
 const RegionalSettlementMobilityWidget = preload("res://scripts/ui/regional_settlement_mobility_widget.gd")
@@ -39,6 +40,7 @@ var _forest_hlod_renderer: ForestHlodRenderer
 var _traffic_overlay_renderer: RegionalTrafficOverlayRenderer
 var _growth_overlay_renderer: RegionalGrowthOverlayRenderer
 var _gameplay_alerts: RegionalGameplayAlerts
+var _infrastructure_proposal_widget: RegionalInfrastructureProposalWidget
 var _line_operations_widget: RegionalLineOperationsWidget
 var _progression_widget: RegionalProgressionWidget
 var _settlement_mobility_widget: RegionalSettlementMobilityWidget
@@ -131,6 +133,10 @@ func _setup_regional_traffic() -> void:
 		_settlement_mobility_widget = RegionalSettlementMobilityWidget.new()
 		_settlement_mobility_widget.name = "RegionalSettlementMobility"
 		add_child(_settlement_mobility_widget)
+	if _infrastructure_proposal_widget == null:
+		_infrastructure_proposal_widget = RegionalInfrastructureProposalWidget.new()
+		_infrastructure_proposal_widget.name = "RegionalInfrastructureProposal"
+		add_child(_infrastructure_proposal_widget)
 
 
 func _process(_delta: float) -> void:
