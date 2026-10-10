@@ -6,20 +6,27 @@ const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GroundCoverRenderer = preload("res://scripts/world/ground_cover_renderer.gd")
 const LandscapeDetailRenderer = preload("res://scripts/world/landscape_detail_renderer.gd")
 const RiparianDetailRenderer = preload("res://scripts/world/riparian_detail_renderer.gd")
-const PremiumTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
+const NearTerrainShader = preload("res://scripts/world/terrain_surface.gdshader")
+const MediumTerrainShader = preload("res://scripts/world/terrain_surface_medium.gdshader")
+const FarTerrainShader = preload("res://scripts/world/terrain_surface_far.gdshader")
 const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
 const TerrainMeshBuilder = preload("res://scripts/world/terrain_mesh_builder.gd")
 const GEOMETRY_REVISION := 1
 
-const DEFAULT_GRAIN_STRENGTH := 0.046
-const DEFAULT_HEIGHT_TINT_STRENGTH := 0.052
-const DEFAULT_SLOPE_TINT_STRENGTH := 0.24
-const DEFAULT_MACRO_VARIATION_STRENGTH := 0.075
-const DEFAULT_MICRO_VARIATION_STRENGTH := 0.055
-const DEFAULT_ROCK_SLOPE_STRENGTH := 0.42
-const DEFAULT_MICRO_NORMAL_STRENGTH := 0.32
-const DEFAULT_WETNESS_STRENGTH := 0.44
-const DEFAULT_CAVITY_STRENGTH := 0.26
+# 28 source cells are ~1.6 km at the current 58 m terrain grid. Medium and far
+# layers use progressively larger chunks as well as decimated geometry, keeping
+# close-range culling fine without exploding distant draw calls.
+const NEAR_CHUNK_CELLS := 28
+const MEDIUM_CHUNK_CELLS := 56
+const FAR_CHUNK_CELLS := 112
+const NEAR_SAMPLE_FACTOR := 1
+const MEDIUM_SAMPLE_FACTOR := 2
+const FAR_SAMPLE_FACTOR := 4
+const NEAR_END_METERS := 2200.0
+const MEDIUM_END_METERS := 5200.0
+const FAR_END_METERS := 9800.0
+const CHUNK_BUILD_BUDGET_USEC := 2500
+const TERRAIN_EDIT_BUDGET_USEC := 1200
 
 var bounds := Rect2()
 var _ground_cover: GroundCoverRenderer
@@ -35,11 +42,21 @@ var _active_builder: RefCounted
 var _build_request := 0
 var _natural_detail_enabled := true
 
+var _chunks_root: Node3D
+var _source_arrays: Array = []
+var _source_steps := Vector2i.ZERO
+var _source_seed := 0
+var _near_material: ShaderMaterial
+var _medium_material: ShaderMaterial
+var _far_material: ShaderMaterial
+var _terrain_edit_refresh_running := false
+var _terrain_edit_refresh_pending := false
+
 
 func _ready() -> void:
 	var game_store := get_node_or_null("/root/GameStore")
 	if game_store != null and game_store.has_signal("terrain_changed"):
-		game_store.terrain_changed.connect(rebuild)
+		game_store.terrain_changed.connect(_on_terrain_changed)
 	_setup_natural_detail()
 	await rebuild(true)
 
@@ -77,6 +94,15 @@ func _apply_natural_detail_enabled() -> void:
 			renderer.call("_mark_dirty")
 
 
+func _on_terrain_changed() -> void:
+	if not _is_regional_map() or _source_arrays.is_empty():
+		rebuild(false)
+		return
+	_terrain_edit_refresh_pending = true
+	if not _terrain_edit_refresh_running:
+		call_deferred("_refresh_chunked_terrain_after_edit")
+
+
 func rebuild(progressive: bool = false) -> void:
 	_build_request += 1
 	var request := _build_request
@@ -96,9 +122,10 @@ func rebuild(progressive: bool = false) -> void:
 		"seed": seed,
 		"map_identity": {"id": map.get("id"), "generator_version": map.get("generator_version")},
 		"terrain_edits": map.get("terrain_edits", {}),
-		"bounds": bounds, "resolution": steps,
+		"bounds": bounds,
+		"resolution": steps,
 	})
-	var result := VisualCache.load_mesh(key, cache_directory)
+	var result: ArrayMesh = VisualCache.load_mesh(key, cache_directory)
 	cache_hit = result != null and result.get_surface_count() > 0
 	worker_count = 0
 	if not cache_hit:
@@ -115,15 +142,232 @@ func rebuild(progressive: bool = false) -> void:
 		if request != _build_request or not is_inside_tree() or result == null or result.get_surface_count() == 0:
 			return
 		VisualCache.save_mesh(key, result, cache_directory)
-	mesh = result
-	if mesh != null and mesh.get_surface_count() > 0:
-		mesh.surface_set_material(0, create_premium_material())
+
+	if _is_regional_map():
+		_source_arrays = result.surface_get_arrays(0)
+		_source_steps = steps
+		_source_seed = seed
+		mesh = null
+		material_override = null
+		_ensure_lod_materials()
+		await _rebuild_chunk_layers(progressive, request)
+		if request != _build_request or not is_inside_tree():
+			return
+	else:
+		_clear_chunk_root()
+		mesh = result
+		if mesh != null and mesh.get_surface_count() > 0:
+			mesh.surface_set_material(0, create_premium_material())
+
 	startup_progress = 1.0
 	startup_loading = false
 	build_duration_ms = Time.get_ticks_msec() - started
 	if _is_regional_map():
 		_setup_natural_detail()
-	print("[RegionLoad] terrain cache=%s workers=%d elapsed_ms=%d" % ["hit" if cache_hit else "miss", worker_count, build_duration_ms])
+	print("[RegionLoad] terrain cache=%s workers=%d chunked=%s elapsed_ms=%d" % [
+		"hit" if cache_hit else "miss",
+		worker_count,
+		str(_is_regional_map()),
+		build_duration_ms,
+	])
+
+
+func _ensure_lod_materials() -> void:
+	if _near_material == null:
+		_near_material = ShaderMaterial.new()
+		_near_material.shader = NearTerrainShader
+	if _medium_material == null:
+		_medium_material = ShaderMaterial.new()
+		_medium_material.shader = MediumTerrainShader
+	if _far_material == null:
+		_far_material = ShaderMaterial.new()
+		_far_material.shader = FarTerrainShader
+
+
+func _rebuild_chunk_layers(progressive: bool, request: int) -> void:
+	_clear_chunk_root()
+	_chunks_root = Node3D.new()
+	_chunks_root.name = "TerrainChunks"
+	add_child(_chunks_root)
+	var layer_specs: Array[Dictionary] = [
+		{
+			"name": "Near",
+			"chunk_cells": NEAR_CHUNK_CELLS,
+			"factor": NEAR_SAMPLE_FACTOR,
+			"begin": 0.0,
+			"end": NEAR_END_METERS,
+			"material": _near_material,
+		},
+		{
+			"name": "Medium",
+			"chunk_cells": MEDIUM_CHUNK_CELLS,
+			"factor": MEDIUM_SAMPLE_FACTOR,
+			"begin": NEAR_END_METERS,
+			"end": MEDIUM_END_METERS,
+			"material": _medium_material,
+		},
+		{
+			"name": "Far",
+			"chunk_cells": FAR_CHUNK_CELLS,
+			"factor": FAR_SAMPLE_FACTOR,
+			"begin": MEDIUM_END_METERS,
+			"end": FAR_END_METERS,
+			"material": _far_material,
+		},
+	]
+	var total_chunks := 0
+	for spec in layer_specs:
+		total_chunks += ceili(float(_source_steps.x) / float(int(spec["chunk_cells"]))) * ceili(float(_source_steps.y) / float(int(spec["chunk_cells"])))
+	var built_chunks := 0
+	var slice_started := Time.get_ticks_usec()
+	for spec in layer_specs:
+		var layer := Node3D.new()
+		layer.name = "LOD%s" % str(spec["name"])
+		_chunks_root.add_child(layer)
+		var chunk_cells := int(spec["chunk_cells"])
+		var factor := int(spec["factor"])
+		for z0 in range(0, _source_steps.y, chunk_cells):
+			var z1 := mini(z0 + chunk_cells, _source_steps.y)
+			for x0 in range(0, _source_steps.x, chunk_cells):
+				var x1 := mini(x0 + chunk_cells, _source_steps.x)
+				var instance := _create_terrain_chunk(x0, z0, x1, z1, factor, spec)
+				if instance != null:
+					layer.add_child(instance)
+				built_chunks += 1
+				if progressive and Time.get_ticks_usec() - slice_started >= CHUNK_BUILD_BUDGET_USEC:
+					startup_progress = 0.90 + 0.095 * float(built_chunks) / float(maxi(1, total_chunks))
+					await get_tree().process_frame
+					if request != _build_request or not is_inside_tree():
+						return
+					slice_started = Time.get_ticks_usec()
+
+
+func _create_terrain_chunk(
+	x0: int,
+	z0: int,
+	x1: int,
+	z1: int,
+	factor: int,
+	spec: Dictionary
+) -> MeshInstance3D:
+	var source_vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+	if source_vertices.is_empty():
+		return null
+	var x_indices := _sample_indices(x0, x1, factor)
+	var z_indices := _sample_indices(z0, z1, factor)
+	if x_indices.size() < 2 or z_indices.size() < 2:
+		return null
+	var source_stride := _source_steps.x + 1
+	var first_position: Vector3 = source_vertices[z0 * source_stride + x0]
+	var last_position: Vector3 = source_vertices[z1 * source_stride + x1]
+	var origin := Vector2(
+		(first_position.x + last_position.x) * 0.5,
+		(first_position.z + last_position.z) * 0.5
+	)
+	var chunk_mesh := _build_chunk_mesh(x_indices, z_indices, origin)
+	if chunk_mesh == null:
+		return null
+	chunk_mesh.surface_set_material(0, spec["material"])
+	var instance := MeshInstance3D.new()
+	instance.name = "%s_%d_%d" % [str(spec["name"]), x0, z0]
+	instance.position = Vector3(origin.x, 0.0, origin.y)
+	instance.mesh = chunk_mesh
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	instance.visibility_range_begin = float(spec["begin"])
+	instance.visibility_range_end = float(spec["end"])
+	return instance
+
+
+func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vector2) -> ArrayMesh:
+	var source_vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+	var source_normals: PackedVector3Array = _source_arrays[Mesh.ARRAY_NORMAL]
+	var source_colors: PackedColorArray = _source_arrays[Mesh.ARRAY_COLOR]
+	var source_uv2: PackedVector2Array = _source_arrays[Mesh.ARRAY_TEX_UV2]
+	var source_stride := _source_steps.x + 1
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	var uv2 := PackedVector2Array()
+	var local_count := x_indices.size() * z_indices.size()
+	vertices.resize(local_count)
+	normals.resize(local_count)
+	colors.resize(local_count)
+	uv2.resize(local_count)
+	var local_index := 0
+	for global_z in z_indices:
+		for global_x in x_indices:
+			var source_index := global_z * source_stride + global_x
+			var position: Vector3 = source_vertices[source_index]
+			vertices[local_index] = Vector3(position.x - origin.x, position.y, position.z - origin.y)
+			normals[local_index] = source_normals[source_index] if source_index < source_normals.size() else Vector3.UP
+			colors[local_index] = source_colors[source_index] if source_index < source_colors.size() else Color.WHITE
+			uv2[local_index] = source_uv2[source_index] if source_index < source_uv2.size() else Vector2(0.45, 0.5)
+			local_index += 1
+	var indices := PackedInt32Array()
+	var width := x_indices.size()
+	for local_z in range(z_indices.size() - 1):
+		for local_x in range(width - 1):
+			var top_left := local_z * width + local_x
+			var top_right := top_left + 1
+			var bottom_left := top_left + width
+			var bottom_right := bottom_left + 1
+			indices.append_array(PackedInt32Array([
+				top_left, top_right, bottom_right,
+				top_left, bottom_right, bottom_left,
+			]))
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var result := ArrayMesh.new()
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return result
+
+
+func _sample_indices(start_index: int, end_index: int, factor: int) -> Array[int]:
+	var result: Array[int] = []
+	var current := start_index
+	while current < end_index:
+		result.append(current)
+		current += maxi(1, factor)
+	if result.is_empty() or result.back() != end_index:
+		result.append(end_index)
+	return result
+
+
+func _refresh_chunked_terrain_after_edit() -> void:
+	if _terrain_edit_refresh_running:
+		return
+	_terrain_edit_refresh_running = true
+	while _terrain_edit_refresh_pending and is_inside_tree():
+		_terrain_edit_refresh_pending = false
+		_build_request += 1
+		var request := _build_request
+		var vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+		var slice_started := Time.get_ticks_usec()
+		for index in range(vertices.size()):
+			var position := vertices[index]
+			position.y = TerrainSurface.height(_source_seed, position.x, position.z)
+			vertices[index] = position
+			if Time.get_ticks_usec() - slice_started >= TERRAIN_EDIT_BUDGET_USEC:
+				await get_tree().process_frame
+				if request != _build_request or not is_inside_tree():
+					break
+				slice_started = Time.get_ticks_usec()
+		if request == _build_request and is_inside_tree():
+			_source_arrays[Mesh.ARRAY_VERTEX] = vertices
+			await _rebuild_chunk_layers(true, request)
+	_terrain_edit_refresh_running = false
+
+
+func _clear_chunk_root() -> void:
+	if is_instance_valid(_chunks_root):
+		remove_child(_chunks_root)
+		_chunks_root.free()
+	_chunks_root = null
 
 
 func _exit_tree() -> void:
@@ -148,9 +392,6 @@ func _build_mesh(rect: Rect2, seed: int, progressive: bool = false) -> ArrayMesh
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var slice_start := Time.get_ticks_msec()
-
-	# Indexed world grid: expensive regional biome/hydrology sampling is done once
-	# per terrain vertex instead of once for every triangle corner.
 	for z_index in range(z_steps + 1):
 		var world_z := rect.position.y + rect.size.y * float(z_index) / float(z_steps)
 		for x_index in range(x_steps + 1):
@@ -160,7 +401,6 @@ func _build_mesh(rect: Rect2, seed: int, progressive: bool = false) -> ArrayMesh
 				startup_progress = float(z_index * stride + x_index + 1) / float(stride * (z_steps + 1))
 				await get_tree().process_frame
 				slice_start = Time.get_ticks_msec()
-
 	for z_index in range(z_steps):
 		for x_index in range(x_steps):
 			var top_left := z_index * stride + x_index
@@ -176,25 +416,16 @@ func _build_mesh(rect: Rect2, seed: int, progressive: bool = false) -> ArrayMesh
 			if progressive and Time.get_ticks_msec() - slice_start >= 8:
 				await get_tree().process_frame
 				slice_start = Time.get_ticks_msec()
-
 	tool.generate_normals()
 	var result := tool.commit()
-	result.surface_set_material(0, create_premium_material())
+	if result == null:
+		return ArrayMesh.new()
 	return result
 
 
 static func create_premium_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
-	material.shader = PremiumTerrainShader
-	material.set_shader_parameter("grain_strength", DEFAULT_GRAIN_STRENGTH)
-	material.set_shader_parameter("height_tint_strength", DEFAULT_HEIGHT_TINT_STRENGTH)
-	material.set_shader_parameter("slope_tint_strength", DEFAULT_SLOPE_TINT_STRENGTH)
-	material.set_shader_parameter("macro_variation_strength", DEFAULT_MACRO_VARIATION_STRENGTH)
-	material.set_shader_parameter("micro_variation_strength", DEFAULT_MICRO_VARIATION_STRENGTH)
-	material.set_shader_parameter("rock_slope_strength", DEFAULT_ROCK_SLOPE_STRENGTH)
-	material.set_shader_parameter("micro_normal_strength", DEFAULT_MICRO_NORMAL_STRENGTH)
-	material.set_shader_parameter("wetness_strength", DEFAULT_WETNESS_STRENGTH)
-	material.set_shader_parameter("cavity_strength", DEFAULT_CAVITY_STRENGTH)
+	material.shader = NearTerrainShader
 	return material
 
 
@@ -206,7 +437,5 @@ func _add_vertex(tool: SurfaceTool, x: float, z: float, seed: int) -> void:
 	var moisture := float(sample["moisture"]) if regional else 0.45
 	var ground_cover := float(sample["ground_cover"]) if regional else 0.5
 	tool.set_color(color)
-	# UV2 is used as compact material metadata rather than texture coordinates:
-	# x = local moisture, y = vegetation/ground-cover potential.
 	tool.set_uv2(Vector2(clampf(moisture, 0.0, 1.0), clampf(ground_cover, 0.0, 1.0)))
 	tool.add_vertex(Vector3(x, y, z))
