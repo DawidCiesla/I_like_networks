@@ -1,8 +1,10 @@
 extends Node3D
 
+const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
+const RegionalEconomy = preload("res://scripts/simulation/regional_economy.gd")
 const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
 const RegionalTrafficOverlayRenderer = preload("res://scripts/render/regional_traffic_overlay_renderer.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
@@ -84,6 +86,7 @@ func _setup_regional_traffic() -> void:
 	RegionalTrafficRuntime.ensure(GameStore.city)
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
+	GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
 	RegionalTransitTrafficRuntime.apply(GameStore)
 	if _traffic_overlay_renderer == null:
 		_traffic_overlay_renderer = RegionalTrafficOverlayRenderer.new()
@@ -112,6 +115,13 @@ func _advance_regional_traffic() -> void:
 	_last_traffic_elapsed_seconds = elapsed
 	if traffic_delta <= 0.0 or not GameStore.is_sandbox():
 		return
+	# GameStore already accrues transit and service OPEX. Economy V1 adds only
+	# player-road maintenance here, using the same simulation-clock delta so
+	# pause and speed controls remain authoritative.
+	RegionalEconomy.advance(
+		GameStore,
+		traffic_delta * float(Data.GAME_MINUTES_PER_REAL_SECOND)
+	)
 	if RegionalTrafficRuntime.advance(GameStore, traffic_delta):
 		GameStore.emit_signal("city_changed")
 
