@@ -86,6 +86,9 @@ func _build_ui() -> void:
 
 	_target_select = OptionButton.new()
 	_target_select.custom_minimum_size.x = 112.0
+	_target_select.tooltip_text = "Set an explicit service commitment, or leave the line without a target."
+	_target_select.add_item("NO TARGET")
+	_target_select.set_item_metadata(0, 0.0)
 	for preset_value in RegionalServicePlanning.TARGET_HEADWAY_PRESETS:
 		var preset := float(preset_value)
 		var index := _target_select.item_count
@@ -235,12 +238,24 @@ func _refresh_service_target(
 		_match_button.disabled = true
 		return
 	_target_select.disabled = false
-	_select_target_preset(float(plan.get("target_headway_minutes", 15.0)))
+	var target_active := bool(plan.get("target_active", false))
 	var target := float(plan.get("target_headway_minutes", 15.0))
 	var required := int(plan.get("required_fleet", 1))
 	var planned := int(plan.get("planned_fleet", 1))
 	var gap := int(plan.get("fleet_gap", 0))
 	var projected := float(plan.get("cycle_minutes", 0.0)) / float(maxi(1, required))
+	if not target_active:
+		_target_select.select(0)
+		var suggested := float(plan.get("suggested_headway_minutes", target))
+		_target_status.text = "No service commitment · suggested %.1f min would need %d %s" % [
+			suggested,
+			required,
+			_vehicle_plural(vehicle_name, required),
+		]
+		_match_button.text = "SET A TARGET TO PLAN SERVICE"
+		_match_button.disabled = true
+		return
+	_select_target_preset(target)
 	if not bool(plan.get("target_feasible", true)):
 		_target_status.text = "Target %.1f min needs %d vehicles · fleet cap %d · best %.1f min" % [
 			target,
@@ -286,9 +301,9 @@ func _refresh_service_target(
 
 
 func _select_target_preset(target: float) -> void:
-	var best_index := 0
+	var best_index := 1 if _target_select.item_count > 1 else 0
 	var best_distance := INF
-	for index in range(_target_select.item_count):
+	for index in range(1, _target_select.item_count):
 		var value := float(_target_select.get_item_metadata(index))
 		var distance := absf(value - target)
 		if distance < best_distance:
@@ -302,7 +317,10 @@ func _on_target_selected(index: int) -> void:
 	if _line_id.is_empty() or not is_instance_valid(store):
 		return
 	var target := float(_target_select.get_item_metadata(index))
-	RegionalServicePlanning.set_target_headway(store, _line_id, target)
+	if target <= 0.0:
+		RegionalServicePlanning.clear_target_headway(store, _line_id)
+	else:
+		RegionalServicePlanning.set_target_headway(store, _line_id, target)
 	_refresh_remaining = 0.0
 
 
