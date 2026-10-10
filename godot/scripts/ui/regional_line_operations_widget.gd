@@ -202,7 +202,6 @@ func _refresh() -> void:
 	_buy_button.text = "BUY %s · $%d" % [vehicle_name.to_upper(), cost]
 	_buy_button.disabled = (
 		fleet >= int(Data.ECONOMY["max_vehicles_per_line"])
-		or float(store.money) < float(cost)
 		or int(store.call("garage_used")) >= int(store.depot.get("garage_slots", 0))
 	)
 
