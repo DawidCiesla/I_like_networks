@@ -10,6 +10,7 @@ func _init() -> void:
 	_test_capacity_warning_and_overload()
 	_test_congestion_limited_service()
 	_test_long_headway()
+	_test_player_headway_target()
 	_test_healthy_service()
 	if _failures > 0:
 		push_error("TRANSIT LINE HEALTH TEST: FAIL (%d checks)" % _failures)
@@ -69,8 +70,44 @@ func _test_long_headway() -> void:
 		"traffic_effective_headway_minutes": 18.0,
 		"traffic_delay_factor": 1.0,
 	})
-	_expect(str(result.get("status", "")) == "under_served", "low-frequency line with demand is under-served")
+	_expect(str(result.get("status", "")) == "under_served", "legacy low-frequency line with demand is still under-served at 15 minutes")
+	_expect(str(result.get("reason", "")) == "long_headway", "line without a player target keeps the legacy health reason")
 	_expect(str(result.get("recommended_action", "")) == "add_vehicle", "long headway suggests another vehicle")
+
+
+func _test_player_headway_target() -> void:
+	var missed := TransitLineHealth.evaluate({
+		"fleet_count": 2,
+		"current_demand_ppm": 2.0,
+		"traffic_effective_capacity_ppm": 10.0,
+		"traffic_effective_headway_minutes": 12.0,
+		"traffic_delay_factor": 1.0,
+		"target_headway_minutes": 10.0,
+	})
+	_expect(str(missed.get("status", "")) == "under_served", "12 minute service misses a 10 minute player target beyond tolerance")
+	_expect(str(missed.get("reason", "")) == "headway_above_target", "target miss is distinct from the legacy long-headway warning")
+	_expect(bool(missed.get("target_headway_active", false)), "health output exposes that a player target is active")
+	_expect(float(missed.get("headway_target_ratio", 0.0)) > 1.15, "health exposes the size of the target miss")
+
+	var within_target := TransitLineHealth.evaluate({
+		"fleet_count": 2,
+		"current_demand_ppm": 2.0,
+		"traffic_effective_capacity_ppm": 10.0,
+		"traffic_effective_headway_minutes": 11.0,
+		"traffic_delay_factor": 1.0,
+		"target_headway_minutes": 10.0,
+	})
+	_expect(str(within_target.get("status", "")) == "healthy", "small headway variation inside the 15 percent tolerance stays healthy")
+
+	var relaxed_target := TransitLineHealth.evaluate({
+		"fleet_count": 1,
+		"current_demand_ppm": 1.0,
+		"traffic_effective_capacity_ppm": 6.0,
+		"traffic_effective_headway_minutes": 18.0,
+		"traffic_delay_factor": 1.0,
+		"target_headway_minutes": 20.0,
+	})
+	_expect(str(relaxed_target.get("status", "")) == "healthy", "explicit 20 minute target overrides the old fixed 15 minute warning threshold")
 
 
 func _test_healthy_service() -> void:
