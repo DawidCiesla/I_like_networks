@@ -33,6 +33,7 @@ func set_traffic_overlay_active(active: bool) -> void:
 
 static func collect_alerts(city: Dictionary, transit_network: Dictionary) -> Array[Dictionary]:
 	var alerts: Array[Dictionary] = []
+	_append_economy_alert(alerts, city)
 	var worst_road: Dictionary = {}
 	var worst_vc := 0.0
 	for road_value in city.get("roads", []):
@@ -101,6 +102,38 @@ static func collect_alerts(city: Dictionary, transit_network: Dictionary) -> Arr
 		return a_priority > b_priority
 	)
 	return alerts
+
+
+static func _append_economy_alert(alerts: Array[Dictionary], city: Dictionary) -> void:
+	var economy_value: Variant = city.get("economy", {})
+	if typeof(economy_value) != TYPE_DICTIONARY:
+		return
+	var economy: Dictionary = economy_value
+	var severity := int(economy.get("severity", 0))
+	if severity < 2:
+		return
+	var status := str(economy.get("status", "watch"))
+	var net_per_minute := float(economy.get("net_per_minute", 0.0))
+	var runway := float(economy.get("runway_minutes", INF))
+	var runway_text := "—"
+	if is_finite(runway):
+		runway_text = "%.0f min" % runway
+	alerts.append({
+		"id": "economy",
+		"priority": severity,
+		"label": "%s · %s$%.1f/min" % [
+			"FINANCES CRITICAL" if status == "critical" else "FINANCIAL PRESSURE",
+			"+" if net_per_minute >= 0.0 else "−",
+			absf(net_per_minute),
+		],
+		"selection": "",
+		"tooltip": "Projected 60 min balance: %s$%.0f · runway: %s · road upkeep $%.2f/min" % [
+			"+" if float(economy.get("forecast_net", 0.0)) >= 0.0 else "−",
+			absf(float(economy.get("forecast_net", 0.0))),
+			runway_text,
+			float(economy.get("road_maintenance_per_minute", 0.0)),
+		],
+	})
 
 
 static func _status_label(status: String) -> String:
