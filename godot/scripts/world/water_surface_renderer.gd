@@ -6,6 +6,7 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const GameData = preload("res://scripts/core/game_data.gd")
 const WaterShader = preload("res://scripts/world/water_surface.gdshader")
+const FarWaterShader = preload("res://scripts/world/water_surface_far.gdshader")
 const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
 const GEOMETRY_REVISION := 1
 
@@ -19,12 +20,26 @@ const LAKE_SHALLOWS_COLOR := Color(0.20, 0.57, 0.64, 1.0)
 const LAKE_DEEP_COLOR := Color(0.018, 0.105, 0.245, 1.0)
 const RIVER_MAX_DEPTH := 7.5
 const LAKE_MAX_DEPTH := 9.0
+const NEAR_CHUNK_SIZE_METERS := 1800.0
+const FAR_CHUNK_SIZE_METERS := 4200.0
+const NEAR_END_METERS := 3200.0
+const FAR_END_METERS := 9800.0
+const CHUNK_BUILD_BUDGET_USEC := 1800
+const EDIT_REFRESH_BUDGET_USEC := 900
+
 var startup_loading := true
 var startup_progress := 0.0
 var cache_directory := ""
 var cache_hit := false
 var build_duration_ms := 0
 var _build_request := 0
+var _chunks_root: Node3D
+var _source_arrays: Array = []
+var _source_seed := 0
+var _near_material: ShaderMaterial
+var _far_material: ShaderMaterial
+var _terrain_edit_refresh_running := false
+var _terrain_edit_refresh_pending := false
 
 
 func _ready() -> void:
@@ -33,11 +48,17 @@ func _ready() -> void:
 	var store := get_node_or_null("/root/GameStore")
 	if store != null and store.has_signal("terrain_changed"):
 		store.terrain_changed.connect(_on_terrain_changed)
-	var resolution := REGIONAL_RESOLUTION if str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID else DEFAULT_RESOLUTION
+	var regional := str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID
+	var resolution := REGIONAL_RESOLUTION if regional else DEFAULT_RESOLUTION
 	await rebuild(seed, TerrainSurface.world_bounds(), resolution, true)
 
 
 func _on_terrain_changed() -> void:
+	if _is_regional_map() and not _source_arrays.is_empty():
+		_terrain_edit_refresh_pending = true
+		if not _terrain_edit_refresh_running:
+			call_deferred("_refresh_chunked_water_after_edit")
+		return
 	var active_map := MapDefinition.active_definition()
 	var resolution := REGIONAL_RESOLUTION if str(active_map.get("id", "")) != MapDefinition.LEGACY_CITY_MAP_ID else DEFAULT_RESOLUTION
 	rebuild(
@@ -47,8 +68,6 @@ func _on_terrain_changed() -> void:
 	)
 
 
-## Rebuilds a world-space water mesh for the supplied rectangle and terrain seed.
-## The rectangle uses x/z in its x/y components; keep this node at world origin.
 func rebuild(
 	seed: int,
 	bounds: Rect2,
@@ -64,26 +83,194 @@ func rebuild(
 		"seed": seed,
 		"map_identity": {"id": map.get("id"), "generator_version": map.get("generator_version")},
 		"terrain_edits": map.get("terrain_edits", {}),
-		"bounds": bounds, "resolution": resolution,
+		"bounds": bounds,
+		"resolution": resolution,
 	})
-	var result := VisualCache.load_mesh(key, cache_directory)
+	var result: ArrayMesh = VisualCache.load_mesh(key, cache_directory)
 	cache_hit = result != null
 	if not cache_hit:
 		result = await build_mesh(seed, bounds, resolution, get_tree() if progressive else null, self if progressive else null)
 		if request != _build_request or not is_inside_tree() or result == null:
 			return
 		VisualCache.save_mesh(key, result, cache_directory)
-	mesh = result
-	material_override = create_water_material()
+
+	if _is_regional_map():
+		_source_seed = seed
+		_source_arrays = result.surface_get_arrays(0) if result.get_surface_count() > 0 else []
+		mesh = null
+		material_override = null
+		_ensure_materials()
+		await _rebuild_water_chunks(progressive, request)
+		if request != _build_request or not is_inside_tree():
+			return
+	else:
+		_clear_chunk_root()
+		mesh = result
+		material_override = create_water_material()
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	startup_progress = 1.0
 	startup_loading = false
 	build_duration_ms = Time.get_ticks_msec() - started
-	print("[RegionLoad] water cache=%s elapsed_ms=%d" % ["hit" if cache_hit else "miss", build_duration_ms])
+	print("[RegionLoad] water cache=%s chunked=%s elapsed_ms=%d" % [
+		"hit" if cache_hit else "miss",
+		str(_is_regional_map()),
+		build_duration_ms,
+	])
 
 
-## Creates a bounded transparent surface from point samples. Regional maps use
-## the maximum practical grid resolution so narrow tributaries survive the 24 km scale.
+func _ensure_materials() -> void:
+	if _near_material == null:
+		_near_material = create_water_material()
+	if _far_material == null:
+		_far_material = ShaderMaterial.new()
+		_far_material.shader = FarWaterShader
+
+
+func _rebuild_water_chunks(progressive: bool, request: int) -> void:
+	var new_root := Node3D.new()
+	new_root.name = "WaterChunks"
+	if _source_arrays.is_empty():
+		_swap_chunk_root(new_root)
+		return
+	var specs: Array[Dictionary] = [
+		{
+			"name": "Near",
+			"chunk_size": NEAR_CHUNK_SIZE_METERS,
+			"begin": 0.0,
+			"end": NEAR_END_METERS,
+			"material": _near_material,
+		},
+		{
+			"name": "Far",
+			"chunk_size": FAR_CHUNK_SIZE_METERS,
+			"begin": NEAR_END_METERS,
+			"end": FAR_END_METERS,
+			"material": _far_material,
+		},
+	]
+	var slice_started := Time.get_ticks_usec()
+	for spec in specs:
+		var layer := Node3D.new()
+		layer.name = "LOD%s" % str(spec["name"])
+		new_root.add_child(layer)
+		var buckets := _partition_triangles(float(spec["chunk_size"]))
+		var keys: Array = buckets.keys()
+		keys.sort_custom(func(a: Vector2i, b: Vector2i):
+			return a.y < b.y or (a.y == b.y and a.x < b.x)
+		)
+		for key_value in keys:
+			var key: Vector2i = key_value
+			var source_indices: Array = buckets[key]
+			var instance := _create_water_chunk(key, source_indices, spec)
+			if instance != null:
+				layer.add_child(instance)
+			if progressive and Time.get_ticks_usec() - slice_started >= CHUNK_BUILD_BUDGET_USEC:
+				await get_tree().process_frame
+				if request != _build_request or not is_inside_tree():
+					new_root.free()
+					return
+				slice_started = Time.get_ticks_usec()
+	if request != _build_request or not is_inside_tree():
+		new_root.free()
+		return
+	_swap_chunk_root(new_root)
+
+
+func _partition_triangles(chunk_size: float) -> Dictionary:
+	var result: Dictionary = {}
+	var vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+	var triangle_end := vertices.size() - vertices.size() % 3
+	for first in range(0, triangle_end, 3):
+		var centroid := (vertices[first] + vertices[first + 1] + vertices[first + 2]) / 3.0
+		var key := Vector2i(floori(centroid.x / chunk_size), floori(centroid.z / chunk_size))
+		var bucket: Array = result.get(key, [])
+		bucket.append(first)
+		bucket.append(first + 1)
+		bucket.append(first + 2)
+		result[key] = bucket
+	return result
+
+
+func _create_water_chunk(key: Vector2i, source_indices: Array, spec: Dictionary) -> MeshInstance3D:
+	if source_indices.is_empty():
+		return null
+	var chunk_size := float(spec["chunk_size"])
+	var origin := Vector2((float(key.x) + 0.5) * chunk_size, (float(key.y) + 0.5) * chunk_size)
+	var source_vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+	var source_normals: PackedVector3Array = _source_arrays[Mesh.ARRAY_NORMAL]
+	var source_colors: PackedColorArray = _source_arrays[Mesh.ARRAY_COLOR]
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	vertices.resize(source_indices.size())
+	normals.resize(source_indices.size())
+	colors.resize(source_indices.size())
+	for local_index in range(source_indices.size()):
+		var source_index := int(source_indices[local_index])
+		var position: Vector3 = source_vertices[source_index]
+		vertices[local_index] = Vector3(position.x - origin.x, position.y, position.z - origin.y)
+		normals[local_index] = source_normals[source_index] if source_index < source_normals.size() else Vector3.UP
+		colors[local_index] = source_colors[source_index] if source_index < source_colors.size() else Color.TRANSPARENT
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var chunk_mesh := ArrayMesh.new()
+	chunk_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	chunk_mesh.surface_set_material(0, spec["material"])
+	var instance := MeshInstance3D.new()
+	instance.name = "%s_%d_%d" % [str(spec["name"]), key.x, key.y]
+	instance.position = Vector3(origin.x, 0.0, origin.y)
+	instance.mesh = chunk_mesh
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	instance.visibility_range_begin = float(spec["begin"])
+	instance.visibility_range_end = float(spec["end"])
+	return instance
+
+
+func _refresh_chunked_water_after_edit() -> void:
+	if _terrain_edit_refresh_running:
+		return
+	_terrain_edit_refresh_running = true
+	while _terrain_edit_refresh_pending and is_inside_tree():
+		_terrain_edit_refresh_pending = false
+		_build_request += 1
+		var request := _build_request
+		if _source_arrays.is_empty():
+			break
+		var vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
+		var slice_started := Time.get_ticks_usec()
+		for index in range(vertices.size()):
+			var position := vertices[index]
+			position.y = TerrainSurface.height(_source_seed, position.x, position.z) + WATER_SURFACE_OFFSET
+			vertices[index] = position
+			if Time.get_ticks_usec() - slice_started >= EDIT_REFRESH_BUDGET_USEC:
+				await get_tree().process_frame
+				if request != _build_request or not is_inside_tree():
+					break
+				slice_started = Time.get_ticks_usec()
+		if request == _build_request and is_inside_tree():
+			_source_arrays[Mesh.ARRAY_VERTEX] = vertices
+			await _rebuild_water_chunks(true, request)
+	_terrain_edit_refresh_running = false
+
+
+func _swap_chunk_root(new_root: Node3D) -> void:
+	if is_instance_valid(_chunks_root):
+		remove_child(_chunks_root)
+		_chunks_root.free()
+	_chunks_root = new_root
+	add_child(_chunks_root)
+
+
+func _clear_chunk_root() -> void:
+	if is_instance_valid(_chunks_root):
+		remove_child(_chunks_root)
+		_chunks_root.free()
+	_chunks_root = null
+
+
 static func build_mesh(
 	seed: int,
 	bounds: Rect2,
@@ -105,7 +292,6 @@ static func build_mesh(
 	colors.resize(point_count)
 	var stride := steps.x + 1
 	var slice_start := Time.get_ticks_msec()
-
 	for grid_z in range(steps.y + 1):
 		var tz := float(grid_z) / float(steps.y)
 		var world_z := bounds.position.y + bounds.size.y * tz
@@ -129,7 +315,6 @@ static func build_mesh(
 				if not is_instance_valid(progress_owner) or not progress_owner.is_inside_tree():
 					return null
 				slice_start = Time.get_ticks_msec()
-
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var has_geometry := false
@@ -146,7 +331,6 @@ static func build_mesh(
 				if not is_instance_valid(progress_owner) or not progress_owner.is_inside_tree():
 					return null
 				slice_start = Time.get_ticks_msec()
-
 	if not has_geometry:
 		return empty_mesh
 	tool.generate_normals()
@@ -157,11 +341,11 @@ static func build_mesh(
 static func create_water_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = WaterShader
-	material.set_shader_parameter("wave_strength", 0.072)
+	material.set_shader_parameter("wave_strength", 0.070)
 	material.set_shader_parameter("wave_speed", 0.68)
-	material.set_shader_parameter("fresnel_strength", 0.58)
-	material.set_shader_parameter("refraction_strength", 0.016)
-	material.set_shader_parameter("shore_foam_strength", 0.31)
+	material.set_shader_parameter("fresnel_strength", 0.54)
+	material.set_shader_parameter("refraction_strength", 0.013)
+	material.set_shader_parameter("shore_foam_strength", 0.28)
 	return material
 
 
@@ -201,6 +385,10 @@ static func water_color_for_depth(kind: String, depth: float) -> Color:
 static func _smoothstep(edge_low: float, edge_high: float, value: float) -> float:
 	var weight := clampf((value - edge_low) / (edge_high - edge_low), 0.0, 1.0)
 	return weight * weight * (3.0 - 2.0 * weight)
+
+
+func _is_regional_map() -> bool:
+	return MapDefinition.active_map_id() != MapDefinition.LEGACY_CITY_MAP_ID
 
 
 func _exit_tree() -> void:
