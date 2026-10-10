@@ -19,6 +19,7 @@ var _failures := 0
 func _init() -> void:
 	_test_forecast_breakdown()
 	_test_historic_roads_are_not_charged()
+	_test_strategic_road_uses_explicit_maintenance()
 	_test_advance_charges_only_new_road_maintenance()
 	_test_runway_statuses()
 	if _failures > 0:
@@ -51,6 +52,17 @@ func _test_historic_roads_are_not_charged() -> void:
 	_expect(is_equal_approx(RegionalEconomy.road_maintenance_per_minute(city), 0.0), "pre-existing and autonomous roads do not charge the player")
 
 
+func _test_strategic_road_uses_explicit_maintenance() -> void:
+	var strategic := _road("relief", "player", "arterial", 5000.0)
+	strategic["maintenanceCostPerMinute"] = 1.75
+	strategic["proposalId"] = "relief-a"
+	var city := {"roads": [strategic]}
+	_expect(is_equal_approx(RegionalEconomy.road_maintenance_per_minute(city), 1.75), "completed strategic roads charge the exact maintenance estimate shown by the proposal")
+	strategic["status"] = "planned"
+	city["roads"] = [strategic]
+	_expect(is_equal_approx(RegionalEconomy.road_maintenance_per_minute(city), 0.0), "planned strategic roads do not charge maintenance before completion")
+
+
 func _test_advance_charges_only_new_road_maintenance() -> void:
 	var store := _base_store()
 	store.transit_network["lines"].clear()
@@ -74,12 +86,21 @@ func _test_runway_statuses() -> void:
 	line["fleet_count"] = 8
 	store.transit_network["lines"]["line-a"] = line
 	store.money = 200.0
-	var stressed := RegionalEconomy.evaluate(store)
-	_expect(float(stressed.get("net_per_minute", 0.0)) < 0.0, "low revenue creates negative projected cashflow")
-	_expect(str(stressed.get("status", "")) in ["stressed", "critical"], "short negative runway is surfaced as financial pressure")
+	var short_runway := RegionalEconomy.evaluate(store)
+	_expect(float(short_runway.get("net_per_minute", 0.0)) < 0.0, "low revenue creates negative projected cashflow")
+	_expect(str(short_runway.get("status", "")) in ["stressed", "critical"], "short negative runway is surfaced as financial pressure")
+
 	store.money = -1.0
-	var critical := RegionalEconomy.evaluate(store)
-	_expect(str(critical.get("status", "")) == "critical", "non-positive treasury is always critical")
+	var soft_debt := RegionalEconomy.evaluate(store)
+	_expect(str(soft_debt.get("status", "")) == "stressed", "negative treasury inside the soft-credit band is stressed rather than an instant failure")
+	_expect(bool(soft_debt.get("in_debt", false)), "soft-credit snapshot marks negative treasury as debt")
+	_expect(not bool(soft_debt.get("large_investment_blocked", true)), "large strategic investment remains available before the soft-credit floor is reached")
+
+	store.money = RegionalEconomy.SOFT_CREDIT_LIMIT
+	var credit_floor := RegionalEconomy.evaluate(store)
+	_expect(str(credit_floor.get("status", "")) == "critical", "reaching the soft-credit floor is critical")
+	_expect(bool(credit_floor.get("large_investment_blocked", false)), "large strategic investment is blocked at the soft-credit floor")
+	_expect(is_equal_approx(float(credit_floor.get("credit_headroom", -1.0)), 0.0), "credit headroom reaches zero at the configured floor")
 	store.free()
 
 
