@@ -8,17 +8,24 @@ var _failures := 0
 
 
 func _init() -> void:
+	_test_activity_proxy_fallback()
+	_test_traffic_pressure_override()
+	_finish()
+
+
+func _test_activity_proxy_fallback() -> void:
 	var city := CityRuntime.create_initial_city(731945, MapDefinition.DEFAULT_MAP_ID)
 	_assert_no_legacy_upgrade_hints(city)
 	var road := _first_intercity_road(city)
 	_expect(not road.is_empty(), "regional map exposes an intercity strategic road")
 	if road.is_empty():
-		_finish()
 		return
 
 	var a := _settlement(city, str(road.get("a", "")))
 	var b := _settlement(city, str(road.get("b", "")))
 	_expect(not a.is_empty() and not b.is_empty(), "strategic road connects two real settlements")
+	var fallback := RegionalHighwayPlanner._corridor_pressure_state(road, a, b)
+	_expect(str(fallback.get("source", "")) == "activity_proxy", "planner keeps the population/jobs proxy before traffic data exists")
 	var road_class_before := str(road.get("class", ""))
 	var road_status_before := str(road.get("status", ""))
 	var points_before: Array = road.get("points", []).duplicate(true)
@@ -38,6 +45,7 @@ func _init() -> void:
 	_expect(road.get("points", []) == points_before, "existing regional-road geometry is preserved")
 	_expect(not road.has("upgradeRecommendation"), "legacy in-place road upgrade recommendation is removed")
 	_expect(float(road.get("capacityPressure", 0.0)) > 0.0, "existing road only records capacity pressure")
+	_expect(str(road.get("capacityPressureSource", "")) == "activity_proxy", "fallback pressure source is exposed on the road")
 	_expect(bool(road.get("preserveExistingRoad", false)), "capacity analysis explicitly preserves roadside development corridor")
 
 	var corridor := _proposal_for_road(city, str(road.get("id", "")))
@@ -63,7 +71,39 @@ func _init() -> void:
 		_expect(str(proposal.get("designPrinciple", "")) == "orbital_outside_built_up_area", "ring proposal is explicitly routed outside urban fabric")
 		_expect(not bool(proposal.get("autoBuild", true)), "municipal ring study still cannot auto-build")
 	_expect(rings > 0, "mature multi-corridor cities can generate outer-ring planning studies")
-	_finish()
+
+
+func _test_traffic_pressure_override() -> void:
+	var city := CityRuntime.create_initial_city(731946, MapDefinition.DEFAULT_MAP_ID)
+	var road := _first_intercity_road(city)
+	_expect(not road.is_empty(), "traffic-pressure fixture exposes a strategic corridor")
+	if road.is_empty():
+		return
+	var a := _settlement(city, str(road.get("a", "")))
+	var b := _settlement(city, str(road.get("b", "")))
+	road["traffic"] = {
+		"flow_vph": 2850.0,
+		"capacity_vph": 1800.0,
+		"vc_ratio": 1.58,
+		"free_flow_minutes": 4.0,
+		"travel_time_minutes": 8.2,
+		"delay_minutes": 4.2,
+		"congestion_level": "severe",
+	}
+	var pressure_state := RegionalHighwayPlanner._corridor_pressure_state(road, a, b)
+	_expect(str(pressure_state.get("source", "")) == "traffic", "real traffic overrides the activity proxy")
+	_expect(float(pressure_state.get("pressure", 0.0)) >= RegionalHighwayPlanner.EXPRESSWAY_PRESSURE_THRESHOLD, "severe V/C and delay create at least expressway-scale planning pressure")
+	_expect(is_equal_approx(float(pressure_state.get("flow_vph", 0.0)), 2850.0), "traffic pressure preserves measured corridor flow")
+
+	var changed := RegionalHighwayPlanner.refresh(city)
+	_expect(changed, "traffic-driven pressure changes planning state")
+	_expect(str(road.get("capacityPressureSource", "")) == "traffic", "strategic road records traffic as the active pressure source")
+	var corridor := _proposal_for_road(city, str(road.get("id", "")))
+	_expect(not corridor.is_empty(), "traffic congestion creates a relief-corridor proposal even without inflated population")
+	if not corridor.is_empty():
+		_expect(str(corridor.get("pressureSource", "")) == "traffic", "proposal explains that real traffic triggered the study")
+		_expect(float(corridor.get("trafficVcRatio", 0.0)) > 1.0, "proposal stores source V/C for later UI explanation")
+		_expect(float(corridor.get("trafficDelayMinutes", 0.0)) > 0.0, "proposal stores measured delay")
 
 
 func _assert_no_legacy_upgrade_hints(city: Dictionary) -> void:
