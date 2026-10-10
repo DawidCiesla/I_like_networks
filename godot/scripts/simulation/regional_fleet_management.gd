@@ -88,7 +88,7 @@ static func process_retirements(store: Node) -> int:
 	if typeof(lines_value) != TYPE_DICTIONARY:
 		return 0
 	var lines: Dictionary = lines_value
-	var retired := 0
+	var total_retired := 0
 	for line_id_value in lines.keys():
 		var line_id := str(line_id_value)
 		var line_value: Variant = lines[line_id]
@@ -103,6 +103,7 @@ static func process_retirements(store: Node) -> int:
 		var last_stop := stop_count - 1
 		var vehicles: Array = line.get("vehicles", [])
 		var kept: Array = []
+		var line_retired := 0
 		for vehicle_value in vehicles:
 			if typeof(vehicle_value) != TYPE_DICTIONARY:
 				kept.append(vehicle_value)
@@ -115,10 +116,11 @@ static func process_retirements(store: Node) -> int:
 				and str(vehicle.get("phase", "")) != "travel"
 				and at_terminal
 				and float(vehicle.get("onboard_passengers", 0.0)) <= EPSILON
-				and vehicles.size() - retired > 1
+				and vehicles.size() - line_retired > 1
 			)
 			if can_retire:
-				retired += 1
+				line_retired += 1
+				total_retired += 1
 				continue
 			kept.append(vehicle)
 		line["vehicles"] = kept
@@ -126,7 +128,7 @@ static func process_retirements(store: Node) -> int:
 		line["pending_retirements"] = pending_retirements(line)
 		lines[line_id] = line
 	store.transit_network["lines"] = lines
-	return retired
+	return total_retired
 
 
 static func pending_retirements(line: Dictionary) -> int:
