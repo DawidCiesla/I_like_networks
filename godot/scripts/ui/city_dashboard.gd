@@ -282,7 +282,7 @@ func _build_economy_page() -> void:
 	var costs := float(_game_store().stats.get("lifetime_operating_costs", 0.0))
 	var lifetime_net := revenue - costs
 	var economy_value: Variant = _game_store().city.get("economy", {})
-	var has_live_economy := (
+	var has_live_economy: bool = (
 		_game_store().is_sandbox()
 		and typeof(economy_value) == TYPE_DICTIONARY
 		and not (economy_value as Dictionary).is_empty()
