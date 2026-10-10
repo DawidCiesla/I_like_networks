@@ -181,24 +181,23 @@ func toggle_natural_details() -> bool:
 
 func toggle_sdfgi() -> bool:
 	_sdfgi_enabled = not _sdfgi_enabled
-	if is_instance_valid(_environment_controller) and _environment_controller.has_method("set_debug_sdfgi_enabled"):
-		_environment_controller.call("set_debug_sdfgi_enabled", _sdfgi_enabled)
+	_set_environment_property("sdfgi_enabled", _sdfgi_enabled)
 	_refresh_overlay_if_visible()
 	return _sdfgi_enabled
 
 
 func toggle_shadows() -> bool:
 	_shadows_enabled = not _shadows_enabled
-	if is_instance_valid(_environment_controller) and _environment_controller.has_method("set_debug_shadows_enabled"):
-		_environment_controller.call("set_debug_shadows_enabled", _shadows_enabled)
+	var sun := _sun_light()
+	if sun != null:
+		sun.shadow_enabled = _shadows_enabled
 	_refresh_overlay_if_visible()
 	return _shadows_enabled
 
 
 func toggle_volumetric_fog() -> bool:
 	_volumetric_fog_enabled = not _volumetric_fog_enabled
-	if is_instance_valid(_environment_controller) and _environment_controller.has_method("set_debug_volumetric_fog_enabled"):
-		_environment_controller.call("set_debug_volumetric_fog_enabled", _volumetric_fog_enabled)
+	_set_environment_property("volumetric_fog_enabled", _volumetric_fog_enabled)
 	_refresh_overlay_if_visible()
 	return _volumetric_fog_enabled
 
@@ -253,13 +252,32 @@ func handle_debug_key(event: InputEventKey) -> bool:
 func _apply_debug_state() -> void:
 	if is_instance_valid(_terrain_renderer) and _terrain_renderer.has_method("set_natural_detail_enabled"):
 		_terrain_renderer.call("set_natural_detail_enabled", _natural_details_enabled)
-	if is_instance_valid(_environment_controller):
-		if _environment_controller.has_method("set_debug_sdfgi_enabled"):
-			_environment_controller.call("set_debug_sdfgi_enabled", _sdfgi_enabled)
-		if _environment_controller.has_method("set_debug_shadows_enabled"):
-			_environment_controller.call("set_debug_shadows_enabled", _shadows_enabled)
-		if _environment_controller.has_method("set_debug_volumetric_fog_enabled"):
-			_environment_controller.call("set_debug_volumetric_fog_enabled", _volumetric_fog_enabled)
+	_set_environment_property("sdfgi_enabled", _sdfgi_enabled)
+	_set_environment_property("volumetric_fog_enabled", _volumetric_fog_enabled)
+	var sun := _sun_light()
+	if sun != null:
+		sun.shadow_enabled = _shadows_enabled
+
+
+func _environment_resource() -> Environment:
+	if not is_instance_valid(_environment_controller):
+		return null
+	var value: Variant = _environment_controller.get("_environment")
+	return value as Environment if value is Environment else null
+
+
+func _sun_light() -> DirectionalLight3D:
+	if not is_instance_valid(_environment_controller):
+		return null
+	var value: Variant = _environment_controller.get("_sun")
+	return value as DirectionalLight3D if value is DirectionalLight3D else null
+
+
+func _set_environment_property(property_name: String, value: Variant) -> void:
+	var environment := _environment_resource()
+	if environment == null:
+		return
+	environment.set(property_name, value)
 
 
 func _create_overlay() -> void:
@@ -269,7 +287,7 @@ func _create_overlay() -> void:
 	add_child(_canvas)
 	_panel = PanelContainer.new()
 	_panel.position = Vector2(12.0, 132.0)
-	_panel.custom_minimum_size = Vector2(470.0, 0.0)
+	_panel.custom_minimum_size = Vector2(500.0, 0.0)
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_panel.visible = false
 	_canvas.add_child(_panel)
@@ -308,6 +326,7 @@ func _refresh_overlay() -> void:
 		"ground_cover_rebuild_ms",
 		"landscape_detail_rebuild_ms",
 		"riparian_detail_rebuild_ms",
+		"resident_transport_metrics_ms",
 		"traffic_refresh_ms",
 		"transit_traffic_apply_ms",
 	]:
@@ -333,11 +352,23 @@ func _refresh_overlay() -> void:
 
 func _register_custom_monitors() -> void:
 	if not Performance.has_custom_monitor("I Like Transit/Frame p95 ms"):
-		Performance.add_custom_monitor("I Like Transit/Frame p95 ms", func() -> float: return float(_stats(_frame_ms).get("p95", 0.0)))
+		Performance.add_custom_monitor("I Like Transit/Frame p95 ms", Callable(self, "_monitor_frame_p95"))
 	if not Performance.has_custom_monitor("I Like Transit/Frame p99 ms"):
-		Performance.add_custom_monitor("I Like Transit/Frame p99 ms", func() -> float: return float(_stats(_frame_ms).get("p99", 0.0)))
+		Performance.add_custom_monitor("I Like Transit/Frame p99 ms", Callable(self, "_monitor_frame_p99"))
 	if not Performance.has_custom_monitor("I Like Transit/GPU render ms"):
-		Performance.add_custom_monitor("I Like Transit/GPU render ms", func() -> float: return float(_stats(_render_gpu_ms).get("latest", 0.0)))
+		Performance.add_custom_monitor("I Like Transit/GPU render ms", Callable(self, "_monitor_gpu_render"))
+
+
+func _monitor_frame_p95() -> float:
+	return float(_stats(_frame_ms).get("p95", 0.0))
+
+
+func _monitor_frame_p99() -> float:
+	return float(_stats(_frame_ms).get("p99", 0.0))
+
+
+func _monitor_gpu_render() -> float:
+	return float(_stats(_render_gpu_ms).get("latest", 0.0))
 
 
 func _append_sample(samples: Array[float], value: float) -> void:
