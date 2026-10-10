@@ -7,6 +7,7 @@ var _failures := 0
 
 func _init() -> void:
 	_test_worst_road_and_line_alerts()
+	_test_service_target_alert()
 	_test_financial_pressure_alert()
 	_test_healthy_network_has_no_alerts()
 	if _failures > 0:
@@ -46,6 +47,34 @@ func _test_worst_road_and_line_alerts() -> void:
 		_expect(str(alerts[0].get("selection", "")) == "regional_road:road-b", "road alert targets the existing road inspector")
 		_expect(str(alerts[1].get("id", "")) == "line:line-a", "line-health issue becomes an actionable line alert")
 		_expect(str(alerts[1].get("selection", "")) == "free_line:line-a", "line alert targets the existing custom-line inspector")
+
+
+func _test_service_target_alert() -> void:
+	var network := {
+		"lines": {
+			"line-target": {
+				"name": "Town Express",
+				"operations_health": {
+					"status": "under_served",
+					"severity": 2,
+					"reason": "headway_above_target",
+					"headway_minutes": 12.0,
+					"target_headway_active": true,
+					"target_headway_minutes": 10.0,
+					"headway_target_ratio": 1.2,
+					"effective_load_ratio": 0.30,
+					"traffic_delay_factor": 1.0,
+					"recommended_action": "add_vehicle",
+				},
+			},
+		},
+	}
+	var alerts := RegionalGameplayAlerts.collect_alerts({"roads": []}, network)
+	_expect(alerts.size() == 1, "explicit service-target miss reaches Network Alerts")
+	if not alerts.is_empty():
+		_expect(str(alerts[0].get("label", "")).contains("BELOW SERVICE TARGET"), "target miss uses service-target wording instead of generic low frequency")
+		_expect(str(alerts[0].get("tooltip", "")).contains("target 10.0 min"), "target alert tooltip shows the configured headway")
+		_expect(str(alerts[0].get("tooltip", "")).contains("120% of target"), "target alert explains the size of the miss")
 
 
 func _test_financial_pressure_alert() -> void:
