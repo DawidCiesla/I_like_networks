@@ -4,6 +4,7 @@ const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalAccessibility = preload("res://scripts/city/regional_accessibility.gd")
 const RegionalDevelopmentPressure = preload("res://scripts/city/regional_development_pressure.gd")
+const RegionalHighwayProposalRuntime = preload("res://scripts/city/regional_highway_proposal_runtime.gd")
 const RegionalProgressionRuntime = preload("res://scripts/city/regional_progression_runtime.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
@@ -100,6 +101,7 @@ func _setup_regional_traffic() -> void:
 		GameStore.emit_signal("city_changed")
 	RegionalAccessibility.apply(GameStore)
 	RegionalDevelopmentPressure.apply(GameStore)
+	RegionalHighwayProposalRuntime.apply(GameStore.city)
 	GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
 	RegionalTransitTrafficRuntime.apply(GameStore)
 	RegionalProgressionRuntime.apply(GameStore)
@@ -162,11 +164,13 @@ func _advance_regional_traffic() -> void:
 	)
 	var traffic_changed := RegionalTrafficRuntime.advance(GameStore, traffic_delta)
 	if traffic_changed:
-		# Accessibility and parcel development pressure sample the freshly-updated
-		# travel conditions once per traffic refresh. Growth consumes this stable
-		# previous-period snapshot instead of recalculating mode choice itself.
+		# Accessibility, parcel development pressure and highway proposal benefits
+		# sample the freshly-updated travel conditions once per traffic refresh.
+		# Growth consumes this stable previous-period snapshot rather than
+		# recalculating mode choice itself.
 		RegionalAccessibility.apply(GameStore)
 		RegionalDevelopmentPressure.apply(GameStore)
+		RegionalHighwayProposalRuntime.apply(GameStore.city)
 		RegionalProgressionRuntime.apply(GameStore)
 		GameStore.emit_signal("city_changed")
 
