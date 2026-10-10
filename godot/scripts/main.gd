@@ -4,6 +4,7 @@ const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
 const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
+const RegionalTrafficOverlayRenderer = preload("res://scripts/render/regional_traffic_overlay_renderer.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
@@ -24,6 +25,7 @@ var _cloud_layer_renderer: CloudLayerRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
+var _traffic_overlay_renderer: RegionalTrafficOverlayRenderer
 var _gameplay_alerts: RegionalGameplayAlerts
 var _last_traffic_elapsed_seconds := 0.0
 
@@ -83,10 +85,16 @@ func _setup_regional_traffic() -> void:
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
 	RegionalTransitTrafficRuntime.apply(GameStore)
+	if _traffic_overlay_renderer == null:
+		_traffic_overlay_renderer = RegionalTrafficOverlayRenderer.new()
+		_traffic_overlay_renderer.name = "RegionalTrafficOverlay"
+		add_child(_traffic_overlay_renderer)
 	if _gameplay_alerts == null:
 		_gameplay_alerts = RegionalGameplayAlerts.new()
 		_gameplay_alerts.name = "RegionalGameplayAlerts"
+		_gameplay_alerts.traffic_overlay_requested.connect(_toggle_traffic_overlay)
 		add_child(_gameplay_alerts)
+		_gameplay_alerts.set_traffic_overlay_active(false)
 
 
 func _process(_delta: float) -> void:
@@ -108,6 +116,14 @@ func _advance_regional_traffic() -> void:
 		GameStore.emit_signal("city_changed")
 
 
+func _toggle_traffic_overlay() -> void:
+	if not GameStore.is_sandbox() or not is_instance_valid(_traffic_overlay_renderer):
+		return
+	var active := _traffic_overlay_renderer.toggle()
+	if is_instance_valid(_gameplay_alerts):
+		_gameplay_alerts.set_traffic_overlay_active(active)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_ESCAPE:
@@ -123,6 +139,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				if GameStore.simulation_speed > 0
 				else 1
 			)
+		elif event.physical_keycode == KEY_T and GameStore.is_sandbox():
+			_toggle_traffic_overlay()
+			get_viewport().set_input_as_handled()
 
 
 func _on_state_changed() -> void:
