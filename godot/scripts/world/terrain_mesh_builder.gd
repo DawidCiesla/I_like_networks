@@ -23,7 +23,6 @@ class RowJob extends RefCounted:
 	var uv2 := PackedVector2Array()
 	var _sampler: RefCounted
 	var _edits: RefCounted
-	var _vertex_heights: Dictionary = {}
 	var _mutex := Mutex.new()
 	var _progress := 0.0
 	var _cancelled := false
@@ -63,51 +62,27 @@ class RowJob extends RefCounted:
 				var x := bounds.position.x + bounds.size.x * float(column) / float(steps.x)
 				var index := (row - first_row) * stride + column
 				var sample: Dictionary = _sampler.call("regional_surface_sample", seed, x, z) if regional else {}
-				vertices[index] = Vector3(x, _height(x, z), z)
+				# x/z are exact terrain grid vertices. regional_surface_sample() already
+				# computed their analytic height, so do not run the previous four-sample
+				# triangulated height path again. Terrain edits remain an additive delta.
+				var base_height := (
+					float(sample["height"])
+					if regional
+					else float(_sampler.call("height", seed, x, z))
+				)
+				var edit_delta := float(_edits.call("edit_delta_at", x, z)) if _edits != null else 0.0
+				vertices[index] = Vector3(x, base_height + edit_delta, z)
 				colors[index] = sample["color"] if regional else _sampler.call("terrain_color", seed, x, z)
 				uv2[index] = Vector2(float(sample["moisture"]), float(sample["ground_cover"])) if regional else Vector2(0.45, 0.5)
 			_mutex.lock()
 			_progress = float(row - first_row + 1) / float(last_row - first_row)
 			_mutex.unlock()
 
-	func _vertex_height(x: float, z: float) -> float:
-		var column: Dictionary = _vertex_heights.get(x, {})
-		if column.has(z):
-			return column[z]
-		var value: float = _sampler.call("regional_height" if regional else "height", seed, x, z)
-		column[z] = value
-		_vertex_heights[x] = column
-		return value
-
-	func _height(x: float, z: float) -> float:
-		var delta := float(_edits.call("edit_delta_at", x, z)) if _edits != null else 0.0
-		var end := bounds.position + bounds.size
-		if x < bounds.position.x or x > end.x or z < bounds.position.y or z > end.y:
-			return float(_sampler.call("regional_height" if regional else "height", seed, x, z)) + delta
-		# Match TerrainSurface's triangulated interpolation exactly, including
-		# floating-point positions on grid boundaries and terrain edit deltas.
-		var step_x := bounds.size.x / float(steps.x)
-		var step_z := bounds.size.y / float(steps.y)
-		var local_x := (x - bounds.position.x) / step_x
-		var local_z := (z - bounds.position.y) / step_z
-		var ix := clampi(floori(local_x), 0, steps.x - 1)
-		var iz := clampi(floori(local_z), 0, steps.y - 1)
-		var tx := clampf(local_x - float(ix), 0.0, 1.0)
-		var tz := clampf(local_z - float(iz), 0.0, 1.0)
-		var x0 := bounds.position.x + step_x * float(ix)
-		var z0 := bounds.position.y + step_z * float(iz)
-		var h00 := _vertex_height(x0, z0)
-		var h10 := _vertex_height(x0 + step_x, z0)
-		var h01 := _vertex_height(x0, z0 + step_z)
-		var h11 := _vertex_height(x0 + step_x, z0 + step_z)
-		if tz <= tx:
-			return h00 + tx * (h10 - h00) + tz * (h11 - h10) + delta
-		return h00 + tx * (h11 - h01) + tz * (h01 - h00) + delta
-
 
 func build(seed: int, bounds: Rect2, steps: Vector2i, regional: bool, edits: Dictionary, owner: Node = null) -> ArrayMesh:
 	_cancelled = false
 	_jobs.clear()
+	_tasks.clear()
 	worker_count = mini(MAX_WORKERS, mini(maxi(1, OS.get_processor_count() - 1), steps.y + 1))
 	var frame_tree: SceneTree = owner.get_tree() if owner != null else null
 	for index in range(worker_count):
