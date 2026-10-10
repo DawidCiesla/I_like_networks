@@ -2,7 +2,7 @@ extends Node
 
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 
-const BENCHMARK_VERSION := 1
+const BENCHMARK_VERSION := 2
 const BENCHMARK_SEED := 812733
 const REPORT_DIRECTORY := "user://performance_reports"
 const MENU_SCENE := "res://scenes/ui/main_menu.tscn"
@@ -89,38 +89,40 @@ func _begin_pending_run() -> void:
 
 
 func _run_suite() -> void:
+	# The first variant is the actual profile used by normal gameplay after the
+	# performance pass. Remaining variants isolate the expensive features.
 	var variants: Array[Dictionary] = [
 		{
-			"id": "baseline",
-			"details": true,
-			"sdfgi": true,
-			"shadows": true,
-			"fog": true,
-			"render_scale": 1.0,
-		},
-		{
-			"id": "details_off",
-			"details": false,
-			"sdfgi": true,
-			"shadows": true,
-			"fog": true,
-			"render_scale": 1.0,
-		},
-		{
-			"id": "sdfgi_off",
+			"id": "playable_default",
 			"details": true,
 			"sdfgi": false,
 			"shadows": true,
-			"fog": true,
-			"render_scale": 1.0,
+			"fog": false,
+			"render_scale": 0.75,
 		},
 		{
-			"id": "render_scale_075",
+			"id": "details_off_reference",
+			"details": false,
+			"sdfgi": false,
+			"shadows": true,
+			"fog": false,
+			"render_scale": 0.75,
+		},
+		{
+			"id": "sdfgi_on_reference",
 			"details": true,
 			"sdfgi": true,
 			"shadows": true,
-			"fog": true,
+			"fog": false,
 			"render_scale": 0.75,
+		},
+		{
+			"id": "native_scale_reference",
+			"details": true,
+			"sdfgi": false,
+			"shadows": true,
+			"fog": false,
+			"render_scale": 1.0,
 		},
 	]
 	for variant_index in range(variants.size()):
@@ -288,14 +290,14 @@ func _apply_variant(variant: Dictionary) -> void:
 	var current: Dictionary = PerformanceProbe.report_snapshot().get("toggles", {})
 	if bool(current.get("natural_details", true)) != bool(variant.get("details", true)):
 		PerformanceProbe.toggle_natural_details()
-	if bool(current.get("sdfgi", true)) != bool(variant.get("sdfgi", true)):
+	if bool(current.get("sdfgi", false)) != bool(variant.get("sdfgi", false)):
 		PerformanceProbe.toggle_sdfgi()
 	if bool(current.get("shadows", true)) != bool(variant.get("shadows", true)):
 		PerformanceProbe.toggle_shadows()
-	if bool(current.get("volumetric_fog", true)) != bool(variant.get("fog", true)):
+	if bool(current.get("volumetric_fog", false)) != bool(variant.get("fog", false)):
 		PerformanceProbe.toggle_volumetric_fog()
-	var current_scale := float(current.get("render_scale_3d", 1.0))
-	var desired_scale := float(variant.get("render_scale", 1.0))
+	var current_scale := float(current.get("render_scale_3d", 0.75))
+	var desired_scale := float(variant.get("render_scale", 0.75))
 	if absf(current_scale - desired_scale) > 0.01:
 		PerformanceProbe.toggle_render_scale()
 
@@ -334,7 +336,13 @@ func _summarize_variant(phases: Array[Dictionary]) -> Dictionary:
 
 func _finish_suite() -> void:
 	_set_status("Saving benchmark report…")
-	_apply_variant({"details": true, "sdfgi": true, "shadows": true, "fog": true, "render_scale": 1.0})
+	_apply_variant({
+		"details": true,
+		"sdfgi": false,
+		"shadows": true,
+		"fog": false,
+		"render_scale": 0.75,
+	})
 	var report := {
 		"benchmark_version": BENCHMARK_VERSION,
 		"captured_at": Time.get_datetime_string_from_system(),
@@ -406,26 +414,32 @@ func _markdown_report(report: Dictionary) -> String:
 		lines.append("")
 		lines.append("### %s" % str(variant.get("id", "")))
 		lines.append("")
-		lines.append("| Phase | p50 | p95 | p99 | max | GPU mean | Ground rebuild p95 | Landscape p95 | Riparian p95 |")
-		lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+		lines.append("| Phase | p50 | p95 | p99 | max | GPU mean | Ground CPU | Ground wall | Landscape CPU | Landscape wall | Riparian CPU | Riparian wall |")
+		lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
 		for phase_value in variant.get("phases", []):
 			var phase: Dictionary = phase_value
 			var frame: Dictionary = phase.get("frame_ms", {})
 			var gpu: Dictionary = phase.get("render_gpu_ms", {})
 			var spans: Dictionary = phase.get("spans", {})
-			var ground_stats: Dictionary = spans.get("ground_cover_rebuild_ms", {})
-			var landscape_stats: Dictionary = spans.get("landscape_detail_rebuild_ms", {})
-			var riparian_stats: Dictionary = spans.get("riparian_detail_rebuild_ms", {})
-			lines.append("| %s | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f |" % [
+			var ground_cpu: Dictionary = spans.get("ground_cover_rebuild_ms", {})
+			var ground_wall: Dictionary = spans.get("ground_cover_rebuild_wall_ms", {})
+			var landscape_cpu: Dictionary = spans.get("landscape_detail_rebuild_ms", {})
+			var landscape_wall: Dictionary = spans.get("landscape_detail_rebuild_wall_ms", {})
+			var riparian_cpu: Dictionary = spans.get("riparian_detail_rebuild_ms", {})
+			var riparian_wall: Dictionary = spans.get("riparian_detail_rebuild_wall_ms", {})
+			lines.append("| %s | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f |" % [
 				str(phase.get("phase_id", "")),
 				float(frame.get("p50", 0.0)),
 				float(frame.get("p95", 0.0)),
 				float(frame.get("p99", 0.0)),
 				float(frame.get("max", 0.0)),
 				float(gpu.get("mean", 0.0)),
-				float(ground_stats.get("p95", 0.0)),
-				float(landscape_stats.get("p95", 0.0)),
-				float(riparian_stats.get("p95", 0.0)),
+				float(ground_cpu.get("p95", 0.0)),
+				float(ground_wall.get("p95", 0.0)),
+				float(landscape_cpu.get("p95", 0.0)),
+				float(landscape_wall.get("p95", 0.0)),
+				float(riparian_cpu.get("p95", 0.0)),
+				float(riparian_wall.get("p95", 0.0)),
 			])
 	return "\n".join(lines) + "\n"
 
