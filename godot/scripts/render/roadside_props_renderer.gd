@@ -12,9 +12,6 @@ const ROAD_HALF_WIDTH := {
 }
 const DELINEATOR_SPACING := 56.0
 const DELINEATOR_CLEARANCE := 4.2
-# Guardrails are long continuous visual elements. Sampling every ~24 m is
-# sufficient for terrain-drop classification and halves the terrain-query cost
-# compared with the first 13 m prototype.
 const GUARDRAIL_SAMPLE_SPACING := 24.0
 const GUARDRAIL_CLEARANCE := 3.2
 const GUARDRAIL_DROP_THRESHOLD := 1.35
@@ -41,15 +38,17 @@ func _ready() -> void:
 
 
 func _create_renderers() -> void:
-	_posts = _new_instance("RoadsideDelineators", 5200.0)
-	_reflectors = _new_instance("RoadsideReflectors", 4200.0)
-	_rails = _new_instance("RoadsideGuardrails", 5200.0)
+	# These are tiny near-field details. Rendering the global MultiMeshes several
+	# kilometres away adds vertices/shadow work without any visible benefit.
+	_posts = _new_instance("RoadsideDelineators", 1500.0)
+	_reflectors = _new_instance("RoadsideReflectors", 1200.0)
+	_rails = _new_instance("RoadsideGuardrails", 2300.0)
 
 
 func _new_instance(instance_name: String, visibility_end: float) -> MultiMeshInstance3D:
 	var instance := MultiMeshInstance3D.new()
 	instance.name = instance_name
-	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	instance.visibility_range_end = visibility_end
 	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(instance)
