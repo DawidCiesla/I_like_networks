@@ -8,6 +8,7 @@ const WORLD_UNITS_PER_KM := 1000.0
 const FORECAST_MINUTES := 60.0
 const WATCH_RUNWAY_MINUTES := 240.0
 const STRESSED_RUNWAY_MINUTES := 90.0
+const SOFT_CREDIT_LIMIT := -50000.0
 const EPSILON := 0.000001
 
 # Only infrastructure paid for by the player is maintained by the player's
@@ -50,6 +51,11 @@ static func evaluate(store: Node) -> Dictionary:
 		"treasury": treasury,
 		"status": status,
 		"severity": _status_severity(status),
+		"financial_policy": "soft_credit",
+		"soft_credit_limit": SOFT_CREDIT_LIMIT,
+		"in_debt": treasury < 0.0,
+		"credit_headroom": maxf(0.0, treasury - SOFT_CREDIT_LIMIT),
+		"large_investment_blocked": treasury <= SOFT_CREDIT_LIMIT,
 	}
 
 
@@ -166,8 +172,12 @@ static func _road_length_world(road: Dictionary) -> float:
 
 
 static func _financial_status(treasury: float, net_per_minute: float, runway_minutes: float) -> String:
-	if treasury <= 0.0:
+	if treasury <= SOFT_CREDIT_LIMIT:
 		return "critical"
+	# Soft credit deliberately keeps the game playable below zero. Debt is a
+	# warning state; only the configured credit floor is critical.
+	if treasury < 0.0:
+		return "stressed"
 	if net_per_minute >= -EPSILON:
 		return "surplus"
 	if runway_minutes <= STRESSED_RUNWAY_MINUTES:
