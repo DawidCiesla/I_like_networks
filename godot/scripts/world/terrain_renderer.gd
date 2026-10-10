@@ -22,7 +22,9 @@ const MEDIUM_SAMPLE_FACTOR := 2
 const FAR_SAMPLE_FACTOR := 4
 const NEAR_END_METERS := 2200.0
 const MEDIUM_END_METERS := 5200.0
-const FAR_END_METERS := 9800.0
+# A zero end range disables the far-distance cutoff in Godot. The far layer is
+# already very cheap and must remain available at maximum region zoom.
+const FAR_END_METERS := 0.0
 const TERRAIN_SKIRT_DEPTH := 36.0
 const CHUNK_BUILD_BUDGET_USEC := 2500
 const TERRAIN_EDIT_BUDGET_USEC := 1200
