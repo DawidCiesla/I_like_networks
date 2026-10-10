@@ -10,7 +10,8 @@ enum Step {
 	DEPOT_AND_BUS = 1,
 	CREATE_FIRST_LINE = 2,
 	NETWORK_EXPANSION = 3,
-	COMPLETED = 4
+	POSITIVE_OPERATIONS = 4,
+	COMPLETED = 5
 }
 
 var current_step: int = Step.WELCOME_AND_ROAD
@@ -28,12 +29,10 @@ func _ready() -> void:
 	if is_instance_valid(store):
 		store.state_changed.connect(_on_store_changed)
 		store.city_changed.connect(_on_store_changed)
-
 	if is_instance_valid(skip_button):
 		skip_button.pressed.connect(_on_skip_pressed)
 	if is_instance_valid(next_button):
 		next_button.pressed.connect(_on_next_pressed)
-
 	_update_step_ui()
 	_on_store_changed()
 
@@ -42,12 +41,11 @@ func _on_store_changed() -> void:
 	var store := get_node_or_null("/root/GameStore")
 	if not is_instance_valid(store):
 		return
-
-	# Re-evaluate sequentially so a loaded game that already satisfies several
-	# tutorial milestones advances to the first genuinely unfinished action.
+	# Loaded saves advance through every milestone already supported by their
+	# canonical state; no tutorial step depends on a manual acknowledgement.
 	var guard := 0
 	var progressed := true
-	while progressed and guard < 5 and current_step < Step.COMPLETED:
+	while progressed and guard < 6 and current_step < Step.COMPLETED:
 		guard += 1
 		progressed = false
 		match current_step:
@@ -65,6 +63,10 @@ func _on_store_changed() -> void:
 					progressed = true
 			Step.NETWORK_EXPANSION:
 				if RegionalTutorialProgress.passenger_target_met(store.stats):
+					advance_step(Step.POSITIVE_OPERATIONS)
+					progressed = true
+			Step.POSITIVE_OPERATIONS:
+				if RegionalTutorialProgress.positive_operating_cashflow(store.city):
 					advance_step(Step.COMPLETED)
 					progressed = true
 	if current_step < Step.COMPLETED:
@@ -87,44 +89,40 @@ func _update_step_ui() -> void:
 	if current_step == Step.COMPLETED:
 		hide()
 		return
-
 	show()
-	# Tutorial progression is state-driven. The action button is retained by the
-	# scene for layout compatibility but cannot manually skip validation.
 	next_button.disabled = true
 	match current_step:
 		Step.WELCOME_AND_ROAD:
-			step_title.text = "TUTORIAL 1/4: REGIONAL INFRASTRUCTURE"
-			step_body.text = "Build your first player road. Select ROAD BUILDER on the bottom panel and connect the regional network toward another settlement. The tutorial advances when a completed player-funded road exists."
+			step_title.text = "TUTORIAL 1/5: REGIONAL INFRASTRUCTURE"
+			step_body.text = "Build your first player road. Select ROAD BUILDER and connect the regional network toward another settlement. This step advances only after construction is complete."
 			next_button.text = "WAITING FOR ROAD"
-
 		Step.DEPOT_AND_BUS:
-			step_title.text = "TUTORIAL 2/4: DEPOT"
-			step_body.text = "Place a Bus Depot along the connected road network. The depot provides garage capacity for the vehicles assigned to your lines."
+			step_title.text = "TUTORIAL 2/5: DEPOT"
+			step_body.text = "Place a Bus Depot along the connected road network. It provides garage capacity for vehicles assigned to your lines."
 			next_button.text = "WAITING FOR DEPOT"
-
 		Step.CREATE_FIRST_LINE:
-			step_title.text = "TUTORIAL 3/4: FIRST TRANSIT LINE"
-			step_body.text = "Create an active passenger line with at least two stops and a vehicle in service. Its real headway, traffic delay and operating balance will appear in Line Operations."
+			step_title.text = "TUTORIAL 3/5: FIRST TRANSIT LINE"
+			step_body.text = "Create an active passenger line with at least two stops and a vehicle in service. The tutorial detects the real custom line and fleet state."
 			next_button.text = "WAITING FOR SERVICE"
-
 		Step.NETWORK_EXPANSION:
 			var store := get_node_or_null("/root/GameStore")
 			var progress := {"current": 0.0, "target": RegionalTutorialProgress.PASSENGER_TARGET}
 			if is_instance_valid(store):
 				progress = RegionalTutorialProgress.passenger_progress(store.stats)
-			step_title.text = "TUTORIAL 4/4: PROVE THE SERVICE"
-			step_body.text = "Let the line carry passengers to their destinations. Deliver %.0f / %.0f passengers. Watch Network Alerts, Traffic Map [T] and the line operating balance while the service runs." % [
-				float(progress.get("current", 0.0)),
-				float(progress.get("target", RegionalTutorialProgress.PASSENGER_TARGET)),
-			]
+			step_title.text = "TUTORIAL 4/5: PROVE THE SERVICE"
+			step_body.text = "Let the line carry passengers. Deliver %.0f / %.0f passengers while watching demand, traffic and fleet performance." % [float(progress.get("current", 0.0)), float(progress.get("target", RegionalTutorialProgress.PASSENGER_TARGET))]
 			next_button.text = "WAITING FOR PASSENGERS"
+		Step.POSITIVE_OPERATIONS:
+			var store := get_node_or_null("/root/GameStore")
+			var cashflow := {"available": false, "net_per_minute": 0.0}
+			if is_instance_valid(store):
+				cashflow = RegionalTutorialProgress.operating_cashflow(store.city)
+			step_title.text = "TUTORIAL 5/5: SUSTAIN THE NETWORK"
+			step_body.text = "Make current operations profitable. Net operating cashflow: %s$%.1f/min. Adjust routes, ridership or fleet size until it is positive." % ["+" if float(cashflow.get("net_per_minute", 0.0)) >= 0.0 else "−", absf(float(cashflow.get("net_per_minute", 0.0)))]
+			next_button.text = "WAITING FOR POSITIVE CASHFLOW"
 
 
 func _on_next_pressed() -> void:
-	# Manual completion was intentionally removed: every tutorial step now has a
-	# measurable GameStore condition. Keep the handler because the scene still
-	# contains the legacy button and may dispatch an input event during migration.
 	_on_store_changed()
 
 
