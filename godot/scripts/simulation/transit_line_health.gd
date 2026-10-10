@@ -76,7 +76,10 @@ static func evaluate(line: Dictionary) -> Dictionary:
 		recommended_action = "improve_corridor"
 	elif is_finite(headway) and headway >= under_service_threshold and demand_ppm > EPSILON:
 		status = "under_served"
-		severity = 1
+		# A player-authored target is an explicit service commitment and should
+		# surface in Network Alerts. The legacy long-headway heuristic remains a
+		# low-priority inspector hint to avoid new alert spam in old saves.
+		severity = 2 if target_active else 1
 		reason = "headway_above_target" if target_active else "long_headway"
 		recommended_action = "add_vehicle"
 
