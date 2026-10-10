@@ -150,7 +150,7 @@ func _advance_build() -> void:
 		var flat_index := _build_cursor
 		_build_cursor += 1
 		var dx := flat_index % _build_side - _build_radius_steps
-		var dz := flat_index / _build_side - _build_radius_steps
+		var dz := floori(float(flat_index) / float(_build_side)) - _build_radius_steps
 		_process_candidate(dx, dz)
 		if Time.get_ticks_usec() - slice_started >= SLICE_BUDGET_USEC:
 			break
@@ -172,7 +172,6 @@ func _process_candidate(dx: int, dz: int) -> void:
 		return
 	if _road_index.point_near_road(point, ROAD_CLEARANCE_METERS):
 		return
-	# The maximum acceptance is 0.94, so this is an exact cheap rejection.
 	var acceptance_roll := _pseudo(point.x, point.y, 3, _build_seed)
 	if acceptance_roll > 0.94:
 		return
