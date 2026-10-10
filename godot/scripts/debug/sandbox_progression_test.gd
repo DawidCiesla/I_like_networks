@@ -9,6 +9,7 @@ func _initialize() -> void:
 	_test_mode_unlock_feedback_uses_existing_rules()
 	_test_owned_modes_are_not_relocked_after_spending()
 	_test_optional_goals_measure_access_health_and_balance()
+	_test_playable_milestone_order_and_current_cashflow()
 	_test_missing_and_malformed_metrics_are_safe()
 	if _failures == 0:
 		print("SandboxProgression: PASS")
@@ -30,7 +31,7 @@ func _test_mode_unlock_feedback_uses_existing_rules() -> void:
 	_expect(int(tram["population"]["remaining"]) == 12500, "tram reports its remaining resident requirement")
 	_expect(is_equal_approx(float(tram["treasury"]["remaining"]), 11000.0), "tram reports its remaining treasury requirement")
 	_expect(str(tram.get("feedback", "")).contains("12,500") and str(tram.get("feedback", "")).contains("$11,000"), "tram feedback names both unmet requirements")
-	_expect(result["next_objective"].get("id") == "tram", "the next objective points to the first unowned mode")
+	_expect(result["next_objective"].get("id") == "tram", "without measurable operating milestones the next objective still points to the first unowned mode")
 
 	var ready := Progression.evaluate({
 		"resident_count": 25000,
@@ -60,7 +61,7 @@ func _test_owned_modes_are_not_relocked_after_spending() -> void:
 		"unlocked_modes": {"bus": true, "tram": true},
 	})
 	_expect(result["mode_unlocks"]["tram"].get("status") == "owned", "an already-owned mode stays available after its unlock cost is spent")
-	_expect(result["next_objective"].get("id") == "metro", "progression advances to metro after tram is owned")
+	_expect(result["next_objective"].get("id") == "metro", "progression advances to metro after tram is owned when no earlier measurable goal is available")
 
 
 func _test_optional_goals_measure_access_health_and_balance() -> void:
@@ -98,9 +99,41 @@ func _test_optional_goals_measure_access_health_and_balance() -> void:
 		"healthcare_coverage": 0.3,
 	})
 	var short_access_goals: Array = short_access["goals"]
-	_expect(str(short_access["next_objective"].get("id", "")) == "regional_access", "when modes are owned, the next available optional milestone is surfaced")
+	_expect(str(short_access["next_objective"].get("id", "")) == "regional_access", "when modes are owned, the next available operating milestone is surfaced")
 	_expect(str(_goal_by_id(short_access_goals, "operator_balance").get("feedback", "")).contains("$2,000 below"), "finance feedback explains the shortfall")
 	_expect(str(_goal_by_id(short_access_goals, "healthcare_coverage").get("feedback", "")).contains("65 percentage points"), "service feedback reports the remaining coverage")
+
+
+func _test_playable_milestone_order_and_current_cashflow() -> void:
+	var base := {
+		"resident_count": 30000,
+		"public_treasury": 50000.0,
+		"unlocked_modes": {"bus": true},
+		"lifetime_passengers": 80.0,
+		"reachable_transit_od_pairs": 4,
+		"total_od_pairs": 8,
+		"current_net_per_minute": 5.0,
+		"current_revenue_per_minute": 12.0,
+		"current_opex_per_minute": 7.0,
+		"current_cashflow_available": true,
+	}
+	var passengers_first := Progression.evaluate(base)
+	_expect(str(passengers_first["next_objective"].get("id", "")) == "passenger_service", "measurable passenger service comes before a tram unlock")
+	var passenger_goal := _goal_by_id(passengers_first["goals"], "passenger_service")
+	_expect(is_equal_approx(float(passenger_goal.get("progress", 0.0)), 80.0 / 250.0), "passenger milestone exposes deterministic progress")
+
+	base["lifetime_passengers"] = 250.0
+	var tram_next := Progression.evaluate(base)
+	_expect(str(tram_next["next_objective"].get("id", "")) == "tram", "after early service/access/cashflow milestones the next strategic objective becomes tram")
+
+	base["current_net_per_minute"] = -3.5
+	base["current_revenue_per_minute"] = 4.0
+	base["current_opex_per_minute"] = 7.5
+	var loss := Progression.evaluate(base)
+	_expect(str(loss["next_objective"].get("id", "")) == "operator_balance", "a currently losing operator must fix service before progression points at tram")
+	var balance := _goal_by_id(loss["goals"], "operator_balance")
+	_expect(not bool(balance.get("complete", true)), "negative current cashflow does not pass due to historic lifetime revenue")
+	_expect(str(balance.get("feedback", "")).contains("$3.5/min"), "current cashflow feedback names the live per-minute loss")
 
 
 func _test_missing_and_malformed_metrics_are_safe() -> void:
