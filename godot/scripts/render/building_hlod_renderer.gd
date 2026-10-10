@@ -5,10 +5,11 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const HlodShader = preload("res://scripts/render/building_hlod.gdshader")
 
 const MAX_INSTANCES := 5200
-const VISIBILITY_BEGIN := 700.0
+const VISIBILITY_BEGIN := 600.0
 const VISIBILITY_END := 18000.0
-const FULL_DETAIL_END := 950.0
-const FOUNDATION_DETAIL_END := 1200.0
+const FULL_DETAIL_END := 800.0
+const AUXILIARY_DETAIL_END := 850.0
+const FOUNDATION_DETAIL_END := 1000.0
 
 var _store: Node
 var _instance: MultiMeshInstance3D
@@ -73,15 +74,22 @@ func _apply_source_lod() -> void:
 	if not is_instance_valid(main_root):
 		return
 	var city_renderer := main_root.get_node_or_null("City")
-	if city_renderer == null:
-		return
-	var full_buildings := city_renderer.get_node_or_null("Buildings")
-	if full_buildings != null:
-		_apply_visibility_range_recursive(full_buildings, FULL_DETAIL_END)
-	var foundations := city_renderer.get_node_or_null("BuildingFoundations") as GeometryInstance3D
-	if foundations != null:
-		foundations.visibility_range_end = FOUNDATION_DETAIL_END
-		foundations.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	if city_renderer != null:
+		var full_buildings := city_renderer.get_node_or_null("Buildings")
+		if full_buildings != null:
+			_apply_visibility_range_recursive(full_buildings, FULL_DETAIL_END)
+		var foundations := city_renderer.get_node_or_null("BuildingFoundations") as GeometryInstance3D
+		if foundations != null:
+			foundations.visibility_range_end = FOUNDATION_DETAIL_END
+			foundations.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+	# Auxiliary detail renderers live beside City, not below City/Buildings.
+	# Cull them at the same transition so windows, hedges, rooftop utilities and
+	# chimneys do not survive several kilometres after the source model becomes HLOD.
+	for node_name in ["BuildingDetails", "BuildingWindows"]:
+		var detail_root := main_root.get_node_or_null(node_name)
+		if detail_root != null:
+			_apply_visibility_range_recursive(detail_root, AUXILIARY_DETAIL_END)
 
 
 func _apply_visibility_range_recursive(node: Node, end_distance: float) -> void:
