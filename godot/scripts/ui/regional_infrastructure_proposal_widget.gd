@@ -4,6 +4,7 @@ class_name RegionalInfrastructureProposalWidget
 const REFRESH_SECONDS := 0.5
 
 var _panel: PanelContainer
+var _toggle_button: Button
 var _title: Label
 var _meta: Label
 var _body: Label
@@ -22,8 +23,6 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if not _open:
-		return
 	_refresh_remaining -= delta
 	if _refresh_remaining <= 0.0:
 		_refresh_remaining = REFRESH_SECONDS
@@ -40,9 +39,11 @@ func set_open(value: bool) -> void:
 	_open = value
 	if is_instance_valid(_panel):
 		_panel.visible = value
+	if is_instance_valid(_toggle_button):
+		_toggle_button.button_pressed = value
 	if value:
 		_refresh_remaining = 0.0
-		_refresh()
+	_refresh()
 
 
 func is_open() -> bool:
@@ -55,13 +56,26 @@ func _build_ui() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 
+	_toggle_button = Button.new()
+	_toggle_button.name = "InfrastructureStudiesToggle"
+	_toggle_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_toggle_button.offset_left = -374.0
+	_toggle_button.offset_right = -222.0
+	_toggle_button.offset_top = 50.0
+	_toggle_button.offset_bottom = 84.0
+	_toggle_button.toggle_mode = true
+	_toggle_button.text = "STUDIES [P]"
+	_toggle_button.tooltip_text = "Open strategic road proposals and benefit estimates."
+	_toggle_button.pressed.connect(func(): set_open(_toggle_button.button_pressed))
+	root.add_child(_toggle_button)
+
 	_panel = PanelContainer.new()
 	_panel.name = "RegionalInfrastructureProposal"
-	_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_panel.offset_left = -458.0
-	_panel.offset_right = -18.0
-	_panel.offset_top = 82.0
-	_panel.offset_bottom = 430.0
+	_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_panel.offset_left = -230.0
+	_panel.offset_right = 230.0
+	_panel.offset_top = -184.0
+	_panel.offset_bottom = 184.0
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_panel)
 
@@ -123,13 +137,20 @@ func _build_ui() -> void:
 
 
 func _refresh() -> void:
-	if not _open:
-		return
 	var store := get_node_or_null("/root/GameStore")
 	if not is_instance_valid(store) or not store.has_method("is_sandbox") or not bool(store.call("is_sandbox")):
-		set_open(false)
+		if is_instance_valid(_panel):
+			_panel.visible = false
+		if is_instance_valid(_toggle_button):
+			_toggle_button.visible = false
 		return
+	if is_instance_valid(_toggle_button):
+		_toggle_button.visible = true
 	var proposals := _proposals(store.city)
+	if is_instance_valid(_toggle_button):
+		_toggle_button.text = "STUDIES %d [P]" % proposals.size()
+	if not _open:
+		return
 	if proposals.is_empty():
 		_index = 0
 		_title.text = "INFRASTRUCTURE STUDIES"
