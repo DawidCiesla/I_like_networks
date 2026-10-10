@@ -4,6 +4,7 @@ class_name RegionalTransitTrafficRuntime
 const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const TransitModes = preload("res://scripts/transport/transit_modes.gd")
+const TransitLineHealth = preload("res://scripts/simulation/transit_line_health.gd")
 
 const WORLD_UNITS_PER_KM := 1000.0
 const MAX_CONGESTION_FACTOR := 6.0
@@ -45,6 +46,7 @@ static func apply(store: Node) -> bool:
 		line["traffic_effective_cycle_minutes"] = float(operations.get("cycle_minutes", 0.0))
 		line["traffic_effective_headway_minutes"] = float(operations.get("headway_minutes", INF))
 		line["traffic_effective_capacity_ppm"] = float(operations.get("capacity_ppm", 0.0))
+		line["operations_health"] = TransitLineHealth.evaluate(line)
 
 		var vehicles: Array = line.get("vehicles", [])
 		for vehicle_index in range(vehicles.size()):
@@ -207,6 +209,7 @@ static func _clear_line_runtime_fields(line: Dictionary) -> void:
 		"traffic_effective_cycle_minutes",
 		"traffic_effective_headway_minutes",
 		"traffic_effective_capacity_ppm",
+		"operations_health",
 	]:
 		line.erase(key)
 	var vehicles: Array = line.get("vehicles", [])
