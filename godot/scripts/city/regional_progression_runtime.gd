@@ -14,10 +14,7 @@ static func apply(store: Node) -> Dictionary:
 	var metrics := collect_metrics(store)
 	var history := _updated_history(store.city, metrics)
 	metrics["had_congestion"] = bool(history.get("had_congestion", false))
-	metrics["resolved_first_congestion"] = (
-		bool(history.get("had_congestion", false))
-		and float(metrics.get("max_vc_ratio", 0.0)) < CONGESTION_RESOLVED_VC
-	)
+	metrics["resolved_first_congestion"] = bool(history.get("resolved_first_congestion", false))
 	metrics["had_severe_congestion"] = bool(history.get("had_severe_congestion", false))
 	var progression := SandboxProgression.evaluate(metrics)
 	var snapshot := {
