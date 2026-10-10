@@ -3,6 +3,7 @@ extends Node3D
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
+const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
@@ -23,6 +24,7 @@ var _cloud_layer_renderer: CloudLayerRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
+var _gameplay_alerts: RegionalGameplayAlerts
 var _last_traffic_elapsed_seconds := 0.0
 
 
@@ -81,6 +83,10 @@ func _setup_regional_traffic() -> void:
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
 	RegionalTransitTrafficRuntime.apply(GameStore)
+	if _gameplay_alerts == null:
+		_gameplay_alerts = RegionalGameplayAlerts.new()
+		_gameplay_alerts.name = "RegionalGameplayAlerts"
+		add_child(_gameplay_alerts)
 
 
 func _process(_delta: float) -> void:
