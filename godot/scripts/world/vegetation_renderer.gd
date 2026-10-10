@@ -120,7 +120,8 @@ func rebuild(progressive: bool = false) -> void:
 
 func _build_tree_batches(regional: bool) -> void:
 	var mesh_data_by_type: Dictionary = {}
-	for tree_type in TREE_SCENES.keys():
+	for tree_type_value in TREE_SCENES.keys():
+		var tree_type := str(tree_type_value)
 		var source_root: Node = TREE_SCENES[tree_type].instantiate()
 		var mesh_data := _find_tree_mesh(source_root, Transform3D.IDENTITY)
 		source_root.free()
@@ -167,9 +168,10 @@ func _build_tree_batches(regional: bool) -> void:
 		if regional:
 			origin = Vector2(float(tile.x) * REGIONAL_TILE_SIZE, float(tile.y) * REGIONAL_TILE_SIZE)
 		_tree_batch_origins[batch_key] = origin
+		var mesh_data_for_type: Dictionary = mesh_data_by_type[tree_type]
 		var multi := MultiMesh.new()
 		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = (mesh_data_by_type[tree_type] as Dictionary)["mesh"]
+		multi.mesh = mesh_data_for_type["mesh"]
 		multi.instance_count = indices.size()
 		_tree_multimeshes[batch_key] = multi
 		var tree_instances := MultiMeshInstance3D.new()
@@ -242,9 +244,10 @@ func _sync_city_occupancy(force: bool = false) -> void:
 			basis,
 			Vector3(float(tree["x"]) - origin.x, float(tree["ground"]), float(tree["z"]) - origin.y)
 		)
+		var model_transform: Transform3D = _tree_model_transforms[tree_type]
 		multimesh.set_instance_transform(
 			int(tree["instance_index"]),
-			transform * (_tree_model_transforms[tree_type] as Transform3D)
+			transform * model_transform
 		)
 
 
