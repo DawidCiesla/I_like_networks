@@ -2,6 +2,7 @@ extends CanvasLayer
 class_name RegionalLineOperationsWidget
 
 const Data = preload("res://scripts/core/game_data.gd")
+const TransitModes = preload("res://scripts/transport/transit_modes.gd")
 const RegionalFleetManagement = preload("res://scripts/simulation/regional_fleet_management.gd")
 
 const REFRESH_SECONDS := 0.4
@@ -126,6 +127,17 @@ func _refresh() -> void:
 	var health_value: Variant = line.get("operations_health", {})
 	var health: Dictionary = health_value if typeof(health_value) == TYPE_DICTIONARY else {}
 	var load_ratio := float(health.get("effective_load_ratio", line.get("crowding_ratio", 0.0)))
+	var profile := TransitModes.profile(mode)
+	var fare_per_minute := (
+		maxf(0.0, float(line.get("last_delivered_ppm", 0.0)))
+		* float(Data.ECONOMY["fare_per_passenger"])
+	)
+	var opex_per_minute := (
+		float(fleet)
+		* maxf(0.0, float(profile.get("operating_cost_multiplier", 1.0)))
+		* float(Data.ECONOMY["sandbox_operating_cost_per_bus_minute"])
+	)
+	var net_per_minute := fare_per_minute - opex_per_minute
 
 	_title.text = "LINE OPERATIONS · %s" % str(line.get("name", line_id)).to_upper()
 	_summary.text = "Fleet %d%s · headway %s · load %.0f%% · traffic ×%.2f" % [
@@ -137,7 +149,14 @@ func _refresh() -> void:
 	]
 	var status := str(health.get("status", "monitor"))
 	var recommendation := str(health.get("recommended_action", "monitor")).replace("_", " ")
-	_health.text = "%s · %s" % [status.replace("_", " ").to_upper(), recommendation]
+	_health.text = "OPS %s$%.1f/min · fares $%.1f · cost $%.1f · %s · %s" % [
+		"+" if net_per_minute >= 0.0 else "−",
+		absf(net_per_minute),
+		fare_per_minute,
+		opex_per_minute,
+		status.replace("_", " ").to_upper(),
+		recommendation,
+	]
 
 	var vehicle_name := _vehicle_name(mode)
 	var cost := 0
@@ -177,7 +196,10 @@ func _on_retire_pressed() -> void:
 	var store := get_node_or_null("/root/GameStore")
 	if _line_id.is_empty() or not is_instance_valid(store):
 		return
-	var line_value: Variant = store.transit_network.get("lines", {}).get(_line_id, {})
+	var lines_value: Variant = store.transit_network.get("lines", {})
+	if typeof(lines_value) != TYPE_DICTIONARY:
+		return
+	var line_value: Variant = (lines_value as Dictionary).get(_line_id, {})
 	if typeof(line_value) != TYPE_DICTIONARY:
 		return
 	var line: Dictionary = line_value
