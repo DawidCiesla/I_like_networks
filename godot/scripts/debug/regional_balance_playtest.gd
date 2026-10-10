@@ -155,13 +155,13 @@ func _setup_starter_bus(store: Node) -> Dictionary:
 func _snapshot(store: Node) -> Dictionary:
 	var transport: Dictionary = store.resident_transport_metrics()
 	var health: Dictionary = store.resident_health_metrics()
-	var economy := RegionalEconomy.evaluate(store)
+	var economy: Dictionary = RegionalEconomy.evaluate(store)
 	var road_traffic: Dictionary = store.city.get("road_traffic", {})
 	var demographics: Dictionary = store.city.get("demographics", {})
 	var line_count := 0
 	var active_fleet := 0
 	for line_id in TransitNetwork.custom_line_ids(store.transit_network):
-		var line := store.transit_line(line_id)
+		var line: Dictionary = store.transit_line(line_id)
 		if str(line.get("status", "")) != "active":
 			continue
 		line_count += 1
