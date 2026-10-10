@@ -10,12 +10,16 @@ const MAX_PARCEL_MARKERS := 420
 var _store: Node
 var _enabled := false
 var _signature := ""
+var _mesh_root: Node3D
 var _legend_layer: CanvasLayer
 var _legend_panel: PanelContainer
 
 
 func _ready() -> void:
 	_store = get_node_or_null("/root/GameStore")
+	_mesh_root = Node3D.new()
+	_mesh_root.name = "GrowthOverlayGeometry"
+	add_child(_mesh_root)
 	visible = false
 	_build_legend()
 	if _store != null and _store.has_signal("city_changed"):
@@ -60,7 +64,9 @@ func _sync() -> void:
 
 
 func _rebuild(city: Dictionary, seed: int) -> void:
-	for child in get_children():
+	if not is_instance_valid(_mesh_root):
+		return
+	for child in _mesh_root.get_children():
 		child.queue_free()
 
 	for settlement_value in city.get("regional_settlements", []):
@@ -106,6 +112,8 @@ func _add_disk(
 	color: Color,
 	alpha: float
 ) -> void:
+	if not is_instance_valid(_mesh_root):
+		return
 	var instance := MeshInstance3D.new()
 	var disk := CylinderMesh.new()
 	disk.top_radius = radius
@@ -116,7 +124,6 @@ func _add_disk(
 	material.albedo_color = Color(color.r, color.g, color.b, alpha)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.no_depth_test = false
 	disk.material = material
 	instance.mesh = disk
 	instance.position = Vector3(
@@ -125,7 +132,7 @@ func _add_disk(
 		point.y
 	)
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(instance)
+	_mesh_root.add_child(instance)
 
 
 func _add_settlement_label(
@@ -137,6 +144,8 @@ func _add_settlement_label(
 	growth: float,
 	development: float
 ) -> void:
+	if not is_instance_valid(_mesh_root):
+		return
 	var label := Label3D.new()
 	var access_text := "%d" % roundi(access * 100.0) if access_available else "--"
 	label.text = "%s\nA %s · G %.2f · D %d" % [
@@ -154,7 +163,7 @@ func _add_settlement_label(
 	label.outline_size = 5
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.modulate = Color(1.0, 1.0, 1.0, 0.94)
-	add_child(label)
+	_mesh_root.add_child(label)
 
 
 func _build_legend() -> void:
