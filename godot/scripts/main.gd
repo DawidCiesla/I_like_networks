@@ -3,6 +3,7 @@ extends Node3D
 const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalAccessibility = preload("res://scripts/city/regional_accessibility.gd")
+const RegionalDevelopmentPressure = preload("res://scripts/city/regional_development_pressure.gd")
 const RegionalProgressionRuntime = preload("res://scripts/city/regional_progression_runtime.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
@@ -12,6 +13,7 @@ const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alert
 const RegionalLineOperationsWidget = preload("res://scripts/ui/regional_line_operations_widget.gd")
 const RegionalProgressionWidget = preload("res://scripts/ui/regional_progression_widget.gd")
 const RegionalSettlementMobilityWidget = preload("res://scripts/ui/regional_settlement_mobility_widget.gd")
+const RegionalGrowthOverlayRenderer = preload("res://scripts/render/regional_growth_overlay_renderer.gd")
 const RegionalTrafficOverlayRenderer = preload("res://scripts/render/regional_traffic_overlay_renderer.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
@@ -34,6 +36,7 @@ var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
 var _traffic_overlay_renderer: RegionalTrafficOverlayRenderer
+var _growth_overlay_renderer: RegionalGrowthOverlayRenderer
 var _gameplay_alerts: RegionalGameplayAlerts
 var _line_operations_widget: RegionalLineOperationsWidget
 var _progression_widget: RegionalProgressionWidget
@@ -96,6 +99,7 @@ func _setup_regional_traffic() -> void:
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
 	RegionalAccessibility.apply(GameStore)
+	RegionalDevelopmentPressure.apply(GameStore)
 	GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
 	RegionalTransitTrafficRuntime.apply(GameStore)
 	RegionalProgressionRuntime.apply(GameStore)
@@ -103,6 +107,10 @@ func _setup_regional_traffic() -> void:
 		_traffic_overlay_renderer = RegionalTrafficOverlayRenderer.new()
 		_traffic_overlay_renderer.name = "RegionalTrafficOverlay"
 		add_child(_traffic_overlay_renderer)
+	if _growth_overlay_renderer == null:
+		_growth_overlay_renderer = RegionalGrowthOverlayRenderer.new()
+		_growth_overlay_renderer.name = "RegionalGrowthOverlay"
+		add_child(_growth_overlay_renderer)
 	if _gameplay_alerts == null:
 		_gameplay_alerts = RegionalGameplayAlerts.new()
 		_gameplay_alerts.name = "RegionalGameplayAlerts"
@@ -154,9 +162,11 @@ func _advance_regional_traffic() -> void:
 	)
 	var traffic_changed := RegionalTrafficRuntime.advance(GameStore, traffic_delta)
 	if traffic_changed:
-		# Accessibility samples the freshly-updated road speeds and resident mode
-		# choice once per traffic refresh; growth only consumes this stable snapshot.
+		# Accessibility and parcel development pressure sample the freshly-updated
+		# travel conditions once per traffic refresh. Growth consumes this stable
+		# previous-period snapshot instead of recalculating mode choice itself.
 		RegionalAccessibility.apply(GameStore)
+		RegionalDevelopmentPressure.apply(GameStore)
 		RegionalProgressionRuntime.apply(GameStore)
 		GameStore.emit_signal("city_changed")
 
@@ -165,8 +175,20 @@ func _toggle_traffic_overlay() -> void:
 	if not GameStore.is_sandbox() or not is_instance_valid(_traffic_overlay_renderer):
 		return
 	var active := _traffic_overlay_renderer.toggle()
+	if active and is_instance_valid(_growth_overlay_renderer):
+		_growth_overlay_renderer.set_enabled(false)
 	if is_instance_valid(_gameplay_alerts):
 		_gameplay_alerts.set_traffic_overlay_active(active)
+
+
+func _toggle_growth_overlay() -> void:
+	if not GameStore.is_sandbox() or not is_instance_valid(_growth_overlay_renderer):
+		return
+	var active := _growth_overlay_renderer.toggle()
+	if active and is_instance_valid(_traffic_overlay_renderer):
+		_traffic_overlay_renderer.set_enabled(false)
+		if is_instance_valid(_gameplay_alerts):
+			_gameplay_alerts.set_traffic_overlay_active(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -186,6 +208,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			)
 		elif event.physical_keycode == KEY_T and GameStore.is_sandbox():
 			_toggle_traffic_overlay()
+			get_viewport().set_input_as_handled()
+		elif event.physical_keycode == KEY_G and GameStore.is_sandbox():
+			_toggle_growth_overlay()
 			get_viewport().set_input_as_handled()
 
 
