@@ -68,9 +68,12 @@ func _ready() -> void:
 	GameStore.toast_requested.connect(_on_toast)
 	if not GameStore.state_changed.is_connected(_on_state_changed):
 		GameStore.state_changed.connect(_on_state_changed)
+	PerformanceProbe.bind_scene(self, _environment_controller, $Terrain)
 	_setup_regional_visual_detail()
 	_setup_regional_traffic()
 	_on_state_changed()
+	# Do not contaminate camera benchmarks with loading-screen and first-frame work.
+	PerformanceProbe.reset_capture()
 
 
 func _wait_for_world_visuals() -> void:
@@ -155,7 +158,7 @@ func _setup_regional_traffic() -> void:
 	RegionalDevelopmentPressure.apply(GameStore)
 	RegionalHighwayProposalRuntime.apply(GameStore.city)
 	GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
-	RegionalTransitTrafficRuntime.apply(GameStore)
+	_apply_regional_transit_traffic_profiled()
 	RegionalProgressionRuntime.apply(GameStore)
 	if _traffic_overlay_renderer == null:
 		_traffic_overlay_renderer = RegionalTrafficOverlayRenderer.new()
@@ -205,7 +208,7 @@ func _process(delta: float) -> void:
 		if _proposal_diagnostic_refresh_remaining <= 0.0:
 			_proposal_diagnostic_refresh_remaining = PROPOSAL_DIAGNOSTIC_REFRESH_SECONDS
 			RegionalHighwayProposalRuntime.apply(GameStore.city)
-		RegionalTransitTrafficRuntime.apply(GameStore)
+		_apply_regional_transit_traffic_profiled()
 		var retired := RegionalFleetManagement.process_retirements(GameStore)
 		if retired > 0:
 			GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
@@ -213,6 +216,16 @@ func _process(delta: float) -> void:
 			if GameStore.has_method("save_game"):
 				GameStore.save_game()
 			GameStore.emit_signal("state_changed")
+
+
+func _apply_regional_transit_traffic_profiled() -> bool:
+	var started_usec := Time.get_ticks_usec()
+	var changed := RegionalTransitTrafficRuntime.apply(GameStore)
+	PerformanceProbe.record_duration(
+		"transit_traffic_apply_ms",
+		float(Time.get_ticks_usec() - started_usec) / 1000.0
+	)
+	return changed
 
 
 func _advance_regional_traffic() -> void:
@@ -258,6 +271,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if startup_loading:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if PerformanceProbe.handle_debug_key(event):
+			get_viewport().set_input_as_handled()
+			return
 		if event.physical_keycode == KEY_ESCAPE:
 			if is_instance_valid(_pause_menu):
 				if _pause_menu.visible:
