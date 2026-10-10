@@ -1,0 +1,120 @@
+extends SceneTree
+
+const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
+
+var _failures := 0
+
+
+func _init() -> void:
+	_test_worst_road_and_line_alerts()
+	_test_service_target_alert()
+	_test_financial_pressure_alert()
+	_test_healthy_network_has_no_alerts()
+	if _failures > 0:
+		push_error("REGIONAL GAMEPLAY ALERTS TEST: FAIL (%d checks)" % _failures)
+		quit(1)
+		return
+	print("REGIONAL GAMEPLAY ALERTS TEST: PASS")
+	quit(0)
+
+
+func _test_worst_road_and_line_alerts() -> void:
+	var city := {
+		"roads": [
+			{"id": "road-a", "traffic": {"vc_ratio": 0.91, "delay_minutes": 1.2, "flow_vph": 1400.0, "capacity_vph": 1600.0}},
+			{"id": "road-b", "traffic": {"vc_ratio": 1.24, "delay_minutes": 4.8, "flow_vph": 2200.0, "capacity_vph": 1800.0}},
+		],
+	}
+	var network := {
+		"lines": {
+			"line-a": {
+				"name": "Airport Bus",
+				"operations_health": {
+					"status": "congestion_limited",
+					"severity": 3,
+					"headway_minutes": 14.0,
+					"effective_load_ratio": 0.72,
+					"traffic_delay_factor": 1.8,
+					"recommended_action": "use_priority_or_separate_right_of_way",
+				},
+			},
+		},
+	}
+	var alerts := RegionalGameplayAlerts.collect_alerts(city, network)
+	_expect(alerts.size() == 2, "fixture produces one road and one line alert")
+	if alerts.size() >= 2:
+		_expect(str(alerts[0].get("id", "")) == "road:road-b", "highest V/C road becomes the road alert")
+		_expect(str(alerts[0].get("selection", "")) == "regional_road:road-b", "road alert targets the existing road inspector")
+		_expect(str(alerts[1].get("id", "")) == "line:line-a", "line-health issue becomes an actionable line alert")
+		_expect(str(alerts[1].get("selection", "")) == "free_line:line-a", "line alert targets the existing custom-line inspector")
+
+
+func _test_service_target_alert() -> void:
+	var network := {
+		"lines": {
+			"line-target": {
+				"name": "Town Express",
+				"operations_health": {
+					"status": "under_served",
+					"severity": 2,
+					"reason": "headway_above_target",
+					"headway_minutes": 12.0,
+					"target_headway_active": true,
+					"target_headway_minutes": 10.0,
+					"headway_target_ratio": 1.2,
+					"effective_load_ratio": 0.30,
+					"traffic_delay_factor": 1.0,
+					"recommended_action": "add_vehicle",
+				},
+			},
+		},
+	}
+	var alerts := RegionalGameplayAlerts.collect_alerts({"roads": []}, network)
+	_expect(alerts.size() == 1, "explicit service-target miss reaches Network Alerts")
+	if not alerts.is_empty():
+		_expect(str(alerts[0].get("label", "")).contains("BELOW SERVICE TARGET"), "target miss uses service-target wording instead of generic low frequency")
+		_expect(str(alerts[0].get("tooltip", "")).contains("target 10.0 min"), "target alert tooltip shows the configured headway")
+		_expect(str(alerts[0].get("tooltip", "")).contains("120% of target"), "target alert explains the size of the miss")
+
+
+func _test_financial_pressure_alert() -> void:
+	var city := {
+		"roads": [],
+		"economy": {
+			"status": "stressed",
+			"severity": 3,
+			"net_per_minute": -12.5,
+			"forecast_net": -750.0,
+			"runway_minutes": 110.0,
+			"road_maintenance_per_minute": 1.25,
+		},
+	}
+	var alerts := RegionalGameplayAlerts.collect_alerts(city, {"lines": {}})
+	_expect(alerts.size() == 1, "stressed economy produces a gameplay alert")
+	if not alerts.is_empty():
+		_expect(str(alerts[0].get("id", "")) == "economy", "financial pressure uses a stable alert id")
+		_expect(int(alerts[0].get("priority", 0)) == 3, "financial alert preserves economy severity")
+		_expect(str(alerts[0].get("label", "")).contains("$12.5/min"), "financial alert exposes current negative cashflow")
+		_expect(str(alerts[0].get("tooltip", "")).contains("110 min"), "financial alert explains remaining runway")
+
+
+func _test_healthy_network_has_no_alerts() -> void:
+	var city := {
+		"roads": [{"id": "road-a", "traffic": {"vc_ratio": 0.55, "delay_minutes": 0.1}}],
+		"economy": {"status": "surplus", "severity": 0, "net_per_minute": 3.0},
+	}
+	var network := {
+		"lines": {
+			"line-a": {
+				"operations_health": {"status": "healthy", "severity": 0},
+			},
+		},
+	}
+	_expect(RegionalGameplayAlerts.collect_alerts(city, network).is_empty(), "healthy road, line, and finances stay quiet")
+
+
+func _expect(condition: bool, message: String) -> void:
+	if condition:
+		return
+	_failures += 1
+	push_error("Regional gameplay alerts: %s" % message)

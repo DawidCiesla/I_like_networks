@@ -11,6 +11,7 @@ const WALK_SPEED_METERS_PER_MINUTE := 72.0
 const WALK_TRANSFER_OVERHEAD_MINUTES := 3.0
 const MAX_EXPECTED_WAIT_MINUTES := 30.0
 const CAPACITY_PENALTY_MINUTES := 42.0
+const MAX_TRAFFIC_RIDE_FACTOR := 6.0
 
 
 static func build_graph(
@@ -47,14 +48,21 @@ static func build_graph(
 		var segments: Array = line.get("route_segments", [])
 		for index in range(stop_ids.size() - 1):
 			var length := 0.0
+			var segment_traffic_factor := maxf(1.0, float(line.get("traffic_delay_factor", 1.0)))
 			if index < segments.size() and segments[index] is Dictionary:
 				var segment: Dictionary = segments[index]
 				length = float(segment.get("length_world", 0.0))
+				segment_traffic_factor = maxf(
+					1.0,
+					float(segment.get("traffic_congestion_factor", segment_traffic_factor))
+				)
 			if length <= EPSILON:
 				var a := TransitNetwork.stop_position(network, stop_ids[index])
 				var b := TransitNetwork.stop_position(network, stop_ids[index + 1])
 				length = a.distance_to(b)
 			var ride_minutes := length / float(Data.WORLD_UNITS_PER_KM) / speed_kph * 60.0
+			if mode == "bus":
+				ride_minutes *= clampf(segment_traffic_factor, 1.0, MAX_TRAFFIC_RIDE_FACTOR)
 			_add_edge(
 				adjacency,
 				stop_ids[index],
@@ -257,6 +265,10 @@ static func _line_headway_minutes(
 	line: Dictionary,
 	profile: Dictionary
 ) -> float:
+	if str(line.get("mode", "bus")) == "bus":
+		var traffic_headway := float(line.get("traffic_effective_headway_minutes", INF))
+		if is_finite(traffic_headway) and traffic_headway >= 0.0:
+			return traffic_headway
 	var fleet := maxi(1, int(line.get("fleet_count", 1)))
 	var stop_ids := TransitNetwork.line_stop_ids(network, line_id)
 	var speed_kph := maxf(1.0, float(profile.get("speed_kph", 18.0)))

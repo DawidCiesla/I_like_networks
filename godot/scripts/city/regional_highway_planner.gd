@@ -4,6 +4,7 @@ class_name RegionalHighwayPlanner
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RoadTopology = preload("res://scripts/city/road_topology.gd")
 const WorldLayers = preload("res://scripts/world/world_layers.gd")
+const RegionalHighwayAnalysis = preload("res://scripts/city/regional_highway_analysis.gd")
 
 const TICK_SECONDS := 600.0
 const RELIEF_PRESSURE_THRESHOLD := 1.25
@@ -54,8 +55,9 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 
 
 ## Re-evaluates strategic road demand without ever changing an existing road's
-## class, geometry or status. Capacity pressure creates a separate planning
-## proposal for a new bypass / expressway / motorway alignment.
+## class, geometry or status. When Traffic Core data is present, V/C, delay,
+## assigned flow and OD composition drive planning pressure. Population/jobs
+## remain a fallback for old saves, tests and the first traffic snapshot.
 static func refresh(city: Dictionary) -> bool:
 	if not _is_regional_city(city):
 		return false
@@ -82,12 +84,20 @@ static func refresh(city: Dictionary) -> bool:
 			continue
 		var a: Dictionary = settlements_by_id[a_id]
 		var b: Dictionary = settlements_by_id[b_id]
-		var pressure := _corridor_pressure(road, a, b)
+		var pressure_state := _corridor_pressure_state(road, a, b, city)
+		var pressure := float(pressure_state.get("pressure", 0.0))
 
 		# Compatibility cleanup: a regional road itself is never promoted into a
 		# motorway. It only reports that a separate relief corridor may be needed.
 		road.erase("upgradeRecommendation")
 		road["capacityPressure"] = pressure
+		road["capacityPressureBase"] = float(pressure_state.get("base_pressure", pressure))
+		road["capacityPressureSource"] = str(pressure_state.get("source", "activity_proxy"))
+		road["strategicPressureMultiplier"] = float(pressure_state.get("strategic_multiplier", 1.0))
+		road["trafficCompositionAvailable"] = bool(pressure_state.get("composition_available", false))
+		road["trafficLocalShare"] = float(pressure_state.get("local_share", 0.0))
+		road["trafficRegionalShare"] = float(pressure_state.get("regional_share", 0.0))
+		road["trafficThroughShare"] = float(pressure_state.get("through_share", 0.0))
 		road["reliefNeed"] = _need_class(pressure)
 		road["preserveExistingRoad"] = true
 
@@ -95,7 +105,7 @@ static func refresh(city: Dictionary) -> bool:
 			continue
 		incident_need[a_id] = int(incident_need.get(a_id, 0)) + 1
 		incident_need[b_id] = int(incident_need.get(b_id, 0)) + 1
-		var proposal := _corridor_proposal(city, road, a, b, pressure)
+		var proposal := _corridor_proposal(city, road, a, b, pressure, pressure_state)
 		proposal = _preserve_proposal_state(proposal, existing_by_id.get(str(proposal.get("id", "")), {}))
 		desired.append(proposal)
 
@@ -147,7 +157,8 @@ static func _corridor_proposal(
 	road: Dictionary,
 	a: Dictionary,
 	b: Dictionary,
-	pressure: float
+	pressure: float,
+	pressure_state: Dictionary = {}
 ) -> Dictionary:
 	var kind := _need_class(pressure)
 	var proposal_id := "regional-relief-%s" % str(road.get("id", "corridor"))
@@ -167,6 +178,20 @@ static func _corridor_proposal(
 		"betweenSettlementIds": [str(a.get("id", "")), str(b.get("id", ""))],
 		"sourceCorridorRoadId": str(road.get("id", "")),
 		"pressure": pressure,
+		"basePressure": float(pressure_state.get("base_pressure", pressure)),
+		"strategicPressureMultiplier": float(pressure_state.get("strategic_multiplier", 1.0)),
+		"pressureSource": str(pressure_state.get("source", "activity_proxy")),
+		"trafficFlowVph": float(pressure_state.get("flow_vph", 0.0)),
+		"trafficCapacityVph": float(pressure_state.get("capacity_vph", 0.0)),
+		"trafficVcRatio": float(pressure_state.get("vc_ratio", 0.0)),
+		"trafficDelayMinutes": float(pressure_state.get("delay_minutes", 0.0)),
+		"trafficCompositionAvailable": bool(pressure_state.get("composition_available", false)),
+		"trafficLocalVph": float(pressure_state.get("local_vph", 0.0)),
+		"trafficRegionalVph": float(pressure_state.get("regional_vph", 0.0)),
+		"trafficThroughVph": float(pressure_state.get("through_vph", 0.0)),
+		"trafficLocalShare": float(pressure_state.get("local_share", 0.0)),
+		"trafficRegionalShare": float(pressure_state.get("regional_share", 0.0)),
+		"trafficThroughShare": float(pressure_state.get("through_share", 0.0)),
 		"points": _serialize_points(alignment.get("points", [])),
 		"alignmentSide": int(alignment.get("side", 1)),
 		"terrainScore": float(alignment.get("score", 0.0)),
@@ -210,7 +235,79 @@ static func _ring_proposal(city: Dictionary, settlement: Dictionary, incident_co
 	}
 
 
+static func _corridor_pressure_state(
+	road: Dictionary,
+	a: Dictionary,
+	b: Dictionary,
+	city: Dictionary = {}
+) -> Dictionary:
+	var traffic_value: Variant = road.get("traffic", {})
+	if typeof(traffic_value) == TYPE_DICTIONARY and not (traffic_value as Dictionary).is_empty():
+		var traffic: Dictionary = traffic_value
+		var vc_ratio := maxf(0.0, float(traffic.get("vc_ratio", 0.0)))
+		var flow_vph := maxf(0.0, float(traffic.get("flow_vph", 0.0)))
+		var capacity_vph := maxf(1.0, float(traffic.get("capacity_vph", 1.0)))
+		var free_flow_minutes := maxf(0.1, float(traffic.get("free_flow_minutes", 0.1)))
+		var delay_minutes := maxf(0.0, float(traffic.get("delay_minutes", 0.0)))
+		var delay_ratio := minf(3.0, delay_minutes / free_flow_minutes)
+		var flow_bonus := clampf((flow_vph - 1800.0) / 3600.0, 0.0, 0.55)
+		# The legacy thresholds remain intact. OD composition only applies a mild
+		# strategic factor: local congestion is more likely to need local network
+		# work, while a corridor carrying through traffic is a better bypass case.
+		var base_pressure := vc_ratio * 1.35 + delay_ratio * 0.75 + flow_bonus
+		var composition := {}
+		var multiplier := 1.0
+		if not city.is_empty():
+			composition = RegionalHighwayAnalysis.corridor_flow_composition(
+				city,
+				road,
+				str(a.get("id", "")),
+				str(b.get("id", ""))
+			)
+			multiplier = RegionalHighwayAnalysis.strategic_pressure_multiplier(composition)
+		var pressure := base_pressure * multiplier
+		return {
+			"pressure": pressure,
+			"base_pressure": base_pressure,
+			"strategic_multiplier": multiplier,
+			"source": "traffic",
+			"flow_vph": flow_vph,
+			"capacity_vph": capacity_vph,
+			"vc_ratio": vc_ratio,
+			"delay_minutes": delay_minutes,
+			"composition_available": bool(composition.get("available", false)),
+			"local_vph": float(composition.get("local_vph", 0.0)),
+			"regional_vph": float(composition.get("regional_vph", 0.0)),
+			"through_vph": float(composition.get("through_vph", 0.0)),
+			"local_share": float(composition.get("local_share", 0.0)),
+			"regional_share": float(composition.get("regional_share", 0.0)),
+			"through_share": float(composition.get("through_share", 0.0)),
+		}
+	var fallback_pressure := _activity_proxy_pressure(road, a, b)
+	return {
+		"pressure": fallback_pressure,
+		"base_pressure": fallback_pressure,
+		"strategic_multiplier": 1.0,
+		"source": "activity_proxy",
+		"flow_vph": 0.0,
+		"capacity_vph": 0.0,
+		"vc_ratio": 0.0,
+		"delay_minutes": 0.0,
+		"composition_available": false,
+		"local_vph": 0.0,
+		"regional_vph": 0.0,
+		"through_vph": 0.0,
+		"local_share": 0.0,
+		"regional_share": 0.0,
+		"through_share": 0.0,
+	}
+
+
 static func _corridor_pressure(road: Dictionary, a: Dictionary, b: Dictionary) -> float:
+	return float(_corridor_pressure_state(road, a, b).get("pressure", 0.0))
+
+
+static func _activity_proxy_pressure(road: Dictionary, a: Dictionary, b: Dictionary) -> float:
 	var population := float(a.get("population", 0)) + float(b.get("population", 0))
 	var jobs := float(a.get("jobs", 0)) + float(b.get("jobs", 0))
 	var activity := population + jobs * 0.65
@@ -361,7 +458,7 @@ static func _notify_new_proposals(store: Node, previous_ids: Dictionary) -> void
 		if previous_ids.has(proposal_id) or not bool(proposal.get("activeNeed", false)):
 			continue
 		var prefix := "MUNICIPAL STUDY" if str(proposal.get("status", "")) == "municipal-study" else "REGIONAL PLANNING NEED"
-		store.emit_signal("toast_requested", "%s · %s" % [prefix, str(proposal.get("label", "New road corridor"))])
+		store.emit_signal("toast_requested", "%s · %s · open STUDIES [P]" % [prefix, str(proposal.get("label", "New road corridor"))])
 
 
 static func _active_proposal_ids(city: Dictionary) -> Dictionary:
@@ -405,11 +502,12 @@ static func _proposal_signature(proposals_value: Variant) -> String:
 		if typeof(proposal_value) != TYPE_DICTIONARY:
 			continue
 		var proposal: Dictionary = proposal_value
-		parts.append("%s|%s|%s|%.3f" % [
+		parts.append("%s|%s|%s|%.3f|%s" % [
 			str(proposal.get("id", "")),
 			str(proposal.get("status", "")),
 			str(proposal.get("projectClass", "")),
 			float(proposal.get("pressure", 0.0)),
+			str(proposal.get("pressureSource", "activity_proxy")),
 		])
 	parts.sort()
 	return ";".join(parts)

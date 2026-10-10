@@ -278,23 +278,68 @@ func _build_transport_page() -> void:
 
 
 func _build_economy_page() -> void:
-	_add_page_heading("City economy", "Recorded fare revenue and operating costs from the current city state.")
 	var revenue := float(_game_store().stats.get("lifetime_revenue", 0.0))
 	var costs := float(_game_store().stats.get("lifetime_operating_costs", 0.0))
-	var net := revenue - costs
-	var net_color := POSITIVE if net >= 0.0 else NEGATIVE
-	var cards: Array[Dictionary] = [
-		{"label": "CITY TREASURY", "value": _format_money(_game_store().money), "detail": "Available funds", "accent": POSITIVE},
-		{"label": "FARE REVENUE", "value": _format_money(revenue), "detail": "Lifetime recorded", "accent": ACCENT},
-		{"label": "OPERATING COSTS", "value": _format_money(costs), "detail": "Lifetime recorded", "accent": NEGATIVE},
-		{"label": "OPERATING BALANCE", "value": _format_signed_money(net), "detail": "Revenue less recorded costs", "accent": net_color},
+	var lifetime_net := revenue - costs
+	var economy_value: Variant = _game_store().city.get("economy", {})
+	var has_live_economy: bool = (
+		_game_store().is_sandbox()
+		and typeof(economy_value) == TYPE_DICTIONARY
+		and not (economy_value as Dictionary).is_empty()
+	)
+
+	if not has_live_economy:
+		_add_page_heading("City economy", "Recorded fare revenue and operating costs from the current city state.")
+		var legacy_cards: Array[Dictionary] = [
+			{"label": "CITY TREASURY", "value": _format_money(_game_store().money), "detail": "Available funds", "accent": POSITIVE},
+			{"label": "FARE REVENUE", "value": _format_money(revenue), "detail": "Lifetime recorded", "accent": ACCENT},
+			{"label": "OPERATING COSTS", "value": _format_money(costs), "detail": "Lifetime recorded", "accent": NEGATIVE},
+			{"label": "OPERATING BALANCE", "value": _format_signed_money(lifetime_net), "detail": "Revenue less recorded costs", "accent": POSITIVE if lifetime_net >= 0.0 else NEGATIVE},
+		]
+		_add_metric_cards(legacy_cards)
+		_add_section_label("RECENT ACTIVITY")
+		var latest_fare := float(_game_store().stats.get("last_fare_event_value", 0.0))
+		_add_metric_row("Latest fare event", _format_money(latest_fare), "Most recently recorded fare income")
+		_add_metric_row("Passengers carried", _format_integer(float(_game_store().stats.get("lifetime_passengers", 0.0))), "Cumulative passengers recorded")
+		_add_note("Live Economy V1 forecasting is available on the Regional Sandbox map.")
+		return
+
+	var economy: Dictionary = economy_value
+	var current_net := float(economy.get("net_per_minute", 0.0))
+	var forecast_net := float(economy.get("forecast_net", 0.0))
+	var forecast_minutes := float(economy.get("forecast_minutes", 60.0))
+	var runway := float(economy.get("runway_minutes", INF))
+	var status := str(economy.get("status", "surplus"))
+	var runway_text := "∞"
+	if is_finite(runway):
+		runway_text = "%.0f min" % runway
+	var runway_color := POSITIVE
+	if status in ["critical", "stressed"]:
+		runway_color = NEGATIVE
+	elif status == "watch":
+		runway_color = Color("#edcf74")
+
+	_add_page_heading("City economy", "Current operating cashflow, cost drivers, forecast and treasury runway from Economy V1.")
+	var live_cards: Array[Dictionary] = [
+		{"label": "CITY TREASURY", "value": _format_money(_game_store().money), "detail": "Available funds", "accent": POSITIVE if _game_store().money >= 0.0 else NEGATIVE},
+		{"label": "CURRENT CASHFLOW", "value": "%s$%.1f/min" % ["+" if current_net >= 0.0 else "−", absf(current_net)], "detail": status.replace("_", " ").to_upper(), "accent": POSITIVE if current_net >= 0.0 else NEGATIVE},
+		{"label": "%d MIN FORECAST" % roundi(forecast_minutes), "value": "%s$%.0f" % ["+" if forecast_net >= 0.0 else "−", absf(forecast_net)], "detail": "At current revenue and OPEX rates", "accent": POSITIVE if forecast_net >= 0.0 else NEGATIVE},
+		{"label": "TREASURY RUNWAY", "value": runway_text, "detail": "At current negative cashflow" if is_finite(runway) else "No depletion at current cashflow", "accent": runway_color},
 	]
-	_add_metric_cards(cards)
-	_add_section_label("RECENT ACTIVITY")
-	var latest_fare := float(_game_store().stats.get("last_fare_event_value", 0.0))
-	_add_metric_row("Latest fare event", _format_money(latest_fare), "Most recently recorded fare income")
-	_add_metric_row("Passengers carried", _format_integer(float(_game_store().stats.get("lifetime_passengers", 0.0))), "Cumulative passengers recorded")
-	_add_note("All values come from the current GameStore; no forecast or budget target is shown.")
+	_add_metric_cards(live_cards)
+
+	_add_section_label("CURRENT OPERATING MODEL")
+	_add_metric_row("Fare revenue", "$%.2f/min" % float(economy.get("fare_revenue_per_minute", 0.0)), "Current passenger fare income")
+	_add_metric_row("Transit OPEX", "$%.2f/min" % float(economy.get("transit_opex_per_minute", 0.0)), "Active fleet operating cost")
+	_add_metric_row("Service OPEX", "$%.2f/min" % float(economy.get("service_opex_per_minute", 0.0)), "Player-funded operational service buildings")
+	_add_metric_row("Road maintenance", "$%.2f/min" % float(economy.get("road_maintenance_per_minute", 0.0)), "Only player-funded built roads are charged")
+	_add_metric_row("Total OPEX", "$%.2f/min" % float(economy.get("total_opex_per_minute", 0.0)), "Transit + services + player-road maintenance")
+
+	_add_section_label("LIFETIME ACCOUNTING")
+	_add_metric_row("Fare revenue", _format_money(revenue), "Cumulative recorded fare income")
+	_add_metric_row("Operating costs", _format_money(costs), "Cumulative recorded operating costs")
+	_add_metric_row("Operating balance", _format_signed_money(lifetime_net), "Lifetime fare revenue less recorded OPEX")
+	_add_note("Forecast values are a current-rate projection, not guaranteed future income. Construction CAPEX is paid immediately and is not part of per-minute OPEX.")
 
 
 func _build_residents_page() -> void:

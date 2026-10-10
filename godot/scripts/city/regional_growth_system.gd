@@ -7,6 +7,7 @@ const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const TransitNetwork = preload("res://scripts/transport/transit_network.gd")
 const RoadTopology = preload("res://scripts/city/road_topology.gd")
 const RoadProfile = preload("res://scripts/city/road_profile.gd")
+const RegionalAccessibility = preload("res://scripts/city/regional_accessibility.gd")
 
 const TICK_SECONDS := 300.0
 const MAX_ACTIONS_PER_SETTLEMENT_TICK := 3
@@ -14,6 +15,10 @@ const BASE_GROWTH_CREDIT := 0.07
 const TRANSIT_GROWTH_WEIGHT := 0.72
 const PLAYER_LINK_GROWTH_WEIGHT := 0.30
 const HISTORIC_LINK_GROWTH_WEIGHT := 0.025
+const REAL_ACCESSIBILITY_BLEND := 0.55
+const REAL_ACCESSIBILITY_GROWTH_WEIGHT := 0.72
+const REAL_PLAYER_LINK_WEIGHT := 0.12
+const REAL_HISTORIC_LINK_WEIGHT := 0.015
 const MAX_GROWTH_CREDIT_PER_TICK := 2.4
 const EXPANSION_PRESSURE_THRESHOLD := 0.58
 const RESERVE_RATIO_TRIGGER := 0.19
@@ -89,11 +94,17 @@ static func _growth_tick(store: Node, tick: int) -> bool:
 		if settlement_id.is_empty():
 			continue
 		var local_state: Dictionary = settlements_state.get(settlement_id, {}).duplicate(true)
-		var pressure := _growth_pressure(store, settlement)
+		var pressure_components := _growth_pressure_components(store, settlement)
+		var pressure := float(pressure_components.get("pressure", 0.0))
 		var credit := float(local_state.get("growth_credit", 0.0)) + pressure
 		local_state["last_pressure"] = pressure
 		settlement["growthPressure"] = pressure
 		settlement["transitAccessibility"] = _settlement_transit_accessibility(store, settlement)
+		settlement["growthMobilitySource"] = str(pressure_components.get("source", "legacy_proxy"))
+		settlement["growthMobilityPressure"] = float(pressure_components.get("mobility_pressure", 0.0))
+		settlement["growthLegacyMobilityPressure"] = float(pressure_components.get("legacy_mobility_pressure", 0.0))
+		settlement["growthRealMobilityPressure"] = float(pressure_components.get("real_mobility_pressure", 0.0))
+		settlement["growthAccessibilityScore"] = float(pressure_components.get("accessibility_score", 0.0))
 		var actions := 0
 		while credit >= 1.0 and actions < MAX_ACTIONS_PER_SETTLEMENT_TICK:
 			if not _perform_growth_action(store, settlement, local_state, pressure, tick):
@@ -164,20 +175,52 @@ static func _perform_growth_action(
 
 
 static func _growth_pressure(store: Node, settlement: Dictionary) -> float:
+	return float(_growth_pressure_components(store, settlement).get("pressure", 0.0))
+
+
+static func _growth_pressure_components(store: Node, settlement: Dictionary) -> Dictionary:
 	var transit := _settlement_transit_accessibility(store, settlement)
 	var player_links := _count_player_links(store.city, settlement)
 	var historic_links := _count_historic_strategic_links(store.city, settlement)
-	var population := float(settlement.get("population", 0.0))
-	var hub_bonus := clampf(population / 50000.0, 0.0, 0.10)
-	return clampf(
-		BASE_GROWTH_CREDIT
-		+ transit * TRANSIT_GROWTH_WEIGHT
+	var legacy_mobility := (
+		transit * TRANSIT_GROWTH_WEIGHT
 		+ float(mini(player_links, 4)) * PLAYER_LINK_GROWTH_WEIGHT
 		+ float(mini(historic_links, 4)) * HISTORIC_LINK_GROWTH_WEIGHT
-		+ hub_bonus,
+	)
+	var mobility_pressure := legacy_mobility
+	var real_mobility := legacy_mobility
+	var accessibility_score := 0.0
+	var source := "legacy_proxy"
+	var settlement_id := str(settlement.get("id", ""))
+	var accessibility := RegionalAccessibility.snapshot_row(store.city, settlement_id)
+	if bool(accessibility.get("available", false)):
+		accessibility_score = clampf(float(accessibility.get("score", 0.0)), 0.0, 1.0)
+		real_mobility = (
+			accessibility_score * REAL_ACCESSIBILITY_GROWTH_WEIGHT
+			+ float(mini(player_links, 4)) * REAL_PLAYER_LINK_WEIGHT
+			+ float(mini(historic_links, 4)) * REAL_HISTORIC_LINK_WEIGHT
+		)
+		mobility_pressure = lerpf(legacy_mobility, real_mobility, REAL_ACCESSIBILITY_BLEND)
+		source = "blended_real_accessibility"
+	var population := float(settlement.get("population", 0.0))
+	var hub_bonus := clampf(population / 50000.0, 0.0, 0.10)
+	var pressure := clampf(
+		BASE_GROWTH_CREDIT + mobility_pressure + hub_bonus,
 		0.0,
 		MAX_GROWTH_CREDIT_PER_TICK
 	)
+	return {
+		"pressure": pressure,
+		"source": source,
+		"accessibility_score": accessibility_score,
+		"mobility_pressure": mobility_pressure,
+		"legacy_mobility_pressure": legacy_mobility,
+		"real_mobility_pressure": real_mobility,
+		"transit_proximity_score": transit,
+		"player_links": player_links,
+		"historic_links": historic_links,
+		"hub_bonus": hub_bonus,
+	}
 
 
 static func _settlement_transit_accessibility(store: Node, settlement: Dictionary) -> float:
@@ -266,12 +309,18 @@ static func _best_vacant_parcel(store: Node, settlement: Dictionary) -> Dictiona
 		var frontage := _find_by_id(store.city.get("roads", []), str(parcel.get("frontageRoadId", "")))
 		if frontage.is_empty() or str(frontage.get("status", "")) != "built":
 			continue
-		var position := Vector2(float(parcel.get("x", 0.0)), float(parcel.get("y", 0.0)))
-		var transit := 0.0
-		if typeof(store.transit_network) == TYPE_DICTIONARY:
-			transit = TransitNetwork.stop_accessibility_score(store.transit_network, position, 620.0)
-		var centrality := 1.0 - clampf(position.distance_to(center) / maxf(radius * 1.35, 1.0), 0.0, 1.0)
-		var score := transit * 4.0 + centrality * 0.35 - float(parcel.get("developmentOrder", 0.0)) * 0.0005
+		var score := 0.0
+		if bool(parcel.get("developmentPressureAvailable", false)):
+			score = float(parcel.get("developmentPressureRaw", parcel.get("developmentPressure", 0.0)))
+		else:
+			# Exact compatibility fallback for parcels created after the latest
+			# transport snapshot and for old saves without development pressure.
+			var position := Vector2(float(parcel.get("x", 0.0)), float(parcel.get("y", 0.0)))
+			var transit := 0.0
+			if typeof(store.transit_network) == TYPE_DICTIONARY:
+				transit = TransitNetwork.stop_accessibility_score(store.transit_network, position, 620.0)
+			var centrality := 1.0 - clampf(position.distance_to(center) / maxf(radius * 1.35, 1.0), 0.0, 1.0)
+			score = transit * 4.0 + centrality * 0.35 - float(parcel.get("developmentOrder", 0.0)) * 0.0005
 		candidates.append({"parcel": parcel, "score": score})
 	candidates.sort_custom(func(a, b):
 		var score_a := float(a.get("score", 0.0))
