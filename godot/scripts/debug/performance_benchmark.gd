@@ -14,6 +14,26 @@ var _camera_rig: Node
 var _variant_results: Array[Dictionary] = []
 var _last_report_json := ""
 var _last_report_markdown := ""
+var _status_canvas: CanvasLayer
+var _status_label: Label
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func _process(_delta: float) -> void:
+	if not _pending or _running:
+		return
+	var current_scene := get_tree().current_scene
+	if not is_instance_valid(current_scene):
+		return
+	if str(current_scene.name) != "Main" or not current_scene.has_node("CameraRig"):
+		return
+	var loading_value: Variant = current_scene.get("startup_loading")
+	if loading_value != null and bool(loading_value):
+		return
+	bind_scene(current_scene, current_scene.get_node("CameraRig"))
 
 
 func request_full_suite() -> void:
@@ -59,9 +79,11 @@ func _begin_pending_run() -> void:
 	_running = true
 	_pending = false
 	_variant_results.clear()
-	if _camera_rig.has_method("set_benchmark_controlled"):
-		_camera_rig.call("set_benchmark_controlled", true)
+	_camera_rig.set_process_unhandled_input(false)
 	GameStore.simulation_speed = 0
+	_create_status_overlay()
+	_set_status("Preparing deterministic camera benchmark…")
+	await get_tree().process_frame
 	await _run_suite()
 	await _finish_suite()
 
@@ -101,11 +123,11 @@ func _run_suite() -> void:
 			"render_scale": 0.75,
 		},
 	]
-	for variant in variants:
-		await _run_variant(variant)
+	for variant_index in range(variants.size()):
+		await _run_variant(variants[variant_index], variant_index + 1, variants.size())
 
 
-func _run_variant(variant: Dictionary) -> void:
+func _run_variant(variant: Dictionary, variant_number: int, variant_count: int) -> void:
 	_apply_variant(variant)
 	var bounds := TerrainSurface.world_bounds()
 	var center := bounds.get_center()
@@ -117,11 +139,23 @@ func _run_variant(variant: Dictionary) -> void:
 		"pitch": 0.72,
 	}
 	_apply_pose(warmup_pose)
+	_set_status("Variant %d/%d · %s · warm-up" % [variant_number, variant_count, str(variant.get("id", "variant"))])
 	await _wait_seconds(1.5)
 
 	var phases := _phase_definitions(center, size)
 	var phase_results: Array[Dictionary] = []
-	for phase in phases:
+	for phase_index in range(phases.size()):
+		var phase: Dictionary = phases[phase_index]
+		_set_status(
+			"Variant %d/%d · %s\nPhase %d/%d · %s" % [
+				variant_number,
+				variant_count,
+				str(variant.get("id", "variant")),
+				phase_index + 1,
+				phases.size(),
+				str(phase.get("id", "phase")),
+			]
+		)
 		PerformanceProbe.reset_capture()
 		await _run_phase(phase)
 		var snapshot: Dictionary = PerformanceProbe.report_snapshot()
@@ -240,14 +274,14 @@ func _apply_combined_pose(phase: Dictionary, t: float) -> void:
 func _apply_pose(pose: Dictionary) -> void:
 	if not is_instance_valid(_camera_rig):
 		return
-	if _camera_rig.has_method("apply_benchmark_pose"):
-		_camera_rig.call(
-			"apply_benchmark_pose",
-			pose.get("target", Vector2.ZERO),
-			float(pose.get("distance", 900.0)),
-			float(pose.get("yaw", -0.72)),
-			float(pose.get("pitch", 0.72))
-		)
+	var target: Vector2 = pose.get("target", Vector2.ZERO)
+	var terrain_y := TerrainSurface.height(GameStore.city_seed, target.x, target.y)
+	_camera_rig.position = Vector3(target.x, terrain_y, target.y)
+	_camera_rig.set("distance", float(pose.get("distance", 900.0)))
+	_camera_rig.set("yaw", float(pose.get("yaw", -0.72)))
+	_camera_rig.set("pitch", float(pose.get("pitch", 0.72)))
+	if _camera_rig.has_method("_update_camera"):
+		_camera_rig.call("_update_camera")
 
 
 func _apply_variant(variant: Dictionary) -> void:
@@ -281,10 +315,12 @@ func _summarize_variant(phases: Array[Dictionary]) -> Dictionary:
 			worst_phase = str(phase.get("phase_id", ""))
 		worst_max = maxf(worst_max, float(frame.get("max", 0.0)))
 		p95_sum += float(frame.get("p95", 0.0))
-		gpu_mean_sum += float((phase.get("render_gpu_ms", {}) as Dictionary).get("mean", 0.0))
+		var gpu_stats: Dictionary = phase.get("render_gpu_ms", {})
+		gpu_mean_sum += float(gpu_stats.get("mean", 0.0))
 		var spans: Dictionary = phase.get("spans", {})
 		for metric_name in ["ground_cover_rebuild_ms", "landscape_detail_rebuild_ms", "riparian_detail_rebuild_ms"]:
-			rebuild_count += int((spans.get(metric_name, {}) as Dictionary).get("count_total", 0))
+			var metric_stats: Dictionary = spans.get(metric_name, {})
+			rebuild_count += int(metric_stats.get("count_total", 0))
 	var count := maxi(1, phases.size())
 	return {
 		"worst_phase": worst_phase,
@@ -297,6 +333,7 @@ func _summarize_variant(phases: Array[Dictionary]) -> Dictionary:
 
 
 func _finish_suite() -> void:
+	_set_status("Saving benchmark report…")
 	_apply_variant({"details": true, "sdfgi": true, "shadows": true, "fog": true, "render_scale": 1.0})
 	var report := {
 		"benchmark_version": BENCHMARK_VERSION,
@@ -310,14 +347,15 @@ func _finish_suite() -> void:
 		"variants": _variant_results.duplicate(true),
 	}
 	_write_reports(report)
-	if is_instance_valid(_camera_rig) and _camera_rig.has_method("set_benchmark_controlled"):
-		_camera_rig.call("set_benchmark_controlled", false)
+	if is_instance_valid(_camera_rig):
+		_camera_rig.set_process_unhandled_input(true)
 	_running = false
 	_scene_root = null
 	_camera_rig = null
 	GameStore.suppress_persistence = true
 	GameStore.reset_state(false, BENCHMARK_SEED, false)
 	await get_tree().process_frame
+	_destroy_status_overlay()
 	get_tree().change_scene_to_file(MENU_SCENE)
 
 
@@ -375,6 +413,9 @@ func _markdown_report(report: Dictionary) -> String:
 			var frame: Dictionary = phase.get("frame_ms", {})
 			var gpu: Dictionary = phase.get("render_gpu_ms", {})
 			var spans: Dictionary = phase.get("spans", {})
+			var ground_stats: Dictionary = spans.get("ground_cover_rebuild_ms", {})
+			var landscape_stats: Dictionary = spans.get("landscape_detail_rebuild_ms", {})
+			var riparian_stats: Dictionary = spans.get("riparian_detail_rebuild_ms", {})
 			lines.append("| %s | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f |" % [
 				str(phase.get("phase_id", "")),
 				float(frame.get("p50", 0.0)),
@@ -382,9 +423,9 @@ func _markdown_report(report: Dictionary) -> String:
 				float(frame.get("p99", 0.0)),
 				float(frame.get("max", 0.0)),
 				float(gpu.get("mean", 0.0)),
-				float((spans.get("ground_cover_rebuild_ms", {}) as Dictionary).get("p95", 0.0)),
-				float((spans.get("landscape_detail_rebuild_ms", {}) as Dictionary).get("p95", 0.0)),
-				float((spans.get("riparian_detail_rebuild_ms", {}) as Dictionary).get("p95", 0.0)),
+				float(ground_stats.get("p95", 0.0)),
+				float(landscape_stats.get("p95", 0.0)),
+				float(riparian_stats.get("p95", 0.0)),
 			])
 	return "\n".join(lines) + "\n"
 
@@ -399,3 +440,34 @@ func _wait_seconds(seconds: float) -> void:
 	var started_usec := Time.get_ticks_usec()
 	while float(Time.get_ticks_usec() - started_usec) / 1000000.0 < seconds:
 		await get_tree().process_frame
+
+
+func _create_status_overlay() -> void:
+	_destroy_status_overlay()
+	_status_canvas = CanvasLayer.new()
+	_status_canvas.layer = 200
+	add_child(_status_canvas)
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	panel.position = Vector2(-230.0, 24.0)
+	panel.custom_minimum_size = Vector2(460.0, 72.0)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_canvas.add_child(panel)
+	_status_label = Label.new()
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_label.add_theme_font_size_override("font_size", 14)
+	panel.add_child(_status_label)
+
+
+func _set_status(text: String) -> void:
+	if is_instance_valid(_status_label):
+		_status_label.text = "PERFORMANCE BENCHMARK\n%s" % text
+
+
+func _destroy_status_overlay() -> void:
+	if is_instance_valid(_status_canvas):
+		_status_canvas.queue_free()
+	_status_canvas = null
+	_status_label = null
