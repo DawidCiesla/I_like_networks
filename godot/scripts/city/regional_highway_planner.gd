@@ -54,8 +54,9 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 
 
 ## Re-evaluates strategic road demand without ever changing an existing road's
-## class, geometry or status. Capacity pressure creates a separate planning
-## proposal for a new bypass / expressway / motorway alignment.
+## class, geometry or status. When Traffic Core data is present, V/C, delay and
+## assigned flow drive the planning pressure. Population/jobs remain a fallback
+## for old saves, tests and the short period before the first traffic snapshot.
 static func refresh(city: Dictionary) -> bool:
 	if not _is_regional_city(city):
 		return false
@@ -82,12 +83,14 @@ static func refresh(city: Dictionary) -> bool:
 			continue
 		var a: Dictionary = settlements_by_id[a_id]
 		var b: Dictionary = settlements_by_id[b_id]
-		var pressure := _corridor_pressure(road, a, b)
+		var pressure_state := _corridor_pressure_state(road, a, b)
+		var pressure := float(pressure_state.get("pressure", 0.0))
 
 		# Compatibility cleanup: a regional road itself is never promoted into a
 		# motorway. It only reports that a separate relief corridor may be needed.
 		road.erase("upgradeRecommendation")
 		road["capacityPressure"] = pressure
+		road["capacityPressureSource"] = str(pressure_state.get("source", "activity_proxy"))
 		road["reliefNeed"] = _need_class(pressure)
 		road["preserveExistingRoad"] = true
 
@@ -95,7 +98,7 @@ static func refresh(city: Dictionary) -> bool:
 			continue
 		incident_need[a_id] = int(incident_need.get(a_id, 0)) + 1
 		incident_need[b_id] = int(incident_need.get(b_id, 0)) + 1
-		var proposal := _corridor_proposal(city, road, a, b, pressure)
+		var proposal := _corridor_proposal(city, road, a, b, pressure, pressure_state)
 		proposal = _preserve_proposal_state(proposal, existing_by_id.get(str(proposal.get("id", "")), {}))
 		desired.append(proposal)
 
@@ -147,7 +150,8 @@ static func _corridor_proposal(
 	road: Dictionary,
 	a: Dictionary,
 	b: Dictionary,
-	pressure: float
+	pressure: float,
+	pressure_state: Dictionary = {}
 ) -> Dictionary:
 	var kind := _need_class(pressure)
 	var proposal_id := "regional-relief-%s" % str(road.get("id", "corridor"))
@@ -167,6 +171,11 @@ static func _corridor_proposal(
 		"betweenSettlementIds": [str(a.get("id", "")), str(b.get("id", ""))],
 		"sourceCorridorRoadId": str(road.get("id", "")),
 		"pressure": pressure,
+		"pressureSource": str(pressure_state.get("source", "activity_proxy")),
+		"trafficFlowVph": float(pressure_state.get("flow_vph", 0.0)),
+		"trafficCapacityVph": float(pressure_state.get("capacity_vph", 0.0)),
+		"trafficVcRatio": float(pressure_state.get("vc_ratio", 0.0)),
+		"trafficDelayMinutes": float(pressure_state.get("delay_minutes", 0.0)),
 		"points": _serialize_points(alignment.get("points", [])),
 		"alignmentSide": int(alignment.get("side", 1)),
 		"terrainScore": float(alignment.get("score", 0.0)),
@@ -210,7 +219,45 @@ static func _ring_proposal(city: Dictionary, settlement: Dictionary, incident_co
 	}
 
 
+static func _corridor_pressure_state(road: Dictionary, a: Dictionary, b: Dictionary) -> Dictionary:
+	var traffic_value: Variant = road.get("traffic", {})
+	if typeof(traffic_value) == TYPE_DICTIONARY and not (traffic_value as Dictionary).is_empty():
+		var traffic: Dictionary = traffic_value
+		var vc_ratio := maxf(0.0, float(traffic.get("vc_ratio", 0.0)))
+		var flow_vph := maxf(0.0, float(traffic.get("flow_vph", 0.0)))
+		var capacity_vph := maxf(1.0, float(traffic.get("capacity_vph", 1.0)))
+		var free_flow_minutes := maxf(0.1, float(traffic.get("free_flow_minutes", 0.1)))
+		var delay_minutes := maxf(0.0, float(traffic.get("delay_minutes", 0.0)))
+		var delay_ratio := minf(3.0, delay_minutes / free_flow_minutes)
+		var flow_bonus := clampf((flow_vph - 1800.0) / 3600.0, 0.0, 0.55)
+		# The legacy planning thresholds are retained. This scalar maps meaningful
+		# traffic conditions onto those thresholds: sustained V/C around 0.9–1.0
+		# begins bypass pressure, ~1.4 supports expressway study, and prolonged
+		# severe congestion can reach motorway-scale strategic demand.
+		var pressure := vc_ratio * 1.35 + delay_ratio * 0.75 + flow_bonus
+		return {
+			"pressure": pressure,
+			"source": "traffic",
+			"flow_vph": flow_vph,
+			"capacity_vph": capacity_vph,
+			"vc_ratio": vc_ratio,
+			"delay_minutes": delay_minutes,
+		}
+	return {
+		"pressure": _activity_proxy_pressure(road, a, b),
+		"source": "activity_proxy",
+		"flow_vph": 0.0,
+		"capacity_vph": 0.0,
+		"vc_ratio": 0.0,
+		"delay_minutes": 0.0,
+	}
+
+
 static func _corridor_pressure(road: Dictionary, a: Dictionary, b: Dictionary) -> float:
+	return float(_corridor_pressure_state(road, a, b).get("pressure", 0.0))
+
+
+static func _activity_proxy_pressure(road: Dictionary, a: Dictionary, b: Dictionary) -> float:
 	var population := float(a.get("population", 0)) + float(b.get("population", 0))
 	var jobs := float(a.get("jobs", 0)) + float(b.get("jobs", 0))
 	var activity := population + jobs * 0.65
@@ -405,11 +452,12 @@ static func _proposal_signature(proposals_value: Variant) -> String:
 		if typeof(proposal_value) != TYPE_DICTIONARY:
 			continue
 		var proposal: Dictionary = proposal_value
-		parts.append("%s|%s|%s|%.3f" % [
+		parts.append("%s|%s|%s|%.3f|%s" % [
 			str(proposal.get("id", "")),
 			str(proposal.get("status", "")),
 			str(proposal.get("projectClass", "")),
 			float(proposal.get("pressure", 0.0)),
+			str(proposal.get("pressureSource", "activity_proxy")),
 		])
 	parts.sort()
 	return ";".join(parts)
