@@ -48,7 +48,14 @@ static func create_initial_city(
 
 
 static func ensure_city(store: Node) -> void:
+	# Godot JSON serializes native Vector2 values from some older saves as text
+	# such as "(123.4, -56.7)". Normalize regional settlement positions at the
+	# runtime boundary before any subsystem assumes a typed Vector2.
+	_normalize_regional_settlement_positions(store.city)
 	CoreRuntime.ensure_city(store)
+	# CoreRuntime may materialize/migrate city state, so keep the canonical
+	# regional representation typed after its compatibility pass as well.
+	_normalize_regional_settlement_positions(store.city)
 	if _is_regional_city(store.city) and str(store.city.get("starter_profile", "")) != STARTER_PROFILE:
 		_materialize_existing_region(store.city)
 	# Organic initialization scans settlement morphology and is intentionally
@@ -279,6 +286,48 @@ static func _count_built_regional_roads(city: Dictionary) -> int:
 		if str(road.get("source", "")) == "regional-existing" and str(road.get("status", "")) == "built":
 			count += 1
 	return count
+
+
+static func _normalize_regional_settlement_positions(city: Dictionary) -> void:
+	if not _is_regional_city(city):
+		return
+	for settlement_value in city.get("regional_settlements", []):
+		if typeof(settlement_value) != TYPE_DICTIONARY:
+			continue
+		var settlement: Dictionary = settlement_value
+		settlement["position"] = _saved_vector2(
+			settlement.get("position", null),
+			Vector2(float(settlement.get("x", 0.0)), float(settlement.get("y", 0.0)))
+		)
+
+
+static func _saved_vector2(value: Variant, fallback: Vector2 = Vector2.ZERO) -> Vector2:
+	if value is Vector2:
+		return value
+	if typeof(value) == TYPE_DICTIONARY:
+		var raw: Dictionary = value
+		if raw.has("x") and raw.has("y"):
+			return Vector2(float(raw.get("x", fallback.x)), float(raw.get("y", fallback.y)))
+	if typeof(value) == TYPE_ARRAY:
+		var raw_array: Array = value
+		if raw_array.size() >= 2:
+			return Vector2(float(raw_array[0]), float(raw_array[1]))
+	if typeof(value) == TYPE_STRING:
+		var text := str(value).strip_edges()
+		if text.begins_with("Vector2"):
+			text = text.trim_prefix("Vector2").strip_edges()
+		if (
+			(text.begins_with("(") and text.ends_with(")"))
+			or (text.begins_with("[") and text.ends_with("]"))
+		):
+			text = text.substr(1, text.length() - 2)
+		var parts := text.split(",", false)
+		if parts.size() >= 2:
+			var x_text := str(parts[0]).strip_edges()
+			var y_text := str(parts[1]).strip_edges()
+			if x_text.is_valid_float() and y_text.is_valid_float():
+				return Vector2(x_text.to_float(), y_text.to_float())
+	return fallback
 
 
 static func _is_regional_city(city: Dictionary) -> bool:
