@@ -221,29 +221,23 @@ static func _shortest_path(
 	if not adjacency.has(start_id) or not adjacency.has(end_id):
 		return {"success": false, "reason": "node_missing"}
 
-	var distance: Dictionary = {}
+	# The old implementation kept every graph node in an Array and linearly
+	# scanned that entire Array to find the next cheapest node. On a regional
+	# road graph this made each OD route O(V^2), which was especially expensive
+	# because traffic assignment routes every OD pair several times during game
+	# startup. A binary min-heap keeps Dijkstra at O((V + E) log V) and avoids
+	# blocking the main thread while preserving the exact same edge costs.
+	var distance: Dictionary = {start_id: 0.0}
 	var previous: Dictionary = {}
-	var open: Array[String] = []
-	for node_id_value in adjacency.keys():
-		var node_id := str(node_id_value)
-		distance[node_id] = INF
-		open.append(node_id)
-	distance[start_id] = 0.0
+	var heap: Array[Dictionary] = []
+	_heap_push(heap, {"node": start_id, "cost": 0.0})
 
-	while not open.is_empty():
-		var best_index := -1
-		var current_id := ""
-		var current_cost := INF
-		for index in range(open.size()):
-			var candidate_id := open[index]
-			var candidate_cost := float(distance.get(candidate_id, INF))
-			if candidate_cost < current_cost:
-				best_index = index
-				current_id = candidate_id
-				current_cost = candidate_cost
-		if best_index < 0 or current_cost == INF:
-			break
-		open.remove_at(best_index)
+	while not heap.is_empty():
+		var current := _heap_pop(heap)
+		var current_id := str(current.get("node", ""))
+		var current_cost := float(current.get("cost", INF))
+		if current_cost > float(distance.get(current_id, INF)) + EPSILON:
+			continue
 		if current_id == end_id:
 			break
 
@@ -251,17 +245,18 @@ static func _shortest_path(
 			var connection: Dictionary = connection_value
 			var neighbor := str(connection.get("to", ""))
 			var edge_id := str(connection.get("edge_id", ""))
-			if not distance.has(neighbor) or not edge_metrics.has(edge_id):
+			if neighbor.is_empty() or not edge_metrics.has(edge_id):
 				continue
 			var edge: Dictionary = edge_metrics[edge_id]
 			var alternate := current_cost + float(edge.get("travel_time_minutes", INF))
-			if alternate + EPSILON >= float(distance[neighbor]):
+			if alternate + EPSILON >= float(distance.get(neighbor, INF)):
 				continue
 			distance[neighbor] = alternate
 			previous[neighbor] = {
 				"from": current_id,
 				"edge_id": edge_id,
 			}
+			_heap_push(heap, {"node": neighbor, "cost": alternate})
 
 	if not previous.has(end_id):
 		return {"success": false, "reason": "no_path"}
@@ -287,6 +282,53 @@ static func _shortest_path(
 		"edge_ids": reverse_edges,
 		"road_ids": road_ids,
 	}
+
+
+static func _heap_push(heap: Array[Dictionary], entry: Dictionary) -> void:
+	heap.append(entry)
+	var index := heap.size() - 1
+	while index > 0:
+		var parent := int((index - 1) / 2)
+		if not _heap_entry_less(heap[index], heap[parent]):
+			break
+		var swap := heap[parent]
+		heap[parent] = heap[index]
+		heap[index] = swap
+		index = parent
+
+
+static func _heap_pop(heap: Array[Dictionary]) -> Dictionary:
+	if heap.is_empty():
+		return {}
+	var root := heap[0]
+	var last := heap.pop_back()
+	if heap.is_empty():
+		return root
+	heap[0] = last
+	var index := 0
+	while true:
+		var left := index * 2 + 1
+		if left >= heap.size():
+			break
+		var right := left + 1
+		var smallest := left
+		if right < heap.size() and _heap_entry_less(heap[right], heap[left]):
+			smallest = right
+		if not _heap_entry_less(heap[smallest], heap[index]):
+			break
+		var swap := heap[index]
+		heap[index] = heap[smallest]
+		heap[smallest] = swap
+		index = smallest
+	return root
+
+
+static func _heap_entry_less(a: Dictionary, b: Dictionary) -> bool:
+	var a_cost := float(a.get("cost", INF))
+	var b_cost := float(b.get("cost", INF))
+	if not is_equal_approx(a_cost, b_cost):
+		return a_cost < b_cost
+	return str(a.get("node", "")) < str(b.get("node", ""))
 
 
 static func _update_congestion(metrics: Dictionary, alpha: float, beta: float) -> void:
