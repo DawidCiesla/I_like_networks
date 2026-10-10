@@ -126,9 +126,13 @@ jobs:
             --script res://scripts/debug/regional_visual_renderers_test.gd
 
   balance-smoke:
-    name: Regional balance smoke
+    name: Regional balance smoke (${{ matrix.scenario }})
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [baseline, starter_bus]
 
     steps:
       - name: Checkout
@@ -153,7 +157,7 @@ jobs:
             --path godot \
             --import
 
-      - name: Run starter-bus balance smoke
+      - name: Run balance smoke scenario
         shell: bash
         run: |
           set -euo pipefail
@@ -162,7 +166,7 @@ jobs:
             --path godot \
             --script res://scripts/debug/regional_balance_playtest.gd \
             -- \
-            --scenario=starter_bus \
+            --scenario=${{ matrix.scenario }} \
             --years=0.1 \
             --seed=731945 \
             --speed=4
