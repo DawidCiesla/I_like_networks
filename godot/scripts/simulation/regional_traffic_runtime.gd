@@ -40,6 +40,7 @@ static func advance(store: Node, delta_seconds: float) -> bool:
 static func refresh(store: Node) -> bool:
 	if not _is_regional_city(store.city):
 		return false
+	var perf_started_usec := Time.get_ticks_usec()
 	ensure(store.city)
 	var previous: Dictionary = store.city.get("road_traffic", {})
 
@@ -48,7 +49,12 @@ static func refresh(store: Node) -> bool:
 	# snapshot, so the mode-choice pass feels the congestion it created.
 	var resident_metrics: Dictionary = {}
 	if store.has_method("resident_transport_metrics"):
+		var resident_started_usec := Time.get_ticks_usec()
 		var metrics_value: Variant = store.call("resident_transport_metrics")
+		PerformanceProbe.record_duration(
+			"resident_transport_metrics_ms",
+			float(Time.get_ticks_usec() - resident_started_usec) / 1000.0
+		)
 		if typeof(metrics_value) == TYPE_DICTIONARY:
 			resident_metrics = metrics_value
 
@@ -86,6 +92,10 @@ static func refresh(store: Node) -> bool:
 	}
 	store.city["road_traffic"] = snapshot
 	_apply_road_metrics(store.city, snapshot.get("road_metrics", {}))
+	PerformanceProbe.record_duration(
+		"traffic_refresh_ms",
+		float(Time.get_ticks_usec() - perf_started_usec) / 1000.0
+	)
 	return changed
 
 
