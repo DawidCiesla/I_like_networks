@@ -309,12 +309,18 @@ static func _best_vacant_parcel(store: Node, settlement: Dictionary) -> Dictiona
 		var frontage := _find_by_id(store.city.get("roads", []), str(parcel.get("frontageRoadId", "")))
 		if frontage.is_empty() or str(frontage.get("status", "")) != "built":
 			continue
-		var position := Vector2(float(parcel.get("x", 0.0)), float(parcel.get("y", 0.0)))
-		var transit := 0.0
-		if typeof(store.transit_network) == TYPE_DICTIONARY:
-			transit = TransitNetwork.stop_accessibility_score(store.transit_network, position, 620.0)
-		var centrality := 1.0 - clampf(position.distance_to(center) / maxf(radius * 1.35, 1.0), 0.0, 1.0)
-		var score := transit * 4.0 + centrality * 0.35 - float(parcel.get("developmentOrder", 0.0)) * 0.0005
+		var score := 0.0
+		if bool(parcel.get("developmentPressureAvailable", false)):
+			score = float(parcel.get("developmentPressureRaw", parcel.get("developmentPressure", 0.0)))
+		else:
+			# Exact compatibility fallback for parcels created after the latest
+			# transport snapshot and for old saves without development pressure.
+			var position := Vector2(float(parcel.get("x", 0.0)), float(parcel.get("y", 0.0)))
+			var transit := 0.0
+			if typeof(store.transit_network) == TYPE_DICTIONARY:
+				transit = TransitNetwork.stop_accessibility_score(store.transit_network, position, 620.0)
+			var centrality := 1.0 - clampf(position.distance_to(center) / maxf(radius * 1.35, 1.0), 0.0, 1.0)
+			score = transit * 4.0 + centrality * 0.35 - float(parcel.get("developmentOrder", 0.0)) * 0.0005
 		candidates.append({"parcel": parcel, "score": score})
 	candidates.sort_custom(func(a, b):
 		var score_a := float(a.get("score", 0.0))
