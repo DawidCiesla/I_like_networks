@@ -20,6 +20,7 @@ var _scene_root: Node
 var _terrain_renderer: Node
 var _environment_controller: Node
 var _natural_details_enabled := true
+var _ssao_enabled := false
 var _sdfgi_enabled := false
 var _ssil_enabled := false
 var _ssr_enabled := false
@@ -136,6 +137,7 @@ func report_snapshot() -> Dictionary:
 		"viewport_size": {"x": viewport_size.x, "y": viewport_size.y},
 		"toggles": {
 			"natural_details": _natural_details_enabled,
+			"ssao": _ssao_enabled,
 			"sdfgi": _sdfgi_enabled,
 			"ssil": _ssil_enabled,
 			"ssr": _ssr_enabled,
@@ -255,6 +257,7 @@ func handle_debug_key(event: InputEventKey) -> bool:
 func _apply_debug_state() -> void:
 	if is_instance_valid(_terrain_renderer) and _terrain_renderer.has_method("set_natural_detail_enabled"):
 		_terrain_renderer.call("set_natural_detail_enabled", _natural_details_enabled)
+	_set_environment_property("ssao_enabled", _ssao_enabled)
 	_set_environment_property("sdfgi_enabled", _sdfgi_enabled)
 	_set_environment_property("ssil_enabled", _ssil_enabled)
 	_set_environment_property("ssr_enabled", _ssr_enabled)
@@ -370,12 +373,13 @@ func _refresh_overlay() -> void:
 			float(stat.get("p95", 0.0)),
 			float(stat.get("max", 0.0)),
 		])
-	lines.append("A/B  Ctrl/Cmd+1 details:%s  +2 SDFGI:%s  +3 shadows:%s" % [
+	lines.append("A/B  details:%s  SSAO:%s  SDFGI:%s  shadows:%s" % [
 		_on_off(_natural_details_enabled),
+		_on_off(_ssao_enabled),
 		_on_off(_sdfgi_enabled),
 		_on_off(_shadows_enabled),
 	])
-	lines.append("     +4 fog:%s  +5 render scale:%.2f  SSIL:%s  SSR:%s" % [
+	lines.append("     fog:%s  scale:%.2f  SSIL:%s  SSR:%s" % [
 		_on_off(_volumetric_fog_enabled),
 		_render_scale,
 		_on_off(_ssil_enabled),
