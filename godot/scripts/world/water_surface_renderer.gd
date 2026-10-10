@@ -20,8 +20,7 @@ const LAKE_SHALLOWS_COLOR := Color(0.20, 0.57, 0.64, 1.0)
 const LAKE_DEEP_COLOR := Color(0.018, 0.105, 0.245, 1.0)
 const RIVER_MAX_DEPTH := 7.5
 const LAKE_MAX_DEPTH := 9.0
-const NEAR_CHUNK_SIZE_METERS := 1800.0
-const FAR_CHUNK_SIZE_METERS := 4200.0
+const WATER_CHUNK_SIZE_METERS := 1800.0
 const NEAR_END_METERS := 3200.0
 const FAR_END_METERS := 9800.0
 const CHUNK_BUILD_BUDGET_USEC := 1800
@@ -135,29 +134,24 @@ func _rebuild_water_chunks(progressive: bool, request: int) -> void:
 	var specs: Array[Dictionary] = [
 		{
 			"name": "Near",
-			"chunk_size": NEAR_CHUNK_SIZE_METERS,
 			"begin": 0.0,
 			"end": NEAR_END_METERS,
 			"material": _near_material,
 		},
 		{
 			"name": "Far",
-			"chunk_size": FAR_CHUNK_SIZE_METERS,
 			"begin": NEAR_END_METERS,
 			"end": FAR_END_METERS,
 			"material": _far_material,
 		},
 	]
+	var buckets := _partition_triangles(WATER_CHUNK_SIZE_METERS)
+	var keys: Array = buckets.keys()
 	var slice_started := Time.get_ticks_usec()
 	for spec in specs:
 		var layer := Node3D.new()
 		layer.name = "LOD%s" % str(spec["name"])
 		new_root.add_child(layer)
-		var buckets := _partition_triangles(float(spec["chunk_size"]))
-		var keys: Array = buckets.keys()
-		keys.sort_custom(func(a: Vector2i, b: Vector2i):
-			return a.y < b.y or (a.y == b.y and a.x < b.x)
-		)
 		for key_value in keys:
 			var key: Vector2i = key_value
 			var source_indices: Array = buckets[key]
@@ -194,8 +188,10 @@ func _partition_triangles(chunk_size: float) -> Dictionary:
 func _create_water_chunk(key: Vector2i, source_indices: Array, spec: Dictionary) -> MeshInstance3D:
 	if source_indices.is_empty():
 		return null
-	var chunk_size := float(spec["chunk_size"])
-	var origin := Vector2((float(key.x) + 0.5) * chunk_size, (float(key.y) + 0.5) * chunk_size)
+	var origin := Vector2(
+		(float(key.x) + 0.5) * WATER_CHUNK_SIZE_METERS,
+		(float(key.y) + 0.5) * WATER_CHUNK_SIZE_METERS
+	)
 	var source_vertices: PackedVector3Array = _source_arrays[Mesh.ARRAY_VERTEX]
 	var source_normals: PackedVector3Array = _source_arrays[Mesh.ARRAY_NORMAL]
 	var source_colors: PackedColorArray = _source_arrays[Mesh.ARRAY_COLOR]
@@ -226,6 +222,7 @@ func _create_water_chunk(key: Vector2i, source_indices: Array, spec: Dictionary)
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	instance.visibility_range_begin = float(spec["begin"])
 	instance.visibility_range_end = float(spec["end"])
+	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 	return instance
 
 
