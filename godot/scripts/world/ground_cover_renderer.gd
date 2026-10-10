@@ -7,16 +7,16 @@ const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const GrassShader = preload("res://scripts/world/ground_cover.gdshader")
 const RoadSpatialIndex = preload("res://scripts/world/detail_road_spatial_index.gd")
 
-const PATCH_RADIUS_METERS := 380.0
-const SAMPLE_SPACING_METERS := 10.5
-const REBUILD_DISTANCE_METERS := 110.0
-const MAX_CAMERA_HEIGHT_METERS := 980.0
+const PATCH_RADIUS_METERS := 310.0
+const SAMPLE_SPACING_METERS := 12.0
+const REBUILD_DISTANCE_METERS := 145.0
+const MAX_CAMERA_HEIGHT_METERS := 760.0
 const ROAD_CLEARANCE_METERS := 18.0
 const SETTLEMENT_CORE_FACTOR := 0.56
-const MAX_INSTANCES := 5200
-const BLADES_PER_TUFT := 10
-const SLICE_BUDGET_USEC := 1200
-const CAMERA_POLL_SECONDS := 0.12
+const MAX_INSTANCES := 3000
+const BLADES_PER_TUFT := 8
+const SLICE_BUDGET_USEC := 600
+const CAMERA_POLL_SECONDS := 0.14
 
 var _instance: MultiMeshInstance3D
 var _store: Node
@@ -25,7 +25,7 @@ var _dirty := true
 var _elapsed := 0.0
 var _grass_mesh_cache: ArrayMesh
 var _road_index := RoadSpatialIndex.new()
-var _road_count := -1
+var _road_signature := ""
 var _road_index_dirty := true
 
 var _build_active := false
@@ -51,7 +51,7 @@ func _ready() -> void:
 	_instance = MultiMeshInstance3D.new()
 	_instance.name = "ProceduralGrass"
 	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_instance.visibility_range_end = 1350.0
+	_instance.visibility_range_end = 1000.0
 	_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(_instance)
 	_store = get_node_or_null("/root/GameStore")
@@ -60,7 +60,7 @@ func _ready() -> void:
 			_store.connect("city_changed", _on_city_changed)
 		if _store.has_signal("terrain_changed"):
 			_store.connect("terrain_changed", _mark_dirty)
-	_refresh_road_count()
+	_road_signature = _current_road_signature()
 	_mark_dirty()
 
 
@@ -91,15 +91,26 @@ func _process(delta: float) -> void:
 
 
 func _on_city_changed() -> void:
-	var previous := _road_count
-	_refresh_road_count()
-	if previous != _road_count:
-		_road_index_dirty = true
-		_dirty = true
+	var next_signature := _current_road_signature()
+	if next_signature == _road_signature:
+		return
+	_road_signature = next_signature
+	_road_index_dirty = true
+	_dirty = true
 
 
-func _refresh_road_count() -> void:
-	_road_count = _active_roads().size()
+func _current_road_signature() -> String:
+	var parts: Array[String] = []
+	for road_value in _active_roads():
+		var road: Dictionary = road_value
+		parts.append("%s:%s:%s:%d" % [
+			str(road.get("id", "")),
+			str(road.get("status", "")),
+			str(road.get("class", "")),
+			str(road.get("points", [])).hash(),
+		])
+	parts.sort()
+	return "|".join(parts)
 
 
 func _mark_dirty() -> void:
@@ -178,9 +189,19 @@ func _process_candidate(dx: int, dz: int) -> void:
 	var terrain_sample := WorldLayers.sample_route_terrain(_build_seed, point)
 	if float(terrain_sample.get("water_depth", 0.0)) > 0.01:
 		return
-	if float(terrain_sample.get("slope_degrees", 0.0)) > 27.0:
+	var slope := float(terrain_sample.get("slope_degrees", 0.0))
+	if slope > 27.0:
 		return
-	var potential := Terrain.regional_ground_cover_potential(_build_seed, point.x, point.y)
+	var forest := float(terrain_sample.get("forest_potential", 0.0))
+	var moisture := Terrain.regional_moisture(_build_seed, point.x, point.y)
+	var potential := Terrain._regional_ground_cover_from_samples(
+		_build_seed,
+		point.x,
+		point.y,
+		moisture,
+		slope,
+		forest
+	)
 	if potential < 0.24:
 		return
 	var acceptance := clampf((potential - 0.18) * 1.18, 0.0, 0.94)
@@ -192,7 +213,6 @@ func _process_candidate(dx: int, dz: int) -> void:
 	var height_scale := lerpf(0.44, 1.10, _pseudo(point.x, point.y, 6, _build_seed))
 	var basis := Basis(Vector3.UP, rotation).scaled(Vector3(width_scale, height_scale, width_scale))
 	_build_transforms.append(Transform3D(basis, Vector3(point.x, ground + 0.018, point.y)))
-	var moisture := Terrain.regional_moisture(_build_seed, point.x, point.y)
 	_build_custom_data.append(Color(
 		_pseudo(point.x, point.y, 7, _build_seed),
 		_pseudo(point.x, point.y, 8, _build_seed),
