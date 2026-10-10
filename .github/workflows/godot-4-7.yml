@@ -178,7 +178,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
 
     steps:
       - name: Checkout
@@ -207,7 +207,7 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-          SHARD_COUNT: 4
+          SHARD_COUNT: 6
         run: |
           set -euo pipefail
           mapfile -d '' -t test_scripts < <(find godot/scripts -type f -name '*_test.gd' -print0 | sort -z)
