@@ -129,7 +129,13 @@ func _setup_starter_bus(store: Node) -> Dictionary:
 	store.selected_transit_mode = "bus"
 	if not store.begin_free_line_editor():
 		return {"success": false, "reason": "route_editor_unavailable", "scenario": "starter_bus"}
-	var points: Array[Vector2] = fixture.get("points", [])
+	var points: Array[Vector2] = []
+	for point_value in fixture.get("points", []):
+		if point_value is Vector2:
+			points.append(point_value)
+		elif typeof(point_value) == TYPE_DICTIONARY:
+			var raw_point: Dictionary = point_value
+			points.append(Vector2(float(raw_point.get("x", 0.0)), float(raw_point.get("y", 0.0))))
 	for point in points:
 		if not store.route_editor_add_point(point):
 			store.cancel_route_editor()
