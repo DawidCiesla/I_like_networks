@@ -119,9 +119,11 @@ func _test_impossible_target_reports_fleet_cap() -> void:
 func _test_target_can_be_cleared() -> void:
 	var store := _store(3, 42.0)
 	RegionalServicePlanning.set_target_headway(store, "line-a", 10.0)
+	var saves_before_clear := store.save_count
 	_expect(RegionalServicePlanning.clear_target_headway(store, "line-a"), "player can return a line to no-target mode")
 	var line: Dictionary = store.transit_network["lines"]["line-a"]
 	_expect(not line.has("target_headway_minutes"), "clearing removes the persisted service commitment")
+	_expect(store.save_count == saves_before_clear + 1, "clearing a service target persists the change")
 	var plan := RegionalServicePlanning.service_plan(store, "line-a")
 	_expect(not bool(plan.get("target_active", true)), "cleared line falls back to suggestion-only planning")
 	store.free()
