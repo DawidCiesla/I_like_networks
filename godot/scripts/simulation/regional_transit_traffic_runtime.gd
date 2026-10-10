@@ -1,6 +1,7 @@
 extends RefCounted
 class_name RegionalTransitTrafficRuntime
 
+const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const TransitModes = preload("res://scripts/transport/transit_modes.gd")
 
@@ -19,6 +20,7 @@ static func apply(store: Node) -> bool:
 	var road_lookup := _road_lookup(store.city)
 	var network: Dictionary = store.transit_network
 	var lines: Dictionary = network.get("lines", {})
+	var stops: Dictionary = network.get("stops", {})
 	var changed := false
 
 	for line_id_value in lines.keys():
@@ -35,10 +37,14 @@ static func apply(store: Node) -> bool:
 
 		var segments: Array = line.get("route_segments", [])
 		var line_summary := _line_congestion_summary(segments, road_lookup)
+		var operations := _line_operations_summary(line, stops, line_summary)
 		line["traffic_delay_factor"] = float(line_summary.get("factor", 1.0))
 		line["traffic_affected_segment_count"] = int(line_summary.get("affected_segments", 0))
 		line["traffic_effective_driving_minutes_one_way"] = float(line_summary.get("effective_minutes", 0.0))
 		line["traffic_nominal_driving_minutes_one_way"] = float(line_summary.get("nominal_minutes", 0.0))
+		line["traffic_effective_cycle_minutes"] = float(operations.get("cycle_minutes", 0.0))
+		line["traffic_effective_headway_minutes"] = float(operations.get("headway_minutes", INF))
+		line["traffic_effective_capacity_ppm"] = float(operations.get("capacity_ppm", 0.0))
 
 		var vehicles: Array = line.get("vehicles", [])
 		for vehicle_index in range(vehicles.size()):
@@ -117,6 +123,49 @@ static func _line_congestion_summary(segments: Array, road_lookup: Dictionary) -
 	}
 
 
+static func _line_operations_summary(
+	line: Dictionary,
+	stops: Dictionary,
+	line_summary: Dictionary
+) -> Dictionary:
+	var stop_ids_value: Variant = line.get("stop_ids", [])
+	var stop_ids: Array = stop_ids_value if typeof(stop_ids_value) == TYPE_ARRAY else []
+	var dwell_minutes := 0.0
+	for stop_index in range(stop_ids.size()):
+		var stop_id := str(stop_ids[stop_index])
+		var stop: Dictionary = stops.get(stop_id, {})
+		var level := clampi(
+			int(stop.get("level", 0)),
+			0,
+			int(Data.STATION_UPGRADE["max_level"])
+		)
+		var reduction := float(Data.STATION_UPGRADE["dwell_reduction"][level])
+		var dwell := maxf(0.12, float(Data.BUS["dwell_minutes"]) - reduction)
+		var visits := 1 if stop_index == 0 or stop_index == stop_ids.size() - 1 else 2
+		dwell_minutes += dwell * float(visits)
+	var cycle_minutes := (
+		float(line_summary.get("effective_minutes", 0.0)) * 2.0
+		+ dwell_minutes
+		+ float(Data.BUS["turnaround_minutes"])
+	)
+	var fleet := maxi(0, int(line.get("fleet_count", 0)))
+	var headway := cycle_minutes / float(fleet) if fleet > 0 and cycle_minutes > EPSILON else INF
+	var vehicle_capacity := maxf(
+		1.0,
+		float(TransitModes.profile("bus").get("vehicle_capacity", Data.BUS["capacity"]))
+	)
+	var capacity_ppm := (
+		vehicle_capacity * float(fleet) * 2.0 / cycle_minutes
+		if fleet > 0 and cycle_minutes > EPSILON
+		else 0.0
+	)
+	return {
+		"cycle_minutes": cycle_minutes,
+		"headway_minutes": headway,
+		"capacity_ppm": capacity_ppm,
+	}
+
+
 static func _nominal_segment_minutes(line: Dictionary, segment: Dictionary) -> float:
 	var mode := str(line.get("mode", "bus"))
 	var speed_kph := maxf(1.0, float(TransitModes.profile(mode).get("speed_kph", 18.0)))
@@ -155,6 +204,9 @@ static func _clear_line_runtime_fields(line: Dictionary) -> void:
 		"traffic_affected_segment_count",
 		"traffic_effective_driving_minutes_one_way",
 		"traffic_nominal_driving_minutes_one_way",
+		"traffic_effective_cycle_minutes",
+		"traffic_effective_headway_minutes",
+		"traffic_effective_capacity_ppm",
 	]:
 		line.erase(key)
 	var vehicles: Array = line.get("vehicles", [])
