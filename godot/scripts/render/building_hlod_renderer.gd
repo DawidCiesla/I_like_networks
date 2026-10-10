@@ -5,8 +5,10 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const HlodShader = preload("res://scripts/render/building_hlod.gdshader")
 
 const MAX_INSTANCES := 5200
-const VISIBILITY_BEGIN := 1700.0
+const VISIBILITY_BEGIN := 700.0
 const VISIBILITY_END := 18000.0
+const FULL_DETAIL_END := 950.0
+const FOUNDATION_DETAIL_END := 1200.0
 
 var _store: Node
 var _instance: MultiMeshInstance3D
@@ -24,6 +26,7 @@ func _ready() -> void:
 		if _store.has_signal("terrain_changed"):
 			_store.terrain_changed.connect(_force_sync)
 	_sync()
+	call_deferred("_apply_source_lod")
 	_update_night_strength()
 
 
@@ -34,7 +37,7 @@ func _process(_delta: float) -> void:
 func _create_instance() -> void:
 	_instance = MultiMeshInstance3D.new()
 	_instance.name = "RegionalBuildingHLOD"
-	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_instance.visibility_range_begin = VISIBILITY_BEGIN
 	_instance.visibility_range_end = VISIBILITY_END
 	_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DEPENDENCIES
@@ -59,10 +62,35 @@ func _sync() -> void:
 	var parcels: Array = city.get("parcels", [])
 	var seed := int(_store.get("city_seed"))
 	var signature := _signature_for(buildings, parcels, seed)
-	if signature == _signature:
+	if signature != _signature:
+		_signature = signature
+		_rebuild(buildings, parcels, seed)
+	call_deferred("_apply_source_lod")
+
+
+func _apply_source_lod() -> void:
+	var main_root := get_parent()
+	if not is_instance_valid(main_root):
 		return
-	_signature = signature
-	_rebuild(buildings, parcels, seed)
+	var city_renderer := main_root.get_node_or_null("City")
+	if city_renderer == null:
+		return
+	var full_buildings := city_renderer.get_node_or_null("Buildings")
+	if full_buildings != null:
+		_apply_visibility_range_recursive(full_buildings, FULL_DETAIL_END)
+	var foundations := city_renderer.get_node_or_null("BuildingFoundations") as GeometryInstance3D
+	if foundations != null:
+		foundations.visibility_range_end = FOUNDATION_DETAIL_END
+		foundations.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+
+func _apply_visibility_range_recursive(node: Node, end_distance: float) -> void:
+	if node is GeometryInstance3D:
+		var geometry := node as GeometryInstance3D
+		geometry.visibility_range_end = end_distance
+		geometry.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	for child in node.get_children():
+		_apply_visibility_range_recursive(child, end_distance)
 
 
 func _signature_for(buildings: Array, parcels: Array, seed: int) -> String:
