@@ -97,7 +97,11 @@ func _show_road(store: Node, road_id: String) -> void:
 
 
 func _show_line(store: Node, line_id: String) -> void:
-	var line_value: Variant = store.transit_network.get("lines", {}).get(line_id, {})
+	var lines_value: Variant = store.transit_network.get("lines", {})
+	if typeof(lines_value) != TYPE_DICTIONARY:
+		_panel.visible = false
+		return
+	var line_value: Variant = (lines_value as Dictionary).get(line_id, {})
 	if typeof(line_value) != TYPE_DICTIONARY:
 		_panel.visible = false
 		return
