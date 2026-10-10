@@ -5,7 +5,9 @@ const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
 const RegionalEconomy = preload("res://scripts/simulation/regional_economy.gd")
+const RegionalFleetManagement = preload("res://scripts/simulation/regional_fleet_management.gd")
 const RegionalGameplayAlerts = preload("res://scripts/ui/regional_gameplay_alerts.gd")
+const RegionalLineOperationsWidget = preload("res://scripts/ui/regional_line_operations_widget.gd")
 const RegionalTrafficOverlayRenderer = preload("res://scripts/render/regional_traffic_overlay_renderer.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
@@ -29,6 +31,7 @@ var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
 var _traffic_overlay_renderer: RegionalTrafficOverlayRenderer
 var _gameplay_alerts: RegionalGameplayAlerts
+var _line_operations_widget: RegionalLineOperationsWidget
 var _last_traffic_elapsed_seconds := 0.0
 
 
@@ -98,6 +101,10 @@ func _setup_regional_traffic() -> void:
 		_gameplay_alerts.traffic_overlay_requested.connect(_toggle_traffic_overlay)
 		add_child(_gameplay_alerts)
 		_gameplay_alerts.set_traffic_overlay_active(false)
+	if _line_operations_widget == null:
+		_line_operations_widget = RegionalLineOperationsWidget.new()
+		_line_operations_widget.name = "RegionalLineOperations"
+		add_child(_line_operations_widget)
 
 
 func _process(_delta: float) -> void:
@@ -107,6 +114,12 @@ func _process(_delta: float) -> void:
 	_advance_regional_traffic()
 	if GameStore.is_sandbox():
 		RegionalTransitTrafficRuntime.apply(GameStore)
+		var retired := RegionalFleetManagement.process_retirements(GameStore)
+		if retired > 0:
+			GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
+			if GameStore.has_method("save_game"):
+				GameStore.save_game()
+			GameStore.emit_signal("state_changed")
 
 
 func _advance_regional_traffic() -> void:
