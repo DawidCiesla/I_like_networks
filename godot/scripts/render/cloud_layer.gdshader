@@ -26,15 +26,18 @@ float value_noise(vec2 point) {
 	return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
 }
 
-float fbm(vec2 point) {
+// These layers cover most of the viewport. Three broad octaves preserve the
+// cloud silhouette while avoiding the previous ten noise-octave evaluations
+// per fragment (5 broad + 5 wisps) on two transparent full-screen layers.
+float fbm_fast(vec2 point) {
 	float sum = 0.0;
-	float amplitude = 0.54;
+	float amplitude = 0.58;
 	float normalization = 0.0;
-	for (int octave = 0; octave < 5; octave++) {
+	for (int octave = 0; octave < 3; octave++) {
 		sum += value_noise(point) * amplitude;
 		normalization += amplitude;
 		point = point * 2.03 + vec2(17.3, 9.1);
-		amplitude *= 0.49;
+		amplitude *= 0.46;
 	}
 	return sum / max(normalization, 0.001);
 }
@@ -42,11 +45,11 @@ float fbm(vec2 point) {
 void fragment() {
 	vec2 wind = normalize(wind_direction + vec2(0.0001)) * TIME * wind_speed;
 	vec2 p = UV * noise_scale + wind + vec2(layer_phase, layer_phase * 0.57);
-	float broad = fbm(p);
-	float wisps = fbm(p * 2.35 + vec2(4.1, -2.8));
-	float density = broad * 0.76 + wisps * 0.24;
+	float broad = fbm_fast(p);
+	float wisps = value_noise(p * 2.35 + vec2(4.1, -2.8));
+	float density = broad * 0.82 + wisps * 0.18;
 	float threshold = mix(0.68, 0.30, coverage);
-	float cloud = smoothstep(threshold, threshold + 0.16, density);
+	float cloud = smoothstep(threshold, threshold + 0.17, density);
 	float inner = smoothstep(threshold + 0.08, threshold + 0.28, density);
 	vec3 shade = cloud_tint.rgb * mix(0.72, 1.08, inner);
 	ALBEDO = shade;
