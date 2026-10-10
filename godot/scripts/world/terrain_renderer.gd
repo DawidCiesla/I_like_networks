@@ -325,11 +325,13 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 	var west: Array[int] = []
 	var east: Array[int] = []
 	for x in range(width):
-		north.append(x)
+		# Reverse north so clockwise front faces point out of the tile.
+		north.append(width - 1 - x)
 		south.append((height - 1) * width + x)
 	for z in range(height):
 		west.append(z * width)
-		east.append(z * width + width - 1)
+		# Reverse east for the same reason.
+		east.append((height - 1 - z) * width + width - 1)
 	_append_skirt(north, Vector3(0.0, 0.0, -1.0), vertices, normals, colors, uv2, indices)
 	_append_skirt(south, Vector3(0.0, 0.0, 1.0), vertices, normals, colors, uv2, indices)
 	_append_skirt(west, Vector3(-1.0, 0.0, 0.0), vertices, normals, colors, uv2, indices)
