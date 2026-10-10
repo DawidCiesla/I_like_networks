@@ -14,6 +14,7 @@ static func apply(city: Dictionary) -> bool:
 		if typeof(proposal_value) != TYPE_DICTIONARY:
 			continue
 		var proposal: Dictionary = proposal_value
+		_sync_construction_state(city, proposal, roads)
 		var project_class := str(proposal.get("projectClass", "bypass"))
 		var cost := RegionalHighwayAnalysis.estimate_project_cost(
 			proposal.get("points", []),
@@ -75,6 +76,31 @@ static func apply(city: Dictionary) -> bool:
 	return before != _signature(city.get("infrastructure_proposals", []))
 
 
+static func _sync_construction_state(city: Dictionary, proposal: Dictionary, roads: Dictionary) -> void:
+	var road_id := str(proposal.get("constructedRoadId", ""))
+	if road_id.is_empty():
+		return
+	var road_value: Variant = roads.get(road_id, {})
+	if typeof(road_value) != TYPE_DICTIONARY or (road_value as Dictionary).is_empty():
+		return
+	var road: Dictionary = road_value
+	if str(road.get("status", "")) == "built":
+		proposal["status"] = "completed"
+		proposal["activeNeed"] = false
+		proposal["constructionCompletedAt"] = float(city.get("time_seconds", 0.0))
+		return
+	for project_value in city.get("projects", []):
+		if typeof(project_value) != TYPE_DICTIONARY:
+			continue
+		var project: Dictionary = project_value
+		if str(project.get("type", "")) != "road" or str(project.get("targetId", "")) != road_id:
+			continue
+		if str(project.get("status", "")) in ["queued", "active"]:
+			proposal["status"] = "under-construction"
+			proposal["constructionProgress"] = clampf(float(project.get("progress", 0.0)), 0.0, 1.0)
+			return
+
+
 static func _strategic_fit(composition: Dictionary) -> String:
 	if not bool(composition.get("available", false)):
 		return "unknown"
@@ -119,8 +145,9 @@ static func _signature(proposals_value: Variant) -> String:
 		if typeof(proposal_value) != TYPE_DICTIONARY:
 			continue
 		var proposal: Dictionary = proposal_value
-		parts.append("%s:%.3f:%.3f:%.3f:%.2f:%s" % [
+		parts.append("%s:%s:%.3f:%.3f:%.3f:%.2f:%s" % [
 			str(proposal.get("id", "")),
+			str(proposal.get("status", "")),
 			float(proposal.get("trafficThroughShare", 0.0)),
 			float(proposal.get("estimatedVcRatioAfter", 0.0)),
 			float(proposal.get("estimatedDelayReductionMinutes", 0.0)),
