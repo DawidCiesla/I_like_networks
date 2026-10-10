@@ -15,6 +15,11 @@ const EPSILON := 0.000001
 ## GameStore owns the transit simulation; this adapter only adjusts the duration
 ## of a bus's active road segment. Progress is preserved when congestion changes,
 ## so a vehicle never jumps backwards or restarts a segment.
+##
+## Tram and metro use the same operations-health telemetry, but their travel time
+## remains independent from road congestion. This keeps service targets and line
+## alerts comparable across modes without making reserved/grade-separated modes
+## inherit mixed-traffic delay.
 static func apply(store: Node) -> bool:
 	if not _is_regional_city(store.city):
 		return false
@@ -31,13 +36,14 @@ static func apply(store: Node) -> bool:
 			continue
 		if str(line.get("status", "")) != "active":
 			continue
-		if str(line.get("mode", "bus")) != "bus":
-			_clear_line_runtime_fields(line)
-			lines[line_id] = line
-			continue
 
+		var mode := str(line.get("mode", "bus"))
 		var segments: Array = line.get("route_segments", [])
-		var line_summary := _line_congestion_summary(segments, road_lookup)
+		var line_summary := (
+			_line_congestion_summary(line, segments, road_lookup)
+			if mode == "bus"
+			else _line_uncongested_summary(line, segments)
+		)
 		var operations := _line_operations_summary(line, stops, line_summary)
 		line["traffic_delay_factor"] = float(line_summary.get("factor", 1.0))
 		line["traffic_affected_segment_count"] = int(line_summary.get("affected_segments", 0))
@@ -47,6 +53,14 @@ static func apply(store: Node) -> bool:
 		line["traffic_effective_headway_minutes"] = float(operations.get("headway_minutes", INF))
 		line["traffic_effective_capacity_ppm"] = float(operations.get("capacity_ppm", 0.0))
 		line["operations_health"] = TransitLineHealth.evaluate(line)
+
+		if mode != "bus":
+			# Reserved/grade-separated modes may have stale bus traffic tags from an
+			# older save or mode migration. Remove only those tags; never rescale the
+			# vehicle's actual phase duration.
+			changed = _clear_vehicle_traffic_fields(line) or changed
+			lines[line_id] = line
+			continue
 
 		var vehicles: Array = line.get("vehicles", [])
 		for vehicle_index in range(vehicles.size()):
@@ -102,7 +116,11 @@ static func apply(store: Node) -> bool:
 	return changed
 
 
-static func _line_congestion_summary(segments: Array, road_lookup: Dictionary) -> Dictionary:
+static func _line_congestion_summary(
+	line: Dictionary,
+	segments: Array,
+	road_lookup: Dictionary
+) -> Dictionary:
 	var nominal_minutes := 0.0
 	var effective_minutes := 0.0
 	var affected_segments := 0
@@ -110,8 +128,7 @@ static func _line_congestion_summary(segments: Array, road_lookup: Dictionary) -
 		if typeof(segment_value) != TYPE_DICTIONARY:
 			continue
 		var segment: Dictionary = segment_value
-		var length_km := maxf(0.0, float(segment.get("length_world", 0.0))) / WORLD_UNITS_PER_KM
-		var segment_nominal := length_km / maxf(1.0, float(TransitModes.profile("bus").get("speed_kph", 18.0))) * 60.0
+		var segment_nominal := _nominal_segment_minutes(line, segment)
 		var factor := _segment_congestion_factor(segment, road_lookup)
 		nominal_minutes += segment_nominal
 		effective_minutes += segment_nominal * factor
@@ -122,6 +139,20 @@ static func _line_congestion_summary(segments: Array, road_lookup: Dictionary) -
 		"nominal_minutes": nominal_minutes,
 		"effective_minutes": effective_minutes,
 		"affected_segments": affected_segments,
+	}
+
+
+static func _line_uncongested_summary(line: Dictionary, segments: Array) -> Dictionary:
+	var nominal_minutes := 0.0
+	for segment_value in segments:
+		if typeof(segment_value) != TYPE_DICTIONARY:
+			continue
+		nominal_minutes += _nominal_segment_minutes(line, segment_value)
+	return {
+		"factor": 1.0,
+		"nominal_minutes": nominal_minutes,
+		"effective_minutes": nominal_minutes,
+		"affected_segments": 0,
 	}
 
 
@@ -152,9 +183,10 @@ static func _line_operations_summary(
 	)
 	var fleet := maxi(0, int(line.get("fleet_count", 0)))
 	var headway := cycle_minutes / float(fleet) if fleet > 0 and cycle_minutes > EPSILON else INF
+	var mode := str(line.get("mode", "bus"))
 	var vehicle_capacity := maxf(
 		1.0,
-		float(TransitModes.profile("bus").get("vehicle_capacity", Data.BUS["capacity"]))
+		float(TransitModes.profile(mode).get("vehicle_capacity", Data.BUS["capacity"]))
 	)
 	var capacity_ppm := (
 		vehicle_capacity * float(fleet) * 2.0 / cycle_minutes
@@ -200,6 +232,22 @@ static func _segment_congestion_factor(segment: Dictionary, road_lookup: Diction
 	return clampf(travel_minutes / free_flow_minutes, 1.0, MAX_CONGESTION_FACTOR)
 
 
+static func _clear_vehicle_traffic_fields(line: Dictionary) -> bool:
+	var vehicles: Array = line.get("vehicles", [])
+	var changed := false
+	for vehicle_index in range(vehicles.size()):
+		if typeof(vehicles[vehicle_index]) != TYPE_DICTIONARY:
+			continue
+		var vehicle: Dictionary = vehicles[vehicle_index]
+		if vehicle.has("traffic_segment_key") or vehicle.has("traffic_congestion_factor"):
+			vehicle.erase("traffic_segment_key")
+			vehicle.erase("traffic_congestion_factor")
+			vehicles[vehicle_index] = vehicle
+			changed = true
+	line["vehicles"] = vehicles
+	return changed
+
+
 static func _clear_line_runtime_fields(line: Dictionary) -> void:
 	for key in [
 		"traffic_delay_factor",
@@ -212,15 +260,7 @@ static func _clear_line_runtime_fields(line: Dictionary) -> void:
 		"operations_health",
 	]:
 		line.erase(key)
-	var vehicles: Array = line.get("vehicles", [])
-	for vehicle_index in range(vehicles.size()):
-		if typeof(vehicles[vehicle_index]) != TYPE_DICTIONARY:
-			continue
-		var vehicle: Dictionary = vehicles[vehicle_index]
-		vehicle.erase("traffic_segment_key")
-		vehicle.erase("traffic_congestion_factor")
-		vehicles[vehicle_index] = vehicle
-	line["vehicles"] = vehicles
+	_clear_vehicle_traffic_fields(line)
 
 
 static func _road_lookup(city: Dictionary) -> Dictionary:
