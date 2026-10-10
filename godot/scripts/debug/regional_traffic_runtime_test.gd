@@ -18,6 +18,7 @@ var _failures := 0
 
 func _init() -> void:
 	_test_snapshot_and_road_metrics()
+	_test_operational_speed_feedback()
 	_test_tick_cadence()
 	_test_legacy_city_is_untouched()
 	if _failures > 0:
@@ -56,6 +57,50 @@ func _test_snapshot_and_road_metrics() -> void:
 	var demand_changed := RegionalTrafficRuntime.refresh(store)
 	_expect(demand_changed, "changed resident demand invalidates the traffic snapshot")
 	_expect(int(store.city.get("road_traffic", {}).get("revision", 0)) == 2, "changed traffic increments revision")
+	store.free()
+
+
+func _test_operational_speed_feedback() -> void:
+	var store := _regional_store(12000.0)
+	RegionalTrafficRuntime.refresh(store)
+	var congested_road: Dictionary = {}
+	for road_value in store.city.get("roads", []):
+		var road: Dictionary = road_value
+		var traffic_value: Variant = road.get("traffic", {})
+		if typeof(traffic_value) != TYPE_DICTIONARY:
+			continue
+		var traffic: Dictionary = traffic_value
+		if float(traffic.get("delay_minutes", 0.0)) <= 0.0001:
+			continue
+		congested_road = road
+		break
+	_expect(not congested_road.is_empty(), "high road demand creates at least one delayed road")
+	if congested_road.is_empty():
+		store.free()
+		return
+
+	var traffic: Dictionary = congested_road.get("traffic", {})
+	var free_speed := float(congested_road.get("traffic_free_flow_speed_kph", 0.0))
+	var operational_speed := float(traffic.get("operational_speed_kph", 0.0))
+	var profile_speed := float(congested_road.get("profile", {}).get("speed_kph", 0.0))
+	_expect(free_speed > 0.0, "traffic runtime preserves the physical free-flow road speed")
+	_expect(operational_speed >= RegionalTrafficRuntime.MIN_OPERATIONAL_SPEED_KPH, "operational speed respects the minimum traffic speed")
+	_expect(operational_speed < free_speed, "congestion lowers the operational road speed")
+	_expect(is_equal_approx(profile_speed, operational_speed), "resident routing sees the current operational speed through the road profile")
+
+	var road_id := str(congested_road.get("id", ""))
+	RegionalTrafficRuntime._restore_free_flow_speeds(store.city)
+	var restored := _road(store.city, road_id)
+	_expect(is_equal_approx(float(restored.get("profile", {}).get("speed_kph", 0.0)), free_speed), "assignment restores free-flow speed before computing BPR delay")
+
+	# Reapply the same demand. The solver must start from the preserved design
+	# speed and converge back to the same operating state rather than compounding
+	# the previous tick's slowdown.
+	RegionalTrafficRuntime.refresh(store)
+	var repeated := _road(store.city, road_id)
+	var repeated_traffic: Dictionary = repeated.get("traffic", {})
+	_expect(is_equal_approx(float(repeated.get("traffic_free_flow_speed_kph", 0.0)), free_speed), "free-flow speed stays stable across traffic ticks")
+	_expect(is_equal_approx(float(repeated_traffic.get("operational_speed_kph", 0.0)), operational_speed), "identical demand does not compound congestion speed loss")
 	store.free()
 
 
@@ -102,6 +147,16 @@ func _resident_metrics(city: Dictionary, car_trips_per_hour: float) -> Dictionar
 			"car_trips_per_hour": car_trips_per_hour,
 		}],
 	}
+
+
+func _road(city: Dictionary, road_id: String) -> Dictionary:
+	for road_value in city.get("roads", []):
+		if typeof(road_value) != TYPE_DICTIONARY:
+			continue
+		var road: Dictionary = road_value
+		if str(road.get("id", "")) == road_id:
+			return road
+	return {}
 
 
 func _expect(condition: bool, message: String) -> void:
