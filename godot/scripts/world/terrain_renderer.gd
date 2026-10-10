@@ -33,6 +33,7 @@ var build_duration_ms := 0
 var worker_count := 0
 var _active_builder: RefCounted
 var _build_request := 0
+var _natural_detail_enabled := true
 
 
 func _ready() -> void:
@@ -58,6 +59,22 @@ func _setup_natural_detail() -> void:
 		_riparian_detail = RiparianDetailRenderer.new()
 		_riparian_detail.name = "RiparianDetail"
 		add_child(_riparian_detail)
+	_apply_natural_detail_enabled()
+
+
+func set_natural_detail_enabled(enabled: bool) -> void:
+	_natural_detail_enabled = enabled
+	_apply_natural_detail_enabled()
+
+
+func _apply_natural_detail_enabled() -> void:
+	for renderer in [_ground_cover, _landscape_detail, _riparian_detail]:
+		if not is_instance_valid(renderer):
+			continue
+		renderer.visible = _natural_detail_enabled
+		renderer.set_process(_natural_detail_enabled)
+		if _natural_detail_enabled and renderer.has_method("_mark_dirty"):
+			renderer.call("_mark_dirty")
 
 
 func rebuild(progressive: bool = false) -> void:
