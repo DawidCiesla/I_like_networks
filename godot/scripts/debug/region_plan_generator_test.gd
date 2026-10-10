@@ -5,6 +5,7 @@ const Generator = preload("res://scripts/world/region_plan_generator.gd")
 const TEST_SEED := 731945
 const TEST_BOUNDS := Rect2(Vector2(-2400.0, -1800.0), Vector2(4800.0, 3600.0))
 const COMPACT_BOUNDS := Rect2(Vector2(-600.0, -500.0), Vector2(1200.0, 1000.0))
+const NODE_INTERSECTION_TOLERANCE := 0.1
 
 
 func _initialize() -> void:
@@ -163,15 +164,15 @@ func _validate_local_morphology(
 		if not street_id.begins_with(expected_prefix):
 			errors.append("local street %s does not use a settlement-derived persistent id" % street_id)
 		var street_points: Array = street.get("points", [])
-		var root_position: Vector2 = settlement_lookup[settlement_id]["position"]
 		for other_id in edge_lookup.keys():
 			if str(other_id) == street_id:
 				continue
 			var other_edge: Dictionary = edge_lookup[other_id]
-			var shares_root := str(other_edge.get("a", "")) == settlement_id or str(other_edge.get("b", "")) == settlement_id
-			if _paths_cross_away_from_root(
-				street_points, other_edge.get("points", []), root_position,
-			0.1 if shares_root else 0.0
+			var allowed_points: Array[Vector2] = _shared_endpoint_positions(street, other_edge, node_lookup)
+			if _paths_cross_away_from_allowed_points(
+				street_points,
+				other_edge.get("points", []),
+				allowed_points
 			):
 				errors.append("local street %s creates an unmodeled road intersection with %s" % [street_id, str(other_id)])
 				break
@@ -209,7 +210,25 @@ func _validate_local_morphology(
 			errors.append("settlement %s has fewer than three building anchors" % settlement_id)
 
 
-func _paths_cross_away_from_root(first: Array, second: Array, root: Vector2, allowed_radius: float) -> bool:
+func _shared_endpoint_positions(
+	first: Dictionary,
+	second: Dictionary,
+	node_lookup: Dictionary
+) -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	var first_nodes := [str(first.get("a", "")), str(first.get("b", ""))]
+	var second_nodes := [str(second.get("a", "")), str(second.get("b", ""))]
+	for node_id in first_nodes:
+		if node_id in second_nodes and node_lookup.has(node_id):
+			result.append(node_lookup[node_id])
+	return result
+
+
+func _paths_cross_away_from_allowed_points(
+	first: Array,
+	second: Array,
+	allowed_points: Array[Vector2]
+) -> bool:
 	for first_index in range(1, first.size()):
 		var first_a: Vector2 = first[first_index - 1]
 		var first_b: Vector2 = first[first_index]
@@ -217,7 +236,12 @@ func _paths_cross_away_from_root(first: Array, second: Array, root: Vector2, all
 			var second_a: Vector2 = second[second_index - 1]
 			var second_b: Vector2 = second[second_index]
 			for crossing in _intersection_points(first_a, first_b, second_a, second_b):
-				if allowed_radius > 0.0 and crossing.distance_to(root) <= allowed_radius:
+				var allowed := false
+				for allowed_point in allowed_points:
+					if crossing.distance_to(allowed_point) <= NODE_INTERSECTION_TOLERANCE:
+						allowed = true
+						break
+				if allowed:
 					continue
 				return true
 	return false
@@ -229,13 +253,36 @@ func _intersection_points(a: Vector2, b: Vector2, c: Vector2, d: Vector2) -> Arr
 	var second_direction := d - c
 	var denominator := first_direction.cross(second_direction)
 	var offset := c - a
-	if absf(denominator) <= 0.00001:
+	if absf(denominator) > 0.00001:
+		var t := offset.cross(second_direction) / denominator
+		var u := offset.cross(first_direction) / denominator
+		if t >= -0.00001 and t <= 1.00001 and u >= -0.00001 and u <= 1.00001:
+			result.append(a + first_direction * clampf(t, 0.0, 1.0))
 		return result
-	var t := offset.cross(second_direction) / denominator
-	var u := offset.cross(first_direction) / denominator
-	if t >= -0.00001 and t <= 1.00001 and u >= -0.00001 and u <= 1.00001:
-		result.append(a + first_direction * clampf(t, 0.0, 1.0))
+	if absf(offset.cross(first_direction)) > 0.001:
+		return result
+	for point in [a, b, c, d]:
+		var candidate: Vector2 = point
+		if _point_on_segment(candidate, a, b) and _point_on_segment(candidate, c, d):
+			var duplicate := false
+			for existing in result:
+				if existing.distance_to(candidate) <= 0.001:
+					duplicate = true
+					break
+			if not duplicate:
+				result.append(candidate)
 	return result
+
+
+func _point_on_segment(point: Vector2, start: Vector2, finish: Vector2) -> bool:
+	var segment := finish - start
+	var relative := point - start
+	if absf(segment.cross(relative)) > 0.01:
+		return false
+	var dot := relative.dot(segment)
+	if dot < -0.01:
+		return false
+	return dot <= segment.length_squared() + 0.01
 
 
 func _signature(plan: Dictionary) -> String:

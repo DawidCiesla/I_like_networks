@@ -4,11 +4,13 @@ class_name WorldMapDefinition
 const Layout = preload("res://scripts/transport/transport_layout.gd")
 
 const SCHEMA_VERSION := 1
-const GENERATOR_VERSION := 1
+const GENERATOR_VERSION := 2
 const LEGACY_CITY_MAP_ID := "bus-era-city"
 const DEFAULT_MAP_ID := "starter-region"
 const LEGACY_MARGIN := 620.0
-const REGION_HALF_EXTENT := 3200.0
+# Regional sandbox uses real-world metres. A 24 x 24 km region leaves enough
+# space for several independent small towns, villages and rural corridors.
+const REGION_HALF_EXTENT := 12000.0
 
 static var _active_definition: Dictionary = {}
 

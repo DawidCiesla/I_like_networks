@@ -11,7 +11,7 @@ enum Step {
 	COMPLETED = 4
 }
 
-var current_step: Step = Step.WELCOME_AND_ROAD
+var current_step: int = Step.WELCOME_AND_ROAD
 
 @onready var panel: PanelContainer = $Panel
 @onready var step_title: Label = $Panel/Margin/VBox/Header/Title
@@ -72,7 +72,7 @@ func _on_store_changed() -> void:
 				advance_step(Step.COMPLETED)
 
 
-func advance_step(next_step: Step) -> void:
+func advance_step(next_step: int) -> void:
 	current_step = next_step
 	var am := get_node_or_null("/root/AudioManager")
 	if is_instance_valid(am):
@@ -116,7 +116,7 @@ func _on_next_pressed() -> void:
 		am.play_sfx("click")
 
 	if current_step < Step.COMPLETED:
-		advance_step(Step(int(current_step) + 1))
+		advance_step(current_step + 1)
 
 
 func _on_skip_pressed() -> void:

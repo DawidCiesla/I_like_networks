@@ -124,6 +124,10 @@ static func create_visual(
 	# not allocate transient render materials for discarded off-tree instances.
 	imported_root.set_script(BuildingStyleApplier)
 	imported_root.set("tint", tint)
+	if str(building.get("source", "")).begins_with("regional-"):
+		# Detailed authored meshes fade into the cheap regional HLOD boxes. Keep
+		# a wide overlap so Godot's visibility fade never reveals a hard pop.
+		imported_root.set("detail_visibility_end", 2850.0)
 
 	var bounds := _scene_bounds(imported_root)
 	if bounds.size.x <= 0.0001 or bounds.size.y <= 0.0001 or bounds.size.z <= 0.0001:

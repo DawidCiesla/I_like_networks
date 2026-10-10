@@ -13,7 +13,8 @@ on:
       - ".github/workflows/godot-4-7.yml"
 
 jobs:
-  validate:
+  regional:
+    name: Regional validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -31,6 +32,15 @@ jobs:
           unzip -q /tmp/godot.zip -d /tmp/godot
           chmod +x /tmp/godot/Godot_v4.7-stable_linux.x86_64
           /tmp/godot/Godot_v4.7-stable_linux.x86_64 --version
+
+      - name: Import Godot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+            --headless \
+            --path godot \
+            --import
 
       - name: Parse project
         shell: bash
@@ -51,18 +61,132 @@ jobs:
             --path godot \
             --script res://scripts/debug/self_test.gd
 
-      - name: Run focused Godot tests
+      - name: Run regional world tests
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -d '' -t test_scripts < <(find godot/scripts -type f -name '*_test.gd' -print0 | sort -z)
-          for test_script in "${test_scripts[@]}"; do
-            if [[ "${test_script}" == "godot/scripts/debug/self_test.gd" ]]; then
-              continue
-            fi
+          for test_script in \
+            godot/scripts/debug/regional_city_integration_test.gd \
+            godot/scripts/debug/regional_sandbox_runtime_test.gd \
+            godot/scripts/debug/regional_road_build_game_store_test.gd \
+            godot/scripts/debug/road_builder_connectivity_game_store_test.gd \
+            godot/scripts/debug/road_geometry_test.gd \
+            godot/scripts/debug/regional_organic_growth_test.gd \
+            godot/scripts/debug/regional_highway_planner_test.gd \
+            godot/scripts/debug/regional_natural_terrain_test.gd \
+            godot/scripts/world/world_layers_test.gd \
+            godot/scripts/world/terrain_renderer_material_test.gd \
+            godot/scripts/world/water_surface_renderer_test.gd; do
             echo "Running ${test_script}"
             /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
               --headless \
               --path godot \
               --script "res://${test_script#godot/}"
+          done
+
+  visual:
+    name: Regional visual runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Godot 4.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 \
+            -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x /tmp/godot/Godot_v4.7-stable_linux.x86_64
+
+      - name: Import Godot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+            --headless \
+            --path godot \
+            --import
+
+      - name: Run regional visual renderer runtime test
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+            --headless \
+            --path godot \
+            --script res://scripts/debug/regional_visual_renderers_test.gd
+
+  focused:
+    name: Focused tests (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Godot 4.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 \
+            -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x /tmp/godot/Godot_v4.7-stable_linux.x86_64
+
+      - name: Import Godot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+            --headless \
+            --path godot \
+            --import
+
+      - name: Run focused test shard
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: 4
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t test_scripts < <(find godot/scripts -type f -name '*_test.gd' -print0 | sort -z)
+          test_index=0
+          for test_script in "${test_scripts[@]}"; do
+            case "${test_script}" in
+              godot/scripts/debug/self_test.gd|\
+              godot/scripts/debug/regional_city_integration_test.gd|\
+              godot/scripts/debug/regional_sandbox_runtime_test.gd|\
+              godot/scripts/debug/regional_road_build_game_store_test.gd|\
+              godot/scripts/debug/road_builder_connectivity_game_store_test.gd|\
+              godot/scripts/debug/road_geometry_test.gd|\
+              godot/scripts/debug/regional_organic_growth_test.gd|\
+              godot/scripts/debug/regional_highway_planner_test.gd|\
+              godot/scripts/debug/regional_natural_terrain_test.gd|\
+              godot/scripts/debug/regional_visual_renderers_test.gd|\
+              godot/scripts/world/world_layers_test.gd|\
+              godot/scripts/world/terrain_renderer_material_test.gd|\
+              godot/scripts/world/water_surface_renderer_test.gd)
+                continue
+                ;;
+            esac
+
+            if (( test_index % SHARD_COUNT == SHARD_INDEX )); then
+              echo "Running ${test_script} on shard ${SHARD_INDEX}/${SHARD_COUNT}"
+              /tmp/godot/Godot_v4.7-stable_linux.x86_64 \
+                --headless \
+                --path godot \
+                --script "res://${test_script#godot/}"
+            fi
+            test_index=$((test_index + 1))
           done

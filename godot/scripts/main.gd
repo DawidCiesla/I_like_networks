@@ -1,12 +1,73 @@
 extends Node3D
 
+const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
+const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
+const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
+const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
+const BuildingWindowRenderer = preload("res://scripts/render/building_window_renderer.gd")
+const CloudLayerRenderer = preload("res://scripts/render/cloud_layer_renderer.gd")
+const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside_renderer.gd")
+const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
+const ForestHlodRenderer = preload("res://scripts/world/forest_hlod_renderer.gd")
+
 @onready var _environment_controller: Node3D = $WorldEnvironmentController
+@onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
+
+var _bridge_detail_renderer: BridgeDetailRenderer
+var _building_detail_renderer: BuildingDetailRenderer
+var _building_hlod_renderer: BuildingHlodRenderer
+var _building_window_renderer: BuildingWindowRenderer
+var _cloud_layer_renderer: CloudLayerRenderer
+var _regional_roadside_renderer: RegionalRoadsideRenderer
+var _roadside_props_renderer: RoadsidePropsRenderer
+var _forest_hlod_renderer: ForestHlodRenderer
+
 
 func _ready() -> void:
 	GameStore.toast_requested.connect(_on_toast)
 	if not GameStore.state_changed.is_connected(_on_state_changed):
 		GameStore.state_changed.connect(_on_state_changed)
+	_setup_regional_visual_detail()
 	_on_state_changed()
+
+
+func _setup_regional_visual_detail() -> void:
+	var map_definition := MapDefinition.active_definition()
+	if str(map_definition.get("id", MapDefinition.LEGACY_CITY_MAP_ID)) == MapDefinition.LEGACY_CITY_MAP_ID:
+		return
+	if _cloud_layer_renderer == null:
+		_cloud_layer_renderer = CloudLayerRenderer.new()
+		_cloud_layer_renderer.name = "CloudLayers"
+		add_child(_cloud_layer_renderer)
+	if _regional_roadside_renderer == null:
+		_regional_roadside_renderer = RegionalRoadsideRenderer.new()
+		_regional_roadside_renderer.name = "RegionalRoadsideDetail"
+		add_child(_regional_roadside_renderer)
+	if _roadside_props_renderer == null:
+		_roadside_props_renderer = RoadsidePropsRenderer.new()
+		_roadside_props_renderer.name = "RoadsideProps"
+		add_child(_roadside_props_renderer)
+	if _bridge_detail_renderer == null:
+		_bridge_detail_renderer = BridgeDetailRenderer.new()
+		_bridge_detail_renderer.name = "BridgeDetails"
+		add_child(_bridge_detail_renderer)
+	if _building_detail_renderer == null:
+		_building_detail_renderer = BuildingDetailRenderer.new()
+		_building_detail_renderer.name = "BuildingDetails"
+		add_child(_building_detail_renderer)
+	if _building_window_renderer == null:
+		_building_window_renderer = BuildingWindowRenderer.new()
+		_building_window_renderer.name = "BuildingWindows"
+		add_child(_building_window_renderer)
+	if _building_hlod_renderer == null:
+		_building_hlod_renderer = BuildingHlodRenderer.new()
+		_building_hlod_renderer.name = "BuildingHLOD"
+		add_child(_building_hlod_renderer)
+	if _forest_hlod_renderer == null:
+		_forest_hlod_renderer = ForestHlodRenderer.new()
+		_forest_hlod_renderer.name = "ForestHLOD"
+		add_child(_forest_hlod_renderer)
+
 
 func _process(_delta: float) -> void:
 	if not is_instance_valid(_environment_controller):
@@ -14,7 +75,6 @@ func _process(_delta: float) -> void:
 	var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
 	_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
 
-@onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -32,8 +92,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				else 1
 			)
 
+
 func _on_state_changed() -> void:
 	pass
+
 
 func _on_toast(message: String) -> void:
 	print("[I Like Transit] ", message)
