@@ -67,6 +67,7 @@ func _mark_dirty() -> void:
 
 
 func _rebuild(anchor: Vector2) -> void:
+	var perf_started_usec := Time.get_ticks_usec()
 	_dirty = false
 	_last_anchor = anchor
 	var mesh: ArrayMesh = _grass_mesh()
@@ -136,6 +137,10 @@ func _rebuild(anchor: Vector2) -> void:
 		multi.set_instance_transform(index, transforms[index])
 		multi.set_instance_custom_data(index, custom_data[index])
 	_instance.multimesh = multi
+	PerformanceProbe.record_duration(
+		"ground_cover_rebuild_ms",
+		float(Time.get_ticks_usec() - perf_started_usec) / 1000.0
+	)
 
 
 static func _grass_mesh() -> ArrayMesh:
