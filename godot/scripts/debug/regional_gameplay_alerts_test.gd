@@ -7,6 +7,7 @@ var _failures := 0
 
 func _init() -> void:
 	_test_worst_road_and_line_alerts()
+	_test_financial_pressure_alert()
 	_test_healthy_network_has_no_alerts()
 	if _failures > 0:
 		push_error("REGIONAL GAMEPLAY ALERTS TEST: FAIL (%d checks)" % _failures)
@@ -47,8 +48,32 @@ func _test_worst_road_and_line_alerts() -> void:
 		_expect(str(alerts[1].get("selection", "")) == "free_line:line-a", "line alert targets the existing custom-line inspector")
 
 
+func _test_financial_pressure_alert() -> void:
+	var city := {
+		"roads": [],
+		"economy": {
+			"status": "stressed",
+			"severity": 3,
+			"net_per_minute": -12.5,
+			"forecast_net": -750.0,
+			"runway_minutes": 110.0,
+			"road_maintenance_per_minute": 1.25,
+		},
+	}
+	var alerts := RegionalGameplayAlerts.collect_alerts(city, {"lines": {}})
+	_expect(alerts.size() == 1, "stressed economy produces a gameplay alert")
+	if not alerts.is_empty():
+		_expect(str(alerts[0].get("id", "")) == "economy", "financial pressure uses a stable alert id")
+		_expect(int(alerts[0].get("priority", 0)) == 3, "financial alert preserves economy severity")
+		_expect(str(alerts[0].get("label", "")).contains("$12.5/min"), "financial alert exposes current negative cashflow")
+		_expect(str(alerts[0].get("tooltip", "")).contains("110 min"), "financial alert explains remaining runway")
+
+
 func _test_healthy_network_has_no_alerts() -> void:
-	var city := {"roads": [{"id": "road-a", "traffic": {"vc_ratio": 0.55, "delay_minutes": 0.1}}]}
+	var city := {
+		"roads": [{"id": "road-a", "traffic": {"vc_ratio": 0.55, "delay_minutes": 0.1}}],
+		"economy": {"status": "surplus", "severity": 0, "net_per_minute": 3.0},
+	}
 	var network := {
 		"lines": {
 			"line-a": {
@@ -56,7 +81,7 @@ func _test_healthy_network_has_no_alerts() -> void:
 			},
 		},
 	}
-	_expect(RegionalGameplayAlerts.collect_alerts(city, network).is_empty(), "healthy road and line network stays quiet")
+	_expect(RegionalGameplayAlerts.collect_alerts(city, network).is_empty(), "healthy road, line, and finances stay quiet")
 
 
 func _expect(condition: bool, message: String) -> void:
