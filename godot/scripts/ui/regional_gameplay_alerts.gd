@@ -88,7 +88,7 @@ static func collect_alerts(city: Dictionary, transit_network: Dictionary) -> Arr
 				"priority": severity,
 				"label": "%s · %s" % [
 					str(line.get("name", line_id)).to_upper(),
-					_status_label(status),
+					_status_label(status, health),
 				],
 				"selection": "free_line:%s" % line_id,
 				"tooltip": _line_tooltip(health),
@@ -136,7 +136,7 @@ static func _append_economy_alert(alerts: Array[Dictionary], city: Dictionary) -
 	})
 
 
-static func _status_label(status: String) -> String:
+static func _status_label(status: String, health: Dictionary = {}) -> String:
 	match status:
 		"overloaded":
 			return "OVERLOADED"
@@ -145,6 +145,8 @@ static func _status_label(status: String) -> String:
 		"congestion_limited":
 			return "DELAYED BY TRAFFIC"
 		"under_served":
+			if str(health.get("reason", "")) == "headway_above_target":
+				return "BELOW SERVICE TARGET"
 			return "LOW FREQUENCY"
 		"no_service":
 			return "NO SERVICE"
@@ -155,8 +157,14 @@ static func _status_label(status: String) -> String:
 static func _line_tooltip(health: Dictionary) -> String:
 	var headway := float(health.get("headway_minutes", INF))
 	var headway_text := "—" if not is_finite(headway) else "%.1f min" % headway
-	return "Headway %s · load %.0f%% · traffic ×%.2f · suggested: %s" % [
+	var target_text := ""
+	if bool(health.get("target_headway_active", false)):
+		var target := float(health.get("target_headway_minutes", 0.0))
+		var ratio := maxf(0.0, float(health.get("headway_target_ratio", 0.0)))
+		target_text = " · target %.1f min · %.0f%% of target" % [target, ratio * 100.0]
+	return "Headway %s%s · load %.0f%% · traffic ×%.2f · suggested: %s" % [
 		headway_text,
+		target_text,
 		float(health.get("effective_load_ratio", 0.0)) * 100.0,
 		float(health.get("traffic_delay_factor", 1.0)),
 		str(health.get("recommended_action", "monitor")).replace("_", " "),
