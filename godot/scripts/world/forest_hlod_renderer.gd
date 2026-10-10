@@ -5,11 +5,11 @@ const Terrain = preload("res://scripts/world/terrain_model.gd")
 const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const ForestHlodShader = preload("res://scripts/world/forest_hlod.gdshader")
 
-# Far forest is a massing layer, not another tree-by-tree population. A coarse
-# grid keeps regional startup affordable while larger crowns preserve a solid
-# wooded silhouette beyond the full-detail Kenney tree range.
+# Full Kenney trees are now spatially tiled and limited to the near field.
+# This coarse massing layer takes over early enough to preserve the regional
+# forest silhouette without rendering detailed tree geometry for kilometres.
 const GRID_SPACING := 340.0
-const VISIBILITY_BEGIN := 4700.0
+const VISIBILITY_BEGIN := 1650.0
 const VISIBILITY_END := 22000.0
 const MAX_INSTANCES := 3800
 
