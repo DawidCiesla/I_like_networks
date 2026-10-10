@@ -2,6 +2,7 @@ extends Node3D
 
 const Data = preload("res://scripts/core/game_data.gd")
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
+const RegionalAccessibility = preload("res://scripts/city/regional_accessibility.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
 const RegionalEconomy = preload("res://scripts/simulation/regional_economy.gd")
@@ -89,6 +90,7 @@ func _setup_regional_traffic() -> void:
 	RegionalTrafficRuntime.ensure(GameStore.city)
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
+	RegionalAccessibility.apply(GameStore)
 	GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
 	RegionalTransitTrafficRuntime.apply(GameStore)
 	if _traffic_overlay_renderer == null:
@@ -135,7 +137,11 @@ func _advance_regional_traffic() -> void:
 		GameStore,
 		traffic_delta * float(Data.GAME_MINUTES_PER_REAL_SECOND)
 	)
-	if RegionalTrafficRuntime.advance(GameStore, traffic_delta):
+	var traffic_changed := RegionalTrafficRuntime.advance(GameStore, traffic_delta)
+	if traffic_changed:
+		# Accessibility samples the freshly-updated road speeds and resident mode
+		# choice once per traffic refresh; growth only consumes this stable snapshot.
+		RegionalAccessibility.apply(GameStore)
 		GameStore.emit_signal("city_changed")
 
 
