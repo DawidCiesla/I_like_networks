@@ -46,6 +46,12 @@ static func apply(city: Dictionary) -> bool:
 			project_class
 		)
 		var multiplier := RegionalHighwayAnalysis.strategic_pressure_multiplier(composition)
+		var planner_pressure := float(proposal.get("pressure", 0.0))
+		var base_pressure := float(proposal.get(
+			"basePressure",
+			planner_pressure / maxf(0.01, float(proposal.get("strategicPressureMultiplier", multiplier)))
+		))
+		proposal["basePressure"] = base_pressure
 		proposal["trafficCompositionAvailable"] = bool(composition.get("available", false))
 		proposal["trafficLocalVph"] = float(composition.get("local_vph", 0.0))
 		proposal["trafficRegionalVph"] = float(composition.get("regional_vph", 0.0))
@@ -54,7 +60,7 @@ static func apply(city: Dictionary) -> bool:
 		proposal["trafficRegionalShare"] = float(composition.get("regional_share", 0.0))
 		proposal["trafficThroughShare"] = float(composition.get("through_share", 0.0))
 		proposal["strategicPressureMultiplier"] = multiplier
-		proposal["strategicPressure"] = float(proposal.get("pressure", 0.0)) * multiplier
+		proposal["strategicPressure"] = base_pressure * multiplier
 		proposal["strategicFit"] = _strategic_fit(composition)
 		proposal["estimatedBenefitAvailable"] = bool(benefit.get("available", false))
 		proposal["estimatedDiversionFraction"] = float(benefit.get("diversion_fraction", 0.0))
