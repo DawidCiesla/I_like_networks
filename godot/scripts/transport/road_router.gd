@@ -112,24 +112,8 @@ static func route_between_snaps(
 
 		var road_class := str(edge.get("class", road.get("class", "local")))
 		var weight := _road_weight(road_class) if prefer_major_roads else 1.0
-		_add_connection(
-			adjacency,
-			a_id,
-			b_id,
-			length,
-			length * weight,
-			edge_id,
-			road_id
-		)
-		_add_connection(
-			adjacency,
-			b_id,
-			a_id,
-			length,
-			length * weight,
-			edge_id,
-			road_id
-		)
+		_add_connection(adjacency, a_id, b_id, length, length * weight, edge_id, road_id)
+		_add_connection(adjacency, b_id, a_id, length, length * weight, edge_id, road_id)
 		edge_lookup[edge_id] = edge
 
 	var start_edge_id := str(start_snap.get("edge_id", ""))
@@ -144,19 +128,9 @@ static func route_between_snaps(
 	adjacency[start_id] = []
 	adjacency[end_id] = []
 
-	if not _attach_virtual_snap(
-		adjacency,
-		start_id,
-		start_snap,
-		prefer_major_roads
-	):
+	if not _attach_virtual_snap(adjacency, start_id, start_snap, prefer_major_roads):
 		return _failed_route("start_edge_unavailable")
-	if not _attach_virtual_snap(
-		adjacency,
-		end_id,
-		end_snap,
-		prefer_major_roads
-	):
+	if not _attach_virtual_snap(adjacency, end_id, end_snap, prefer_major_roads):
 		return _failed_route("end_edge_unavailable")
 
 	if str(start_snap.get("edge_id", "")) == str(end_snap.get("edge_id", "")):
@@ -280,29 +254,26 @@ static func _dijkstra(
 ) -> Dictionary:
 	var distance: Dictionary = {}
 	var previous: Dictionary = {}
-	var open: Array[String] = []
+	var node_order: Dictionary = {}
+	var heap: Array[Dictionary] = []
+	var order := 0
 
+	# Preserve the old implementation's deterministic tie-breaking: equal-cost
+	# nodes are ordered exactly like the previous linear open array.
 	for node_id_value in adjacency.keys():
 		var node_id := str(node_id_value)
 		distance[node_id] = INF
-		open.append(node_id)
+		node_order[node_id] = order
+		order += 1
 	distance[start_id] = 0.0
+	_heap_push(heap, start_id, 0.0, int(node_order.get(start_id, 0)))
 
-	while not open.is_empty():
-		var best_index := -1
-		var current_id := ""
-		var current_cost := INF
-		for index in range(open.size()):
-			var candidate_id := open[index]
-			var candidate_cost := float(distance.get(candidate_id, INF))
-			if candidate_cost < current_cost:
-				current_cost = candidate_cost
-				current_id = candidate_id
-				best_index = index
-
-		if best_index < 0 or current_cost == INF:
-			break
-		open.remove_at(best_index)
+	while not heap.is_empty():
+		var entry := _heap_pop(heap)
+		var current_id := str(entry.get("node", ""))
+		var current_cost := float(entry.get("cost", INF))
+		if current_cost > float(distance.get(current_id, INF)) + EPSILON:
+			continue
 		if current_id == end_id:
 			break
 
@@ -321,6 +292,12 @@ static func _dijkstra(
 				"road_id": str(connection.get("road_id", "")),
 				"length": float(connection.get("length", 0.0)),
 			}
+			_heap_push(
+				heap,
+				neighbor,
+				alternate,
+				int(node_order.get(neighbor, 2147483647))
+			)
 
 	if not previous.has(end_id) and start_id != end_id:
 		return {"success": false}
@@ -340,6 +317,53 @@ static func _dijkstra(
 		"previous": previous,
 		"cost": float(distance.get(end_id, 0.0)),
 	}
+
+static func _heap_push(heap: Array[Dictionary], node_id: String, cost: float, order: int) -> void:
+	var entry := {"node": node_id, "cost": cost, "order": order}
+	heap.append(entry)
+	var index := heap.size() - 1
+	while index > 0:
+		var parent := (index - 1) / 2
+		if not _heap_less(heap[index], heap[parent]):
+			break
+		var swap := heap[parent]
+		heap[parent] = heap[index]
+		heap[index] = swap
+		index = parent
+
+static func _heap_pop(heap: Array[Dictionary]) -> Dictionary:
+	if heap.is_empty():
+		return {}
+	var root := heap[0]
+	var last := heap.pop_back()
+	if heap.is_empty():
+		return root
+	heap[0] = last
+	var index := 0
+	while true:
+		var left := index * 2 + 1
+		var right := left + 1
+		var smallest := index
+		if left < heap.size() and _heap_less(heap[left], heap[smallest]):
+			smallest = left
+		if right < heap.size() and _heap_less(heap[right], heap[smallest]):
+			smallest = right
+		if smallest == index:
+			break
+		var swap := heap[index]
+		heap[index] = heap[smallest]
+		heap[smallest] = swap
+		index = smallest
+	return root
+
+static func _heap_less(a: Dictionary, b: Dictionary) -> bool:
+	var a_cost := float(a.get("cost", INF))
+	var b_cost := float(b.get("cost", INF))
+	if a_cost < b_cost:
+		return true
+	if a_cost > b_cost:
+		return false
+	return int(a.get("order", 2147483647)) < int(b.get("order", 2147483647))
 
 static func _add_connection(
 	adjacency: Dictionary,
