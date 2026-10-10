@@ -14,8 +14,8 @@ const TerrainMeshBuilder = preload("res://scripts/world/terrain_mesh_builder.gd"
 const GEOMETRY_REVISION := 1
 
 # All LODs use the same ~1.8 km spatial tiles so their AABB centres match.
-# This prevents holes at LOD transitions while still allowing independent
-# frustum culling. Geometry density and shader cost drop with distance.
+# Geometry density and shader cost drop with distance. A short downward skirt on
+# every tile edge hides T-junction cracks when adjacent chunks use different LODs.
 const CHUNK_CELLS := 32
 const NEAR_SAMPLE_FACTOR := 1
 const MEDIUM_SAMPLE_FACTOR := 2
@@ -23,6 +23,7 @@ const FAR_SAMPLE_FACTOR := 4
 const NEAR_END_METERS := 2200.0
 const MEDIUM_END_METERS := 5200.0
 const FAR_END_METERS := 9800.0
+const TERRAIN_SKIRT_DEPTH := 36.0
 const CHUNK_BUILD_BUDGET_USEC := 2500
 const TERRAIN_EDIT_BUDGET_USEC := 1200
 
@@ -303,7 +304,8 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 			local_index += 1
 	var indices := PackedInt32Array()
 	var width := x_indices.size()
-	for local_z in range(z_indices.size() - 1):
+	var height := z_indices.size()
+	for local_z in range(height - 1):
 		for local_x in range(width - 1):
 			var top_left := local_z * width + local_x
 			var top_right := top_left + 1
@@ -315,6 +317,22 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 			indices.append(top_left)
 			indices.append(bottom_right)
 			indices.append(bottom_left)
+
+	var north: Array[int] = []
+	var south: Array[int] = []
+	var west: Array[int] = []
+	var east: Array[int] = []
+	for x in range(width):
+		north.append(x)
+		south.append((height - 1) * width + x)
+	for z in range(height):
+		west.append(z * width)
+		east.append(z * width + width - 1)
+	_append_skirt(north, Vector3(0.0, 0.0, -1.0), vertices, normals, colors, uv2, indices)
+	_append_skirt(south, Vector3(0.0, 0.0, 1.0), vertices, normals, colors, uv2, indices)
+	_append_skirt(west, Vector3(-1.0, 0.0, 0.0), vertices, normals, colors, uv2, indices)
+	_append_skirt(east, Vector3(1.0, 0.0, 0.0), vertices, normals, colors, uv2, indices)
+
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
@@ -325,6 +343,38 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 	var result := ArrayMesh.new()
 	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return result
+
+
+func _append_skirt(
+	edge: Array[int],
+	outward_normal: Vector3,
+	vertices: PackedVector3Array,
+	normals: PackedVector3Array,
+	colors: PackedColorArray,
+	uv2: PackedVector2Array,
+	indices: PackedInt32Array
+) -> void:
+	if edge.size() < 2:
+		return
+	var skirt_start := vertices.size()
+	for top_index in edge:
+		var bottom := vertices[top_index]
+		bottom.y -= TERRAIN_SKIRT_DEPTH
+		vertices.append(bottom)
+		normals.append(outward_normal)
+		colors.append(colors[top_index])
+		uv2.append(uv2[top_index])
+	for segment in range(edge.size() - 1):
+		var top_a := edge[segment]
+		var top_b := edge[segment + 1]
+		var bottom_a := skirt_start + segment
+		var bottom_b := bottom_a + 1
+		indices.append(top_a)
+		indices.append(bottom_a)
+		indices.append(top_b)
+		indices.append(top_b)
+		indices.append(bottom_a)
+		indices.append(bottom_b)
 
 
 func _sample_indices(start_index: int, end_index: int, factor: int) -> Array[int]:
