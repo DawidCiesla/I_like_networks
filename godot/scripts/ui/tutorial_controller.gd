@@ -105,18 +105,18 @@ func _update_step_ui() -> void:
 			step_body.text = "Create an active passenger line with at least two stops and a vehicle in service. The tutorial detects the real custom line and fleet state."
 			next_button.text = "WAITING FOR SERVICE"
 		Step.NETWORK_EXPANSION:
-			var store := get_node_or_null("/root/GameStore")
+			var progress_store := get_node_or_null("/root/GameStore")
 			var progress := {"current": 0.0, "target": RegionalTutorialProgress.PASSENGER_TARGET}
-			if is_instance_valid(store):
-				progress = RegionalTutorialProgress.passenger_progress(store.stats)
+			if is_instance_valid(progress_store):
+				progress = RegionalTutorialProgress.passenger_progress(progress_store.stats)
 			step_title.text = "TUTORIAL 4/5: PROVE THE SERVICE"
 			step_body.text = "Let the line carry passengers. Deliver %.0f / %.0f passengers while watching demand, traffic and fleet performance." % [float(progress.get("current", 0.0)), float(progress.get("target", RegionalTutorialProgress.PASSENGER_TARGET))]
 			next_button.text = "WAITING FOR PASSENGERS"
 		Step.POSITIVE_OPERATIONS:
-			var store := get_node_or_null("/root/GameStore")
+			var economy_store := get_node_or_null("/root/GameStore")
 			var cashflow := {"available": false, "net_per_minute": 0.0}
-			if is_instance_valid(store):
-				cashflow = RegionalTutorialProgress.operating_cashflow(store.city)
+			if is_instance_valid(economy_store):
+				cashflow = RegionalTutorialProgress.operating_cashflow(economy_store.city)
 			step_title.text = "TUTORIAL 5/5: SUSTAIN THE NETWORK"
 			step_body.text = "Make current operations profitable. Net operating cashflow: %s$%.1f/min. Adjust routes, ridership or fleet size until it is positive." % ["+" if float(cashflow.get("net_per_minute", 0.0)) >= 0.0 else "−", absf(float(cashflow.get("net_per_minute", 0.0)))]
 			next_button.text = "WAITING FOR POSITIVE CASHFLOW"
