@@ -17,6 +17,7 @@ func _init() -> void:
 	_test_bus_duration_reacts_to_changed_congestion_without_compounding()
 	_test_bus_operations_kpis_reflect_congestion()
 	_test_reserved_modes_are_not_slowed()
+	_test_reserved_modes_expose_operations_health_without_road_penalty()
 	_test_legacy_city_is_untouched()
 	if _failures > 0:
 		push_error("REGIONAL TRANSIT TRAFFIC RUNTIME TEST: FAIL (%d checks)" % _failures)
@@ -98,7 +99,37 @@ func _test_reserved_modes_are_not_slowed() -> void:
 		var after := _vehicle(store)
 		_expect(not changed, "%s does not inherit mixed-traffic bus delay" % mode)
 		_expect(is_equal_approx(float(after.get("phase_duration_minutes", 0.0)), float(before.get("phase_duration_minutes", 0.0))), "%s keeps its independent right-of-way travel time" % mode)
+		_expect(not after.has("traffic_congestion_factor"), "%s vehicle carries no mixed-traffic congestion tag" % mode)
 		store.free()
+
+
+func _test_reserved_modes_expose_operations_health_without_road_penalty() -> void:
+	for mode in ["tram", "metro"]:
+		var free_store := _store(mode, 1.0)
+		var congested_store := _store(mode, 4.0)
+		for store in [free_store, congested_store]:
+			var line: Dictionary = _line(store)
+			line["current_demand_ppm"] = 2.0
+			line["target_headway_minutes"] = 5.0
+			store.transit_network["lines"]["line-a"] = line
+			RegionalTransitTrafficRuntime.apply(store)
+		var free_line := _line(free_store)
+		var congested_line := _line(congested_store)
+		var free_health: Dictionary = free_line.get("operations_health", {})
+		var congested_health: Dictionary = congested_line.get("operations_health", {})
+		_expect(is_equal_approx(float(free_line.get("traffic_delay_factor", 0.0)), 1.0), "%s operations telemetry is explicitly road-delay independent" % mode)
+		_expect(is_equal_approx(float(congested_line.get("traffic_delay_factor", 0.0)), 1.0), "%s stays delay factor 1.0 even beside a 4x congested road" % mode)
+		_expect(int(congested_line.get("traffic_affected_segment_count", -1)) == 0, "%s reports zero road-affected segments" % mode)
+		_expect(float(free_line.get("traffic_effective_cycle_minutes", 0.0)) > 0.0, "%s exposes a native effective cycle" % mode)
+		_expect(is_equal_approx(float(free_line.get("traffic_effective_cycle_minutes", 0.0)), float(congested_line.get("traffic_effective_cycle_minutes", -1.0))), "%s cycle is unchanged by road congestion" % mode)
+		_expect(is_equal_approx(float(free_line.get("traffic_effective_headway_minutes", 0.0)), float(congested_line.get("traffic_effective_headway_minutes", -1.0))), "%s headway is unchanged by road congestion" % mode)
+		_expect(float(free_line.get("traffic_effective_capacity_ppm", 0.0)) > 0.0, "%s exposes native passenger throughput" % mode)
+		_expect(not free_health.is_empty(), "%s now exposes operations health" % mode)
+		_expect(bool(free_health.get("target_headway_active", false)), "%s operations health consumes the explicit service target" % mode)
+		_expect(str(free_health.get("status", "")).length() > 0, "%s operations health has a gameplay status" % mode)
+		_expect(str(free_health.get("status", "")) == str(congested_health.get("status", "different")), "%s health classification is not changed by adjacent road congestion" % mode)
+		free_store.free()
+		congested_store.free()
 
 
 func _test_legacy_city_is_untouched() -> void:
