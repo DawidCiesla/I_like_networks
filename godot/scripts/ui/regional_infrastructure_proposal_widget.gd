@@ -8,6 +8,7 @@ var _toggle_button: Button
 var _title: Label
 var _meta: Label
 var _body: Label
+var _build_button: Button
 var _counter: Label
 var _previous_button: Button
 var _next_button: Button
@@ -74,8 +75,8 @@ func _build_ui() -> void:
 	_panel.set_anchors_preset(Control.PRESET_CENTER)
 	_panel.offset_left = -230.0
 	_panel.offset_right = 230.0
-	_panel.offset_top = -184.0
-	_panel.offset_bottom = 184.0
+	_panel.offset_top = -206.0
+	_panel.offset_bottom = 206.0
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_panel)
 
@@ -106,6 +107,12 @@ func _build_ui() -> void:
 	_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(_body)
+
+	_build_button = Button.new()
+	_build_button.text = "BUILD"
+	_build_button.custom_minimum_size.y = 34.0
+	_build_button.pressed.connect(_build_current)
+	stack.add_child(_build_button)
 
 	var navigation := HBoxContainer.new()
 	navigation.add_theme_constant_override("separation", 8)
@@ -156,19 +163,20 @@ func _refresh() -> void:
 		_title.text = "INFRASTRUCTURE STUDIES"
 		_meta.text = "No active or monitored proposals"
 		_body.text = "The regional planner has not identified a strategic road project yet. Congestion, traffic composition and settlement growth will be evaluated automatically."
+		_build_button.visible = false
 		_counter.text = "0 / 0"
 		_previous_button.disabled = true
 		_next_button.disabled = true
 		return
 	_index = clampi(_index, 0, proposals.size() - 1)
 	var proposal: Dictionary = proposals[_index]
-	_render_proposal(proposal)
+	_render_proposal(store, proposal)
 	_counter.text = "%d / %d" % [_index + 1, proposals.size()]
 	_previous_button.disabled = proposals.size() <= 1
 	_next_button.disabled = proposals.size() <= 1
 
 
-func _render_proposal(proposal: Dictionary) -> void:
+func _render_proposal(store: Node, proposal: Dictionary) -> void:
 	var label := str(proposal.get("label", proposal.get("id", "Infrastructure proposal")))
 	var project_class := str(proposal.get("projectClass", "proposal")).replace("_", " ").to_upper()
 	var status := str(proposal.get("status", "suggested")).replace("-", " ").replace("_", " ").to_upper()
@@ -224,6 +232,48 @@ func _render_proposal(proposal: Dictionary) -> void:
 		opex,
 		recommendation.to_upper(),
 	]
+	_update_build_button(store, proposal)
+
+
+func _update_build_button(store: Node, proposal: Dictionary) -> void:
+	_build_button.visible = true
+	if not store.has_method("infrastructure_proposal_build_status") or not store.has_method("build_infrastructure_proposal"):
+		_build_button.disabled = true
+		_build_button.text = "BUILD UNAVAILABLE"
+		_build_button.tooltip_text = "This build does not expose proposal construction."
+		return
+	var build_status_value: Variant = store.call("infrastructure_proposal_build_status", str(proposal.get("id", "")))
+	var build_status: Dictionary = build_status_value if typeof(build_status_value) == TYPE_DICTIONARY else {}
+	var proposal_status := str(proposal.get("status", "suggested"))
+	if proposal_status == "under-construction":
+		_build_button.disabled = true
+		_build_button.text = "CONSTRUCTION QUEUED"
+		_build_button.tooltip_text = "This corridor is already in the construction queue."
+		return
+	var available := bool(build_status.get("available", false))
+	var reason := str(build_status.get("reason", ""))
+	var cost := maxf(0.0, float(build_status.get("cost", proposal.get("estimatedConstructionCost", 0.0))))
+	_build_button.disabled = not available
+	_build_button.text = "BUILD · $%s" % _format_money(cost) if available else "BUILD · %s" % reason.replace("_", " ").to_upper()
+	_build_button.tooltip_text = (
+		"Approve this relief corridor and place it in the normal road construction queue."
+		if available
+		else "Cannot start this project: %s." % reason.replace("_", " ")
+	)
+
+
+func _build_current() -> void:
+	var store := get_node_or_null("/root/GameStore")
+	if not is_instance_valid(store) or not store.has_method("build_infrastructure_proposal"):
+		return
+	var proposals := _proposals(store.city)
+	if proposals.is_empty():
+		return
+	_index = clampi(_index, 0, proposals.size() - 1)
+	var proposal: Dictionary = proposals[_index]
+	store.call("build_infrastructure_proposal", str(proposal.get("id", "")))
+	_refresh_remaining = 0.0
+	_refresh()
 
 
 func _show_previous() -> void:
