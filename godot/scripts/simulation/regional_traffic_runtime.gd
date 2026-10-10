@@ -8,6 +8,7 @@ const RoadTrafficSummary = preload("res://scripts/simulation/road_traffic_summar
 const TICK_SECONDS := 30.0
 const AVERAGE_CAR_OCCUPANCY := 1.25
 const ASSIGNMENT_ITERATIONS := 4
+const MIN_OPERATIONAL_SPEED_KPH := 5.0
 const EPSILON := 0.000001
 const SCHEMA_VERSION := 1
 
@@ -41,6 +42,10 @@ static func refresh(store: Node) -> bool:
 		return false
 	ensure(store.city)
 	var previous: Dictionary = store.city.get("road_traffic", {})
+
+	# ResidentTravelChoice reads road.profile.speed_kph. At this point profiles
+	# intentionally still carry the operational speeds from the previous traffic
+	# snapshot, so the mode-choice pass feels the congestion it created.
 	var resident_metrics: Dictionary = {}
 	if store.has_method("resident_transport_metrics"):
 		var metrics_value: Variant = store.call("resident_transport_metrics")
@@ -49,6 +54,11 @@ static func refresh(store: Node) -> bool:
 
 	var demand_state := _demands_from_resident_metrics(store.city, resident_metrics)
 	var demands: Array = demand_state.get("demands", [])
+
+	# The assignment model must always start from physical/free-flow road speeds;
+	# otherwise BPR delay would compound every traffic tick. Design speeds are
+	# preserved separately before operational speeds are exposed to GameStore.
+	_restore_free_flow_speeds(store.city)
 	var assignment := RoadTrafficModel.evaluate(
 		store.city,
 		demands,
@@ -150,6 +160,27 @@ static func _resolve_graph_node(
 	return best_id
 
 
+static func _restore_free_flow_speeds(city: Dictionary) -> void:
+	for road_value in city.get("roads", []):
+		if typeof(road_value) != TYPE_DICTIONARY:
+			continue
+		var road: Dictionary = road_value
+		var profile_value: Variant = road.get("profile", {})
+		if typeof(profile_value) != TYPE_DICTIONARY or (profile_value as Dictionary).is_empty():
+			continue
+		var profile: Dictionary = profile_value
+		if not road.has("traffic_free_flow_speed_kph"):
+			road["traffic_free_flow_speed_kph"] = maxf(
+				MIN_OPERATIONAL_SPEED_KPH,
+				float(profile.get("speed_kph", 30.0))
+			)
+		profile["speed_kph"] = maxf(
+			MIN_OPERATIONAL_SPEED_KPH,
+			float(road.get("traffic_free_flow_speed_kph", profile.get("speed_kph", 30.0)))
+		)
+		road["profile"] = profile
+
+
 static func _apply_road_metrics(city: Dictionary, metrics_value: Variant) -> void:
 	var metrics: Dictionary = metrics_value if typeof(metrics_value) == TYPE_DICTIONARY else {}
 	for road_value in city.get("roads", []):
@@ -157,10 +188,40 @@ static func _apply_road_metrics(city: Dictionary, metrics_value: Variant) -> voi
 			continue
 		var road: Dictionary = road_value
 		var road_id := str(road.get("id", ""))
+		var profile_value: Variant = road.get("profile", {})
+		var has_profile := typeof(profile_value) == TYPE_DICTIONARY and not (profile_value as Dictionary).is_empty()
+		var free_speed := maxf(
+			MIN_OPERATIONAL_SPEED_KPH,
+			float(road.get(
+				"traffic_free_flow_speed_kph",
+				(profile_value as Dictionary).get("speed_kph", 30.0) if has_profile else 30.0
+			))
+		)
+		if not road.has("traffic_free_flow_speed_kph") and has_profile:
+			road["traffic_free_flow_speed_kph"] = free_speed
+
 		if metrics.has(road_id):
-			road["traffic"] = (metrics[road_id] as Dictionary).duplicate(true)
+			var traffic: Dictionary = (metrics[road_id] as Dictionary).duplicate(true)
+			var free_flow_minutes := maxf(EPSILON, float(traffic.get("free_flow_minutes", 0.0)))
+			var travel_minutes := maxf(free_flow_minutes, float(traffic.get("travel_time_minutes", free_flow_minutes)))
+			var operational_speed := clampf(
+				free_speed * free_flow_minutes / travel_minutes,
+				MIN_OPERATIONAL_SPEED_KPH,
+				free_speed
+			)
+			traffic["free_flow_speed_kph"] = free_speed
+			traffic["operational_speed_kph"] = operational_speed
+			road["traffic"] = traffic
+			if has_profile:
+				var profile: Dictionary = profile_value
+				profile["speed_kph"] = operational_speed
+				road["profile"] = profile
 		else:
 			road.erase("traffic")
+			if has_profile:
+				var profile: Dictionary = profile_value
+				profile["speed_kph"] = free_speed
+				road["profile"] = profile
 
 
 static func _snapshot_signature(
