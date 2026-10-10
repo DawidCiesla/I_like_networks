@@ -61,6 +61,7 @@ func _mark_dirty() -> void:
 
 
 func _rebuild(anchor: Vector2, seed: int) -> void:
+	var perf_started_usec := Time.get_ticks_usec()
 	_dirty = false
 	_last_anchor = anchor
 	var transforms: Array[Transform3D] = []
@@ -120,6 +121,10 @@ func _rebuild(anchor: Vector2, seed: int) -> void:
 		multi.set_instance_transform(index, transforms[index])
 		multi.set_instance_custom_data(index, custom_data[index])
 	_instance.multimesh = multi
+	PerformanceProbe.record_duration(
+		"riparian_detail_rebuild_ms",
+		float(Time.get_ticks_usec() - perf_started_usec) / 1000.0
+	)
 
 
 func _bank_strength(seed: int, point: Vector2, depth: float) -> float:
