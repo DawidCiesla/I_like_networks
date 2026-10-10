@@ -97,6 +97,12 @@ static func road_maintenance_per_minute(city: Dictionary) -> float:
 			continue
 		if str(road.get("status", "")) != "built":
 			continue
+		# Strategic proposals already carry the total maintenance estimate shown
+		# to the player before BUILD. Use that canonical value after completion
+		# so the treasury matches the proposal UI exactly.
+		if road.has("maintenanceCostPerMinute"):
+			result += maxf(0.0, float(road.get("maintenanceCostPerMinute", 0.0)))
+			continue
 		var length_km := _road_length_world(road) / WORLD_UNITS_PER_KM
 		if length_km <= EPSILON:
 			continue
@@ -174,8 +180,6 @@ static func _road_length_world(road: Dictionary) -> float:
 static func _financial_status(treasury: float, net_per_minute: float, runway_minutes: float) -> String:
 	if treasury <= SOFT_CREDIT_LIMIT:
 		return "critical"
-	# Soft credit deliberately keeps the game playable below zero. Debt is a
-	# warning state; only the configured credit floor is critical.
 	if treasury < 0.0:
 		return "stressed"
 	if net_per_minute >= -EPSILON:
