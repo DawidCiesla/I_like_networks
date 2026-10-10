@@ -6,14 +6,14 @@ const TerrainSurface = preload("res://scripts/world/terrain_surface.gd")
 const WorldLayers = preload("res://scripts/world/world_layers.gd")
 const DetailShader = preload("res://scripts/world/landscape_detail.gdshader")
 
-const PATCH_RADIUS_METERS := 335.0
-const SAMPLE_SPACING_METERS := 17.0
-const REBUILD_DISTANCE_METERS := 105.0
-const MAX_CAMERA_HEIGHT_METERS := 760.0
-const MAX_INSTANCES := 1800
-const BLADES_PER_CLUMP := 8
-const SLICE_BUDGET_USEC := 850
-const CAMERA_POLL_SECONDS := 0.12
+const PATCH_RADIUS_METERS := 250.0
+const SAMPLE_SPACING_METERS := 20.0
+const REBUILD_DISTANCE_METERS := 140.0
+const MAX_CAMERA_HEIGHT_METERS := 600.0
+const MAX_INSTANCES := 900
+const BLADES_PER_CLUMP := 6
+const SLICE_BUDGET_USEC := 450
+const CAMERA_POLL_SECONDS := 0.14
 
 var _store: Node
 var _instance: MultiMeshInstance3D
@@ -45,7 +45,7 @@ func _ready() -> void:
 	_instance = MultiMeshInstance3D.new()
 	_instance.name = "RiparianReeds"
 	_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_instance.visibility_range_end = 1050.0
+	_instance.visibility_range_end = 800.0
 	_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(_instance)
 	if _store != null and _store.has_signal("terrain_changed"):
@@ -134,8 +134,6 @@ func _process_candidate(dx: int, dz: int) -> void:
 		(_pseudo(base.x, base.y, 1, _build_seed) - 0.5) * SAMPLE_SPACING_METERS * 0.76,
 		(_pseudo(base.x, base.y, 2, _build_seed) - 0.5) * SAMPLE_SPACING_METERS * 0.76
 	)
-	# River floodplain data is already calculated by the terrain sampler and is
-	# much cheaper than probing water four extra times around every candidate.
 	var river := Terrain.river_profile(_build_seed, point.x, point.y)
 	var bank_strength := maxf(
 		float(river.get("major_floodplain", 0.0)),
