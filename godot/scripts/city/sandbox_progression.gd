@@ -243,7 +243,10 @@ static func _transit_share_goal(metrics: Dictionary) -> Dictionary:
 
 
 static func _mobility_access_goal(metrics: Dictionary) -> Dictionary:
-	var available := metrics.has("average_mobility_accessibility")
+	var available := bool(metrics.get(
+		"mobility_accessibility_available",
+		metrics.has("average_mobility_accessibility")
+	))
 	var score := clampf(_non_negative(metrics.get("average_mobility_accessibility", 0.0)), 0.0, 1.0)
 	var complete := available and score + EPSILON >= MOBILITY_ACCESS_TARGET
 	var feedback := "Regional mobility accessibility is not available yet."
