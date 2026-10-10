@@ -2,6 +2,7 @@ extends Node3D
 
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
 const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
+const RegionalTransitTrafficRuntime = preload("res://scripts/simulation/regional_transit_traffic_runtime.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
@@ -79,6 +80,7 @@ func _setup_regional_traffic() -> void:
 	RegionalTrafficRuntime.ensure(GameStore.city)
 	if RegionalTrafficRuntime.refresh(GameStore):
 		GameStore.emit_signal("city_changed")
+	RegionalTransitTrafficRuntime.apply(GameStore)
 
 
 func _process(_delta: float) -> void:
@@ -86,6 +88,8 @@ func _process(_delta: float) -> void:
 		var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
 		_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
 	_advance_regional_traffic()
+	if GameStore.is_sandbox():
+		RegionalTransitTrafficRuntime.apply(GameStore)
 
 
 func _advance_regional_traffic() -> void:
