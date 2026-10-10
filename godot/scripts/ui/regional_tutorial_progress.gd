@@ -2,6 +2,7 @@ extends RefCounted
 class_name RegionalTutorialProgress
 
 const PASSENGER_TARGET := 25.0
+const EPSILON := 0.000001
 
 
 static func has_player_road(city: Dictionary) -> bool:
@@ -22,9 +23,7 @@ static func has_operating_line(network: Dictionary) -> bool:
 		if typeof(line_value) != TYPE_DICTIONARY:
 			continue
 		var line: Dictionary = line_value
-		if str(line.get("source", "")) != "custom":
-			continue
-		if str(line.get("status", "")) != "active":
+		if str(line.get("source", "")) != "custom" or str(line.get("status", "")) != "active":
 			continue
 		if int(line.get("fleet_count", 0)) <= 0:
 			continue
@@ -45,4 +44,24 @@ static func passenger_progress(stats: Dictionary) -> Dictionary:
 		"target": PASSENGER_TARGET,
 		"progress": clampf(current / PASSENGER_TARGET, 0.0, 1.0),
 		"complete": current >= PASSENGER_TARGET,
+	}
+
+
+static func positive_operating_cashflow(city: Dictionary) -> bool:
+	var economy_value: Variant = city.get("economy", {})
+	if typeof(economy_value) != TYPE_DICTIONARY:
+		return false
+	return float((economy_value as Dictionary).get("net_per_minute", 0.0)) > EPSILON
+
+
+static func operating_cashflow(city: Dictionary) -> Dictionary:
+	var economy_value: Variant = city.get("economy", {})
+	if typeof(economy_value) != TYPE_DICTIONARY:
+		return {"available": false, "net_per_minute": 0.0}
+	var economy: Dictionary = economy_value
+	return {
+		"available": true,
+		"net_per_minute": float(economy.get("net_per_minute", 0.0)),
+		"revenue_per_minute": float(economy.get("fare_revenue_per_minute", 0.0)),
+		"opex_per_minute": float(economy.get("total_opex_per_minute", 0.0)),
 	}
