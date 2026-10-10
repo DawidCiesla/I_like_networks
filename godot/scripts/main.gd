@@ -232,7 +232,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _on_state_changed() -> void:
-	pass
+	if GameStore.is_sandbox():
+		GameStore.city["economy"] = RegionalEconomy.evaluate(GameStore)
 
 
 func _on_toast(message: String) -> void:
