@@ -1,6 +1,7 @@
 extends Node3D
 
 const MapDefinition = preload("res://scripts/world/world_map_definition.gd")
+const RegionalTrafficRuntime = preload("res://scripts/simulation/regional_traffic_runtime.gd")
 const BridgeDetailRenderer = preload("res://scripts/render/bridge_detail_renderer.gd")
 const BuildingDetailRenderer = preload("res://scripts/render/building_detail_renderer.gd")
 const BuildingHlodRenderer = preload("res://scripts/render/building_hlod_renderer.gd")
@@ -21,6 +22,7 @@ var _cloud_layer_renderer: CloudLayerRenderer
 var _regional_roadside_renderer: RegionalRoadsideRenderer
 var _roadside_props_renderer: RoadsidePropsRenderer
 var _forest_hlod_renderer: ForestHlodRenderer
+var _last_traffic_elapsed_seconds := 0.0
 
 
 func _ready() -> void:
@@ -28,6 +30,7 @@ func _ready() -> void:
 	if not GameStore.state_changed.is_connected(_on_state_changed):
 		GameStore.state_changed.connect(_on_state_changed)
 	_setup_regional_visual_detail()
+	_setup_regional_traffic()
 	_on_state_changed()
 
 
@@ -69,11 +72,30 @@ func _setup_regional_visual_detail() -> void:
 		add_child(_forest_hlod_renderer)
 
 
-func _process(_delta: float) -> void:
-	if not is_instance_valid(_environment_controller):
+func _setup_regional_traffic() -> void:
+	_last_traffic_elapsed_seconds = maxf(0.0, float(GameStore.elapsed_seconds))
+	if not GameStore.is_sandbox():
 		return
-	var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
-	_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
+	RegionalTrafficRuntime.ensure(GameStore.city)
+	if RegionalTrafficRuntime.refresh(GameStore):
+		GameStore.emit_signal("city_changed")
+
+
+func _process(_delta: float) -> void:
+	if is_instance_valid(_environment_controller):
+		var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
+		_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
+	_advance_regional_traffic()
+
+
+func _advance_regional_traffic() -> void:
+	var elapsed := maxf(0.0, float(GameStore.elapsed_seconds))
+	var traffic_delta := maxf(0.0, elapsed - _last_traffic_elapsed_seconds)
+	_last_traffic_elapsed_seconds = elapsed
+	if traffic_delta <= 0.0 or not GameStore.is_sandbox():
+		return
+	if RegionalTrafficRuntime.advance(GameStore, traffic_delta):
+		GameStore.emit_signal("city_changed")
 
 
 func _unhandled_input(event: InputEvent) -> void:
