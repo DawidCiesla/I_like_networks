@@ -1,11 +1,14 @@
 extends CanvasLayer
 class_name RegionalGameplayAlerts
 
+signal traffic_overlay_requested
+
 const MAX_VISIBLE_ALERTS := 4
 const REFRESH_SECONDS := 0.75
 
 var _panel: PanelContainer
 var _list: VBoxContainer
+var _traffic_button: Button
 var _refresh_remaining := 0.0
 var _signature := ""
 
@@ -21,6 +24,11 @@ func _process(delta: float) -> void:
 	if _refresh_remaining <= 0.0:
 		_refresh_remaining = REFRESH_SECONDS
 		_refresh(false)
+
+
+func set_traffic_overlay_active(active: bool) -> void:
+	if is_instance_valid(_traffic_button):
+		_traffic_button.text = "TRAFFIC MAP: %s  [T]" % ("ON" if active else "OFF")
 
 
 static func collect_alerts(city: Dictionary, transit_network: Dictionary) -> Array[Dictionary]:
@@ -128,6 +136,18 @@ func _build_ui() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 
+	_traffic_button = Button.new()
+	_traffic_button.name = "TrafficMapToggle"
+	_traffic_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_traffic_button.offset_left = -214.0
+	_traffic_button.offset_right = -18.0
+	_traffic_button.offset_top = 50.0
+	_traffic_button.offset_bottom = 84.0
+	_traffic_button.text = "TRAFFIC MAP: OFF  [T]"
+	_traffic_button.tooltip_text = "Toggle road volume/capacity overlay. Green is free-flow; red is over capacity."
+	_traffic_button.pressed.connect(func(): traffic_overlay_requested.emit())
+	root.add_child(_traffic_button)
+
 	_panel = PanelContainer.new()
 	_panel.name = "NetworkAlerts"
 	_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -165,7 +185,11 @@ func _refresh(force: bool) -> void:
 	if not is_instance_valid(store) or not store.has_method("is_sandbox") or not bool(store.call("is_sandbox")):
 		if is_instance_valid(_panel):
 			_panel.visible = false
+		if is_instance_valid(_traffic_button):
+			_traffic_button.visible = false
 		return
+	if is_instance_valid(_traffic_button):
+		_traffic_button.visible = true
 	var alerts := collect_alerts(store.city, store.transit_network)
 	var signature := _alert_signature(alerts)
 	if not force and signature == _signature:
