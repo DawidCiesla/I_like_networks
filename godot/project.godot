@@ -19,6 +19,7 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 SettingsManager="*res://scripts/core/settings_manager.gd"
 AudioManager="*res://scripts/core/audio_manager.gd"
 PerformanceProbe="*res://scripts/debug/performance_probe.gd"
+PerformanceBenchmark="*res://scripts/debug/performance_benchmark.gd"
 GameStore="*res://scripts/core/regional_game_store.gd"
 MCPRuntimeServer="*res://addons/godot_mcp_toolkit/runtime/mcp_runtime_server.gd"
 
