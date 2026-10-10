@@ -12,6 +12,7 @@ var _span_samples: Dictionary = {}
 var _span_counts: Dictionary = {}
 var _counters: Dictionary = {}
 var _overlay_elapsed := 0.0
+var _last_process_usec := 0
 var _canvas: CanvasLayer
 var _panel: PanelContainer
 var _label: Label
@@ -19,14 +20,17 @@ var _scene_root: Node
 var _terrain_renderer: Node
 var _environment_controller: Node
 var _natural_details_enabled := true
-var _sdfgi_enabled := true
+var _sdfgi_enabled := false
+var _ssil_enabled := false
+var _ssr_enabled := false
 var _shadows_enabled := true
-var _volumetric_fog_enabled := true
-var _render_scale := 1.0
+var _volumetric_fog_enabled := false
+var _render_scale := 0.75
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_last_process_usec = Time.get_ticks_usec()
 	_create_overlay()
 	call_deferred("_enable_viewport_measurement")
 	_register_custom_monitors()
@@ -57,7 +61,10 @@ func _enable_viewport_measurement() -> void:
 
 
 func _process(delta: float) -> void:
-	_append_sample(_frame_ms, maxf(0.0, delta * 1000.0))
+	var now_usec := Time.get_ticks_usec()
+	if _last_process_usec > 0:
+		_append_sample(_frame_ms, maxf(0.0, float(now_usec - _last_process_usec) / 1000.0))
+	_last_process_usec = now_usec
 	_append_sample(_process_ms, maxf(0.0, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0))
 	_overlay_elapsed += delta
 	if _overlay_elapsed < OVERLAY_REFRESH_SECONDS:
@@ -104,6 +111,7 @@ func reset_capture() -> void:
 	_span_samples.clear()
 	_span_counts.clear()
 	_counters.clear()
+	_last_process_usec = Time.get_ticks_usec()
 	if is_instance_valid(_panel) and _panel.visible:
 		_refresh_overlay()
 	print("[Perf] capture reset")
@@ -129,6 +137,8 @@ func report_snapshot() -> Dictionary:
 		"toggles": {
 			"natural_details": _natural_details_enabled,
 			"sdfgi": _sdfgi_enabled,
+			"ssil": _ssil_enabled,
+			"ssr": _ssr_enabled,
 			"shadows": _shadows_enabled,
 			"volumetric_fog": _volumetric_fog_enabled,
 			"render_scale_3d": _render_scale,
@@ -204,14 +214,7 @@ func toggle_volumetric_fog() -> bool:
 
 func toggle_render_scale() -> float:
 	_render_scale = 0.75 if _render_scale > 0.9 else 1.0
-	var viewport := get_viewport()
-	if viewport != null:
-		var viewport_rid := viewport.get_viewport_rid()
-		RenderingServer.viewport_set_scaling_3d_mode(
-			viewport_rid,
-			RenderingServer.VIEWPORT_SCALING_3D_MODE_BILINEAR
-		)
-		RenderingServer.viewport_set_scaling_3d_scale(viewport_rid, _render_scale)
+	_apply_render_scale()
 	_refresh_overlay_if_visible()
 	return _render_scale
 
@@ -253,10 +256,31 @@ func _apply_debug_state() -> void:
 	if is_instance_valid(_terrain_renderer) and _terrain_renderer.has_method("set_natural_detail_enabled"):
 		_terrain_renderer.call("set_natural_detail_enabled", _natural_details_enabled)
 	_set_environment_property("sdfgi_enabled", _sdfgi_enabled)
+	_set_environment_property("ssil_enabled", _ssil_enabled)
+	_set_environment_property("ssr_enabled", _ssr_enabled)
 	_set_environment_property("volumetric_fog_enabled", _volumetric_fog_enabled)
+	_apply_render_scale()
 	var sun := _sun_light()
 	if sun != null:
 		sun.shadow_enabled = _shadows_enabled
+		if _shadows_enabled:
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+			sun.directional_shadow_max_distance = 3200.0
+			sun.directional_shadow_split_1 = 0.22
+			sun.directional_shadow_blend_splits = true
+			sun.directional_shadow_fade_start = 0.82
+
+
+func _apply_render_scale() -> void:
+	var viewport := get_viewport()
+	if viewport == null:
+		return
+	var viewport_rid := viewport.get_viewport_rid()
+	RenderingServer.viewport_set_scaling_3d_mode(
+		viewport_rid,
+		RenderingServer.VIEWPORT_SCALING_3D_MODE_BILINEAR
+	)
+	RenderingServer.viewport_set_scaling_3d_scale(viewport_rid, _render_scale)
 
 
 func _environment_resource() -> Environment:
@@ -277,7 +301,10 @@ func _set_environment_property(property_name: String, value: Variant) -> void:
 	var environment := _environment_resource()
 	if environment == null:
 		return
-	environment.set(property_name, value)
+	for property_data in environment.get_property_list():
+		if str(property_data.get("name", "")) == property_name:
+			environment.set(property_name, value)
+			return
 
 
 func _create_overlay() -> void:
@@ -310,7 +337,7 @@ func _refresh_overlay() -> void:
 	var render_cpu := _stats(_render_cpu_ms)
 	var render_gpu := _stats(_render_gpu_ms)
 	var lines: Array[String] = []
-	lines.append("PERFORMANCE PROBE · F9 hide · F10 reset · F11 save JSON")
+	lines.append("PERFORMANCE PROBE · wall-clock frame timing")
 	lines.append("Frame ms  p50 %.2f  p95 %.2f  p99 %.2f  max %.2f" % [
 		float(frame.get("p50", 0.0)),
 		float(frame.get("p95", 0.0)),
@@ -326,13 +353,18 @@ func _refresh_overlay() -> void:
 		"ground_cover_rebuild_ms",
 		"landscape_detail_rebuild_ms",
 		"riparian_detail_rebuild_ms",
+		"ground_cover_rebuild_wall_ms",
+		"landscape_detail_rebuild_wall_ms",
+		"riparian_detail_rebuild_wall_ms",
 		"resident_transport_metrics_ms",
 		"traffic_refresh_ms",
 		"transit_traffic_apply_ms",
 	]:
 		var samples: Array = _span_samples.get(metric_name, [])
+		if samples.is_empty():
+			continue
 		var stat := _stats(samples)
-		lines.append("%-28s count %4d  p95 %6.2f  max %6.2f" % [
+		lines.append("%-32s count %4d  p95 %7.2f  max %7.2f" % [
 			metric_name,
 			int(_span_counts.get(metric_name, 0)),
 			float(stat.get("p95", 0.0)),
@@ -343,9 +375,11 @@ func _refresh_overlay() -> void:
 		_on_off(_sdfgi_enabled),
 		_on_off(_shadows_enabled),
 	])
-	lines.append("     Ctrl/Cmd+4 fog:%s  +5 render scale:%.2f" % [
+	lines.append("     +4 fog:%s  +5 render scale:%.2f  SSIL:%s  SSR:%s" % [
 		_on_off(_volumetric_fog_enabled),
 		_render_scale,
+		_on_off(_ssil_enabled),
+		_on_off(_ssr_enabled),
 	])
 	_label.text = "\n".join(lines)
 
