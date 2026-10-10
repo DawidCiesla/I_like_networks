@@ -13,12 +13,10 @@ const VisualCache = preload("res://scripts/world/region_visual_cache.gd")
 const TerrainMeshBuilder = preload("res://scripts/world/terrain_mesh_builder.gd")
 const GEOMETRY_REVISION := 1
 
-# 28 source cells are ~1.6 km at the current 58 m terrain grid. Medium and far
-# layers use progressively larger chunks as well as decimated geometry, keeping
-# close-range culling fine without exploding distant draw calls.
-const NEAR_CHUNK_CELLS := 28
-const MEDIUM_CHUNK_CELLS := 56
-const FAR_CHUNK_CELLS := 112
+# All LODs use the same ~1.8 km spatial tiles so their AABB centres match.
+# This prevents holes at LOD transitions while still allowing independent
+# frustum culling. Geometry density and shader cost drop with distance.
+const CHUNK_CELLS := 32
 const NEAR_SAMPLE_FACTOR := 1
 const MEDIUM_SAMPLE_FACTOR := 2
 const FAR_SAMPLE_FACTOR := 4
@@ -185,14 +183,11 @@ func _ensure_lod_materials() -> void:
 
 
 func _rebuild_chunk_layers(progressive: bool, request: int) -> void:
-	_clear_chunk_root()
-	_chunks_root = Node3D.new()
-	_chunks_root.name = "TerrainChunks"
-	add_child(_chunks_root)
+	var new_root := Node3D.new()
+	new_root.name = "TerrainChunks"
 	var layer_specs: Array[Dictionary] = [
 		{
 			"name": "Near",
-			"chunk_cells": NEAR_CHUNK_CELLS,
 			"factor": NEAR_SAMPLE_FACTOR,
 			"begin": 0.0,
 			"end": NEAR_END_METERS,
@@ -200,7 +195,6 @@ func _rebuild_chunk_layers(progressive: bool, request: int) -> void:
 		},
 		{
 			"name": "Medium",
-			"chunk_cells": MEDIUM_CHUNK_CELLS,
 			"factor": MEDIUM_SAMPLE_FACTOR,
 			"begin": NEAR_END_METERS,
 			"end": MEDIUM_END_METERS,
@@ -208,28 +202,26 @@ func _rebuild_chunk_layers(progressive: bool, request: int) -> void:
 		},
 		{
 			"name": "Far",
-			"chunk_cells": FAR_CHUNK_CELLS,
 			"factor": FAR_SAMPLE_FACTOR,
 			"begin": MEDIUM_END_METERS,
 			"end": FAR_END_METERS,
 			"material": _far_material,
 		},
 	]
-	var total_chunks := 0
-	for spec in layer_specs:
-		total_chunks += ceili(float(_source_steps.x) / float(int(spec["chunk_cells"]))) * ceili(float(_source_steps.y) / float(int(spec["chunk_cells"])))
+	var chunks_x := ceili(float(_source_steps.x) / float(CHUNK_CELLS))
+	var chunks_z := ceili(float(_source_steps.y) / float(CHUNK_CELLS))
+	var total_chunks := chunks_x * chunks_z * layer_specs.size()
 	var built_chunks := 0
 	var slice_started := Time.get_ticks_usec()
 	for spec in layer_specs:
 		var layer := Node3D.new()
 		layer.name = "LOD%s" % str(spec["name"])
-		_chunks_root.add_child(layer)
-		var chunk_cells := int(spec["chunk_cells"])
+		new_root.add_child(layer)
 		var factor := int(spec["factor"])
-		for z0 in range(0, _source_steps.y, chunk_cells):
-			var z1 := mini(z0 + chunk_cells, _source_steps.y)
-			for x0 in range(0, _source_steps.x, chunk_cells):
-				var x1 := mini(x0 + chunk_cells, _source_steps.x)
+		for z0 in range(0, _source_steps.y, CHUNK_CELLS):
+			var z1 := mini(z0 + CHUNK_CELLS, _source_steps.y)
+			for x0 in range(0, _source_steps.x, CHUNK_CELLS):
+				var x1 := mini(x0 + CHUNK_CELLS, _source_steps.x)
 				var instance := _create_terrain_chunk(x0, z0, x1, z1, factor, spec)
 				if instance != null:
 					layer.add_child(instance)
@@ -238,8 +230,13 @@ func _rebuild_chunk_layers(progressive: bool, request: int) -> void:
 					startup_progress = 0.90 + 0.095 * float(built_chunks) / float(maxi(1, total_chunks))
 					await get_tree().process_frame
 					if request != _build_request or not is_inside_tree():
+						new_root.free()
 						return
 					slice_started = Time.get_ticks_usec()
+	if request != _build_request or not is_inside_tree():
+		new_root.free()
+		return
+	_swap_chunk_root(new_root)
 
 
 func _create_terrain_chunk(
@@ -275,6 +272,7 @@ func _create_terrain_chunk(
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	instance.visibility_range_begin = float(spec["begin"])
 	instance.visibility_range_end = float(spec["end"])
+	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 	return instance
 
 
@@ -296,7 +294,7 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 	var local_index := 0
 	for global_z in z_indices:
 		for global_x in x_indices:
-			var source_index := global_z * source_stride + global_x
+			var source_index := int(global_z) * source_stride + int(global_x)
 			var position: Vector3 = source_vertices[source_index]
 			vertices[local_index] = Vector3(position.x - origin.x, position.y, position.z - origin.y)
 			normals[local_index] = source_normals[source_index] if source_index < source_normals.size() else Vector3.UP
@@ -311,10 +309,12 @@ func _build_chunk_mesh(x_indices: Array[int], z_indices: Array[int], origin: Vec
 			var top_right := top_left + 1
 			var bottom_left := top_left + width
 			var bottom_right := bottom_left + 1
-			indices.append_array(PackedInt32Array([
-				top_left, top_right, bottom_right,
-				top_left, bottom_right, bottom_left,
-			]))
+			indices.append(top_left)
+			indices.append(top_right)
+			indices.append(bottom_right)
+			indices.append(top_left)
+			indices.append(bottom_right)
+			indices.append(bottom_left)
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
@@ -361,6 +361,14 @@ func _refresh_chunked_terrain_after_edit() -> void:
 			_source_arrays[Mesh.ARRAY_VERTEX] = vertices
 			await _rebuild_chunk_layers(true, request)
 	_terrain_edit_refresh_running = false
+
+
+func _swap_chunk_root(new_root: Node3D) -> void:
+	if is_instance_valid(_chunks_root):
+		remove_child(_chunks_root)
+		_chunks_root.free()
+	_chunks_root = new_root
+	add_child(_chunks_root)
 
 
 func _clear_chunk_root() -> void:
