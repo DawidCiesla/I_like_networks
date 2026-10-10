@@ -26,6 +26,8 @@ const RegionalRoadsideRenderer = preload("res://scripts/render/regional_roadside
 const RoadsidePropsRenderer = preload("res://scripts/render/roadside_props_renderer.gd")
 const ForestHlodRenderer = preload("res://scripts/world/forest_hlod_renderer.gd")
 
+const PROPOSAL_DIAGNOSTIC_REFRESH_SECONDS := 1.0
+
 @onready var _environment_controller: Node3D = $WorldEnvironmentController
 @onready var _pause_menu: PauseMenu = $PauseCanvas/PauseMenu
 
@@ -45,6 +47,7 @@ var _line_operations_widget: RegionalLineOperationsWidget
 var _progression_widget: RegionalProgressionWidget
 var _settlement_mobility_widget: RegionalSettlementMobilityWidget
 var _last_traffic_elapsed_seconds := 0.0
+var _proposal_diagnostic_refresh_remaining := 0.0
 
 
 func _ready() -> void:
@@ -139,12 +142,16 @@ func _setup_regional_traffic() -> void:
 		add_child(_infrastructure_proposal_widget)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if is_instance_valid(_environment_controller):
 		var simulation_seconds := maxf(0.0, float(GameStore.city.get("time_seconds", 0.0)))
 		_environment_controller.call("set_time_of_day", 8.0 + simulation_seconds / 3600.0)
 	_advance_regional_traffic()
 	if GameStore.is_sandbox():
+		_proposal_diagnostic_refresh_remaining -= delta
+		if _proposal_diagnostic_refresh_remaining <= 0.0:
+			_proposal_diagnostic_refresh_remaining = PROPOSAL_DIAGNOSTIC_REFRESH_SECONDS
+			RegionalHighwayProposalRuntime.apply(GameStore.city)
 		RegionalTransitTrafficRuntime.apply(GameStore)
 		var retired := RegionalFleetManagement.process_retirements(GameStore)
 		if retired > 0:
